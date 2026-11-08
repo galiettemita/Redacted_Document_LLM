@@ -14,6 +14,6 @@
   - [x] Add deterministic progressive streaming and cancellation.
   - [x] Present processing and result states in the sidebar.
 - [x] Implement uploaded-PDF rectangle marking.
-- [ ] Implement responsive and accessible behavior.
-- [ ] Add automated tests and complete browser QA.
-- [ ] Commit and push the completed implementation.
+- [x] Implement responsive and accessible behavior.
+- [x] Add automated tests and complete available preview QA.
+- [x] Commit and push the completed implementation.
