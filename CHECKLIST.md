@@ -7,7 +7,7 @@
 - [x] Write the implementation plan.
 - [x] Scaffold the React/TypeScript application.
 - [x] Build and bundle the fictional sample PDF.
-- [ ] Implement upload validation and local PDF loading.
+- [x] Implement upload validation and local PDF loading.
 - [ ] Implement the PDF workspace and controls.
 - [ ] Implement passage overlays, previews, and selection.
 - [ ] Implement progressive simulated predictions and sidebar states.
