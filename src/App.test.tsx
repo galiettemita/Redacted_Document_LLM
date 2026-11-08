@@ -1,6 +1,13 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { PDFDocument } from 'pdf-lib'
 import { App } from './App'
+
+const { validatePdfFileMock } = vi.hoisted(() => ({
+  validatePdfFileMock: vi.fn().mockResolvedValue({ ok: true }),
+}))
+
+vi.mock('./features/upload/fileValidation', () => ({
+  validatePdfFile: validatePdfFileMock,
+}))
 
 vi.mock('./features/viewer/PdfViewer', () => ({
   PdfViewer: () => <div aria-label="Local PDF renderer" />,
@@ -26,19 +33,19 @@ describe('document lifecycle', () => {
   const revokeObjectURL = vi.fn()
 
   beforeEach(() => {
+    validatePdfFileMock.mockClear()
+    validatePdfFileMock.mockResolvedValue({ ok: true })
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL })
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL })
   })
 
   it('opens a valid local PDF and replaces it without retaining workspace state', async () => {
-    const pdf = await PDFDocument.create()
-    pdf.addPage([300, 400])
-    const bytes = new Uint8Array(await pdf.save())
-    const file = new File([bytes.buffer], 'local-record.pdf', { type: 'application/pdf' })
+    const file = new File(['%PDF-1.7'], 'local-record.pdf', { type: 'application/pdf' })
     render(<App />)
 
     fireEvent.change(screen.getByLabelText('Choose PDF'), { target: { files: [file] } })
     expect(await screen.findByText('local-record.pdf')).toBeInTheDocument()
+    expect(validatePdfFileMock).toHaveBeenCalledOnce()
     expect(screen.getByText(/Automatic passage detection and predictions aren’t connected yet/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Replace document' }))

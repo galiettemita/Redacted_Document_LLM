@@ -17,3 +17,4 @@
 - [x] Implement responsive and accessible behavior.
 - [x] Add automated tests and complete available preview QA.
 - [x] Commit and push the completed implementation.
+- [x] Fix browser upload flow to validate each PDF only once.

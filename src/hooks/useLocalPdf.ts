@@ -23,6 +23,16 @@ export function useLocalPdf() {
     setError(null)
   }, [revokeCurrentUrl])
 
+  const openValidatedFile = useCallback((file: File) => {
+    revokeCurrentUrl()
+    const nextUrl = URL.createObjectURL(file)
+    currentUrl.current = nextUrl
+    setObjectUrl(nextUrl)
+    setStatus('ready')
+    setError(null)
+    return nextUrl
+  }, [revokeCurrentUrl])
+
   const openFile = useCallback(async (file: File) => {
     setStatus('loading')
     setError(null)
@@ -33,15 +43,10 @@ export function useLocalPdf() {
       return null
     }
 
-    revokeCurrentUrl()
-    const nextUrl = URL.createObjectURL(file)
-    currentUrl.current = nextUrl
-    setObjectUrl(nextUrl)
-    setStatus('ready')
-    return nextUrl
-  }, [revokeCurrentUrl])
+    return openValidatedFile(file)
+  }, [openValidatedFile])
 
   useEffect(() => revokeCurrentUrl, [revokeCurrentUrl])
 
-  return { openFile, objectUrl, status, error, clear }
+  return { openFile, openValidatedFile, objectUrl, status, error, clear }
 }

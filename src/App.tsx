@@ -9,9 +9,8 @@ export function App() {
   const localPdf = useLocalPdf()
   const [document, setDocument] = useState<DocumentDescriptor | null>(null)
 
-  async function openUploadedFile(file: File) {
-    const source = await localPdf.openFile(file)
-    if (!source) return
+  function openUploadedFile(file: File) {
+    const source = localPdf.openValidatedFile(file)
     setDocument({
       id: `uploaded-${file.name}-${file.lastModified}`,
       filename: file.name,
@@ -21,7 +20,7 @@ export function App() {
   }
 
   if (!document) {
-    return <UploadScreen onFileAccepted={(file) => void openUploadedFile(file)} />
+    return <UploadScreen onFileAccepted={openUploadedFile} />
   }
 
   return (
