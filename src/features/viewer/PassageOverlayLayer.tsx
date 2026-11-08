@@ -67,6 +67,8 @@ export function PassageOverlayLayer({
     <div
       ref={layerRef}
       className={`passage-overlay-layer${markingEnabled ? ' is-marking' : ''}`}
+      data-testid="passage-overlay-layer"
+      style={{ touchAction: markingEnabled ? 'none' : undefined }}
       onPointerDown={(event) => {
         if (!markingEnabled || event.button !== 0) return
         event.currentTarget.setPointerCapture(event.pointerId)

@@ -23,6 +23,16 @@ function OverlayHarness() {
 }
 
 describe('PassageOverlayLayer', () => {
+  it('disables native touch panning only while rectangle marking is active', () => {
+    const { rerender } = render(
+      <PassageOverlayLayer page={1} passages={[]} markingEnabled onMarkPassage={vi.fn()} />,
+    )
+    expect(screen.getByTestId('passage-overlay-layer')).toHaveStyle({ touchAction: 'none' })
+
+    rerender(<PassageOverlayLayer page={1} passages={[]} markingEnabled={false} />)
+    expect(screen.getByTestId('passage-overlay-layer')).not.toHaveStyle({ touchAction: 'none' })
+  })
+
   it('activates every rectangle in a multi-line passage and restores the pin after hover', () => {
     render(<OverlayHarness />)
     const passageOne = screen.getAllByRole('button', { name: 'Passage 1 redaction' })

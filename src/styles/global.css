@@ -283,6 +283,7 @@ input:focus-visible {
 .passage-overlay-layer.is-marking {
   pointer-events: auto;
   cursor: crosshair;
+  touch-action: none;
 }
 
 .passage-rect,

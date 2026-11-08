@@ -53,6 +53,7 @@ describe('DocumentWorkspace', () => {
 
     expect(screen.getByText(/This marked area uses a sample prediction/)).toBeInTheDocument()
     expect(screen.getByText('Simulated prediction')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'View interactive sample' })).toBeInTheDocument()
   })
 
   it('returns to the document view when a prediction card is activated', async () => {

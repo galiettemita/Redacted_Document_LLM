@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
+import { configurePdfViewerWorker } from '../../pdfRuntime'
 import type { Passage, PassageRect, Prediction } from '../../types'
 import { PassageOverlayLayer } from './PassageOverlayLayer'
 import { PdfToolbar } from './PdfToolbar'
 
-pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
+configurePdfViewerWorker(pdfjs)
 
 interface PdfViewerProps {
   source: string

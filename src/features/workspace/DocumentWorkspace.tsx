@@ -161,10 +161,16 @@ export function DocumentWorkspace({ document, onReplace, onViewSample }: Documen
             onSelectPassage={handleSelectPassage}
             onDismissSelection={() => dispatch({ type: 'dismiss' })}
           >
-            {document.mode === 'uploaded' && !state.markedPassage ? (
+            {document.mode === 'uploaded' ? (
               <div className="uploaded-document-note">
-                <h3>This PDF is displayed locally</h3>
-                <p>Automatic passage detection and predictions aren’t connected yet. Mark one area to preview the interaction, or explore the complete fictional sample.</p>
+                {!state.markedPassage ? (
+                  <>
+                    <h3>This PDF is displayed locally</h3>
+                    <p>Automatic passage detection and predictions aren’t connected yet. Mark one area to preview the interaction, or explore the complete fictional sample.</p>
+                  </>
+                ) : (
+                  <p>Your marked area is only an interaction preview. Explore the fictional sample for the complete automatic experience.</p>
+                )}
                 <button className="text-button" type="button" onClick={onViewSample}>View interactive sample</button>
               </div>
             ) : null}
