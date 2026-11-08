@@ -135,7 +135,6 @@ export function DocumentWorkspace({ document, onReplace, onViewSample }: Documen
             source={document.source}
             filename={document.filename}
             passages={passages}
-            predictions={predictions}
             page={state.page}
             onPageChange={(page) => dispatch({ type: 'set-page', page })}
             markingEnabled={state.markingEnabled}

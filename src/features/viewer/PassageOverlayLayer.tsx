@@ -1,5 +1,5 @@
 import { useRef, useState, type PointerEvent } from 'react'
-import type { Passage, PassageRect, Prediction } from '../../types'
+import type { Passage, PassageRect } from '../../types'
 import { getEffectivePassageId } from '../workspace/selectionState'
 import { normalizeDrag } from './drawingGeometry'
 
@@ -11,7 +11,6 @@ interface Point {
 interface PassageOverlayLayerProps {
   page: number
   passages: Passage[]
-  predictions?: Prediction[]
   hoveredId?: string | null
   pinnedId?: string | null
   onHover?: (passageId: string | null) => void
@@ -25,7 +24,6 @@ interface PassageOverlayLayerProps {
 export function PassageOverlayLayer({
   page,
   passages,
-  predictions = [],
   hoveredId = null,
   pinnedId = null,
   onHover,
@@ -59,9 +57,6 @@ export function PassageOverlayLayer({
 
   const pagePassages = passages.filter((passage) => passage.page === page)
   const activeId = getEffectivePassageId(hoveredId, pinnedId)
-  const activePassage = pagePassages.find((passage) => passage.id === activeId) ?? null
-  const activePrediction = predictions.find((prediction) => prediction.passageId === activeId)
-  const previewPosition = activePassage ? getPreviewPosition(activePassage) : null
 
   return (
     <div
@@ -124,16 +119,6 @@ export function PassageOverlayLayer({
           />
         )),
       )}
-      {activePassage && previewPosition ? (
-        <div
-          className="passage-preview"
-          role="status"
-          style={{ left: `${previewPosition.left * 100}%`, top: `${previewPosition.top * 100}%` }}
-        >
-          <span>{activePassage.label} · Page {activePassage.page}</span>
-          <p>{activePrediction?.text ?? 'Prediction is still processing…'}</p>
-        </div>
-      ) : null}
       {draftRect ? (
         <span
           className="passage-draft"
@@ -147,11 +132,4 @@ export function PassageOverlayLayer({
       ) : null}
     </div>
   )
-}
-
-function getPreviewPosition(passage: Passage) {
-  const left = Math.max(0.02, Math.min(0.7, Math.min(...passage.rects.map((rect) => rect.x))))
-  const topEdge = Math.min(...passage.rects.map((rect) => rect.y))
-  const bottomEdge = Math.max(...passage.rects.map((rect) => rect.y + rect.height))
-  return { left, top: topEdge > 0.16 ? topEdge - 0.13 : Math.min(0.84, bottomEdge + 0.025) }
 }

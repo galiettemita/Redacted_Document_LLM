@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
-import { SAMPLE_PASSAGES, SAMPLE_PREDICTIONS } from '../../data/sampleDocument'
+import { SAMPLE_PASSAGES } from '../../data/sampleDocument'
 import { PassageOverlayLayer } from './PassageOverlayLayer'
 
 function OverlayHarness() {
@@ -11,7 +11,6 @@ function OverlayHarness() {
       <PassageOverlayLayer
         page={1}
         passages={SAMPLE_PASSAGES}
-        predictions={SAMPLE_PREDICTIONS}
         hoveredId={hoveredId}
         pinnedId={pinnedId}
         onHover={setHoveredId}
@@ -43,7 +42,7 @@ describe('PassageOverlayLayer', () => {
     fireEvent.mouseEnter(passageTwo[1])
     expect(passageTwo.every((rect) => rect.dataset.active === 'true')).toBe(true)
     expect(passageOne.every((rect) => rect.dataset.active === 'false')).toBe(true)
-    expect(screen.getByRole('status')).toHaveTextContent('Field offices were directed')
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
 
     fireEvent.mouseLeave(passageTwo[1])
     expect(passageOne.every((rect) => rect.dataset.active === 'true')).toBe(true)

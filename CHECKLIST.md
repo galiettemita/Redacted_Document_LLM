@@ -24,3 +24,4 @@
 - [x] Pin React-PDF and its worker to the same PDF.js version.
 - [x] Use the compatibility PDF.js build for Safari and older browser runtimes.
 - [x] Audit upload, rendering, paging, zoom, marking, predictions, replacement, and responsive views in real browsers.
+- [x] Remove on-document prediction previews and emphasize the selected sidebar prediction.
