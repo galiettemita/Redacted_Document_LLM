@@ -11,6 +11,8 @@
 - [ ] Implement the PDF workspace and controls.
 - [ ] Implement passage overlays, previews, and selection.
 - [ ] Implement progressive simulated predictions and sidebar states.
+  - [x] Add deterministic progressive streaming and cancellation.
+  - [ ] Present processing and result states in the sidebar.
 - [ ] Implement uploaded-PDF rectangle marking.
 - [ ] Implement responsive and accessible behavior.
 - [ ] Add automated tests and complete browser QA.
