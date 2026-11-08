@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "generate:sample": "node scripts/generate-sample-pdf.mjs",
     "preview": "vite preview",
     "test": "vitest",
     "typecheck": "tsc -b --pretty false"
@@ -21,6 +22,7 @@
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^6.2.1",
     "jsdom": "^31.0.0",
+    "pdf-lib": "^1.17.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.6",
     "vitest": "^5.1.0"
