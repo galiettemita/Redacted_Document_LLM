@@ -14,14 +14,11 @@ describe('validatePdfFile', () => {
     expect(result).toEqual({ ok: false, message: 'Choose a PDF file to continue.' })
   })
 
-  it('rejects a corrupt file even when it is named like a PDF', async () => {
+  it('accepts a named PDF without parsing its bytes during upload', async () => {
     const result = await validatePdfFile(
       new File(['this is not a PDF'], 'damaged.pdf', { type: 'application/pdf' }),
     )
-    expect(result).toEqual({
-      ok: false,
-      message: 'We couldn’t read that PDF. Try another file or export it again.',
-    })
+    expect(result).toEqual({ ok: true })
   })
 
   it('accepts a parseable browser-local PDF', async () => {

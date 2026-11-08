@@ -19,3 +19,4 @@
 - [x] Commit and push the completed implementation.
 - [x] Fix browser upload flow to validate each PDF only once.
 - [x] Remove Safari-blocking PDF worker validation from the upload gate.
+- [x] Remove Safari-blocking file byte reads from the upload gate.
