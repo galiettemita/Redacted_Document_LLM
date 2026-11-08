@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
-import type { Passage, PassageRect } from '../../types'
+import type { Passage, PassageRect, Prediction } from '../../types'
 import { PassageOverlayLayer } from './PassageOverlayLayer'
 import { PdfToolbar } from './PdfToolbar'
 
@@ -10,6 +10,12 @@ interface PdfViewerProps {
   source: string
   filename: string
   passages: Passage[]
+  predictions?: Prediction[]
+  hoveredId?: string | null
+  pinnedId?: string | null
+  onHoverPassage?: (passageId: string | null) => void
+  onPinPassage?: (passageId: string | null) => void
+  onDismissSelection?: () => void
   page: number
   onPageChange: (page: number) => void
   markingEnabled?: boolean
@@ -21,6 +27,12 @@ export function PdfViewer({
   source,
   filename,
   passages,
+  predictions = [],
+  hoveredId = null,
+  pinnedId = null,
+  onHoverPassage,
+  onPinPassage,
+  onDismissSelection,
   page,
   onPageChange,
   markingEnabled = false,
@@ -75,6 +87,12 @@ export function PdfViewer({
             <PassageOverlayLayer
               page={page}
               passages={passages}
+              predictions={predictions}
+              hoveredId={hoveredId}
+              pinnedId={pinnedId}
+              onHover={onHoverPassage}
+              onPin={onPinPassage}
+              onDismiss={onDismissSelection}
               markingEnabled={markingEnabled}
               onMarkPassage={onMarkPassage}
               registerPassageTarget={registerPassageTarget}
