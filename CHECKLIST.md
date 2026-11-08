@@ -5,7 +5,7 @@
 - [x] Select the React + Vite + PDF.js implementation approach.
 - [x] Approve the written design.
 - [x] Write the implementation plan.
-- [ ] Scaffold the React/TypeScript application.
+- [x] Scaffold the React/TypeScript application.
 - [ ] Build and bundle the fictional sample PDF.
 - [ ] Implement upload validation and local PDF loading.
 - [ ] Implement the PDF workspace and controls.
