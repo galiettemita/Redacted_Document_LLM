@@ -19,6 +19,10 @@ input {
   font: inherit;
 }
 
+button {
+  color: inherit;
+}
+
 button:focus-visible,
 input:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--blue) 45%, transparent);
@@ -164,6 +168,143 @@ input:focus-visible {
   height: 6px;
   border-radius: 50%;
   background: var(--blue);
+}
+
+.pdf-viewer {
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #eef0f2;
+}
+
+.pdf-toolbar {
+  min-height: 52px;
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.96);
+  z-index: 5;
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.toolbar-separator {
+  width: 1px;
+  height: 22px;
+  background: var(--line);
+}
+
+.icon-button,
+.fit-button {
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.icon-button {
+  width: 32px;
+  font-size: 1.2rem;
+}
+
+.fit-button {
+  padding: 0 9px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.icon-button:hover:not(:disabled),
+.fit-button:hover {
+  border-color: var(--line);
+  background: var(--soft);
+}
+
+.icon-button:disabled {
+  color: #aeb5bb;
+  cursor: default;
+}
+
+.page-indicator,
+.zoom-indicator {
+  color: #4f5962;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.page-indicator {
+  min-width: 82px;
+  text-align: center;
+}
+
+.zoom-indicator {
+  width: 42px;
+  text-align: center;
+}
+
+.pdf-viewport {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 32px;
+}
+
+.pdf-page-shell {
+  position: relative;
+  margin: 0 auto;
+  background: white;
+  box-shadow: 0 5px 24px rgba(29, 36, 43, 0.13);
+}
+
+.pdf-page-shell canvas {
+  display: block;
+  width: 100% !important;
+  height: auto !important;
+}
+
+.passage-overlay-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.passage-overlay-layer.is-marking {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+.passage-rect,
+.passage-draft {
+  position: absolute;
+  border-radius: 2px;
+}
+
+.passage-rect {
+  pointer-events: auto;
+}
+
+.passage-draft {
+  border: 2px solid var(--blue);
+  background: color-mix(in srgb, var(--blue) 16%, transparent);
+}
+
+.viewer-state {
+  margin: 0;
+  padding: 80px 30px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.viewer-state.is-error {
+  color: #8b3434;
 }
 
 @media (max-width: 600px) {
