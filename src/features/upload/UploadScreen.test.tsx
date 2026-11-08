@@ -26,4 +26,16 @@ describe('UploadScreen', () => {
 
     await waitFor(() => expect(onFileAccepted).toHaveBeenCalledWith(file))
   })
+
+  it('recovers the button when validation fails unexpectedly', async () => {
+    const validate = vi.fn().mockRejectedValue(new Error('worker failed'))
+    render(<UploadScreen onFileAccepted={vi.fn()} validate={validate} />)
+
+    fireEvent.change(screen.getByLabelText('Choose PDF'), {
+      target: { files: [new File(['%PDF-1.7'], 'record.pdf', { type: 'application/pdf' })] },
+    })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('We couldn’t check that PDF. Try choosing it again.')
+    expect(screen.getByRole('button', { name: 'Choose PDF' })).toBeEnabled()
+  })
 })

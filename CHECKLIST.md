@@ -18,3 +18,4 @@
 - [x] Add automated tests and complete available preview QA.
 - [x] Commit and push the completed implementation.
 - [x] Fix browser upload flow to validate each PDF only once.
+- [x] Remove Safari-blocking PDF worker validation from the upload gate.

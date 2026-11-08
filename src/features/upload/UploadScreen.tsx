@@ -16,13 +16,18 @@ export function UploadScreen({ onFileAccepted, validate = validatePdfFile }: Upl
     if (!file || isValidating) return
     setError(null)
     setIsValidating(true)
-    const result = await validate(file)
-    setIsValidating(false)
-    if (!result.ok) {
-      setError(result.message)
-      return
+    try {
+      const result = await validate(file)
+      if (!result.ok) {
+        setError(result.message)
+        return
+      }
+      onFileAccepted(file)
+    } catch {
+      setError('We couldn’t check that PDF. Try choosing it again.')
+    } finally {
+      setIsValidating(false)
     }
-    onFileAccepted(file)
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
