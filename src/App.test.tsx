@@ -1,5 +1,10 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { PDFDocument } from 'pdf-lib'
 import { App } from './App'
+
+vi.mock('./features/viewer/PdfViewer', () => ({
+  PdfViewer: () => <div aria-label="Local PDF renderer" />,
+}))
 
 describe('upload screen', () => {
   it('keeps the initial experience focused on choosing a PDF', () => {
@@ -13,5 +18,31 @@ describe('upload screen', () => {
     expect(screen.getByRole('button', { name: 'Choose PDF' })).toBeInTheDocument()
     expect(screen.getByText('Demo — predictions are simulated')).toBeInTheDocument()
     expect(screen.queryByText('View interactive sample')).not.toBeInTheDocument()
+  })
+})
+
+describe('document lifecycle', () => {
+  const createObjectURL = vi.fn(() => 'blob:uploaded-pdf')
+  const revokeObjectURL = vi.fn()
+
+  beforeEach(() => {
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL })
+  })
+
+  it('opens a valid local PDF and replaces it without retaining workspace state', async () => {
+    const pdf = await PDFDocument.create()
+    pdf.addPage([300, 400])
+    const bytes = new Uint8Array(await pdf.save())
+    const file = new File([bytes.buffer], 'local-record.pdf', { type: 'application/pdf' })
+    render(<App />)
+
+    fireEvent.change(screen.getByLabelText('Choose PDF'), { target: { files: [file] } })
+    expect(await screen.findByText('local-record.pdf')).toBeInTheDocument()
+    expect(screen.getByText(/Automatic passage detection and predictions aren’t connected yet/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace document' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Explore what’s behind the redactions' })).toBeInTheDocument())
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:uploaded-pdf')
   })
 })

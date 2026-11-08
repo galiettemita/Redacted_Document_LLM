@@ -13,7 +13,7 @@
 - [x] Implement progressive simulated predictions and sidebar states.
   - [x] Add deterministic progressive streaming and cancellation.
   - [x] Present processing and result states in the sidebar.
-- [ ] Implement uploaded-PDF rectangle marking.
+- [x] Implement uploaded-PDF rectangle marking.
 - [ ] Implement responsive and accessible behavior.
 - [ ] Add automated tests and complete browser QA.
 - [ ] Commit and push the completed implementation.

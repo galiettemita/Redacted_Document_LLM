@@ -30,7 +30,7 @@ export function useLocalPdf() {
     if (!validation.ok) {
       setStatus('error')
       setError(validation.message)
-      return false
+      return null
     }
 
     revokeCurrentUrl()
@@ -38,7 +38,7 @@ export function useLocalPdf() {
     currentUrl.current = nextUrl
     setObjectUrl(nextUrl)
     setStatus('ready')
-    return true
+    return nextUrl
   }, [revokeCurrentUrl])
 
   useEffect(() => revokeCurrentUrl, [revokeCurrentUrl])
