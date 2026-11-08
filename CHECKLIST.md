@@ -21,3 +21,6 @@
 - [x] Remove Safari-blocking PDF worker validation from the upload gate.
 - [x] Remove Safari-blocking file byte reads from the upload gate.
 - [x] Make the upload-to-workspace transition synchronous so it cannot remain in a checking state.
+- [x] Pin React-PDF and its worker to the same PDF.js version.
+- [x] Use the compatibility PDF.js build for Safari and older browser runtimes.
+- [x] Audit upload, rendering, paging, zoom, marking, predictions, replacement, and responsive views in real browsers.
