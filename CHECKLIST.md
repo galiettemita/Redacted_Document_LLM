@@ -20,3 +20,4 @@
 - [x] Fix browser upload flow to validate each PDF only once.
 - [x] Remove Safari-blocking PDF worker validation from the upload gate.
 - [x] Remove Safari-blocking file byte reads from the upload gate.
+- [x] Make the upload-to-workspace transition synchronous so it cannot remain in a checking state.

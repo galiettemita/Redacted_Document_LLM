@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { App } from './App'
 
 const { validatePdfFileMock } = vi.hoisted(() => ({
-  validatePdfFileMock: vi.fn().mockResolvedValue({ ok: true }),
+  validatePdfFileMock: vi.fn().mockReturnValue({ ok: true }),
 }))
 
 vi.mock('./features/upload/fileValidation', () => ({
@@ -34,7 +34,7 @@ describe('document lifecycle', () => {
 
   beforeEach(() => {
     validatePdfFileMock.mockClear()
-    validatePdfFileMock.mockResolvedValue({ ok: true })
+    validatePdfFileMock.mockReturnValue({ ok: true })
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL })
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL })
   })
@@ -44,6 +44,7 @@ describe('document lifecycle', () => {
     render(<App />)
 
     fireEvent.change(screen.getByLabelText('Choose PDF'), { target: { files: [file] } })
+    expect(screen.queryByText('Checking PDF…')).not.toBeInTheDocument()
     expect(await screen.findByText('local-record.pdf')).toBeInTheDocument()
     expect(validatePdfFileMock).toHaveBeenCalledOnce()
     expect(screen.getByText(/Automatic passage detection and predictions aren’t connected yet/)).toBeInTheDocument()

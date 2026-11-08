@@ -19,16 +19,19 @@ describe('UploadScreen', () => {
   it('passes an accepted PDF to the workspace owner', async () => {
     const file = new File(['%PDF-1.4\n'], 'record.pdf', { type: 'application/pdf' })
     const onFileAccepted = vi.fn()
-    const validate = vi.fn().mockResolvedValue({ ok: true })
+    const validate = vi.fn().mockReturnValue({ ok: true })
     render(<UploadScreen onFileAccepted={onFileAccepted} validate={validate} />)
 
     fireEvent.change(screen.getByLabelText('Choose PDF'), { target: { files: [file] } })
 
+    expect(screen.queryByText('Checking PDF…')).not.toBeInTheDocument()
     await waitFor(() => expect(onFileAccepted).toHaveBeenCalledWith(file))
   })
 
   it('recovers the button when validation fails unexpectedly', async () => {
-    const validate = vi.fn().mockRejectedValue(new Error('worker failed'))
+    const validate = vi.fn(() => {
+      throw new Error('validation failed')
+    })
     render(<UploadScreen onFileAccepted={vi.fn()} validate={validate} />)
 
     fireEvent.change(screen.getByLabelText('Choose PDF'), {

@@ -22,7 +22,7 @@ describe('validatePdfFile', () => {
   })
 
   it('accepts a parseable browser-local PDF', async () => {
-    await expect(validatePdfFile(await validPdfFile())).resolves.toEqual({ ok: true })
+    expect(validatePdfFile(await validPdfFile())).toEqual({ ok: true })
   })
 
 })

@@ -3,21 +3,19 @@ import { validatePdfFile, type PdfValidationResult } from './fileValidation'
 
 interface UploadScreenProps {
   onFileAccepted: (file: File) => void
-  validate?: (file: File) => Promise<PdfValidationResult>
+  validate?: (file: File) => PdfValidationResult
 }
 
 export function UploadScreen({ onFileAccepted, validate = validatePdfFile }: UploadScreenProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = useState(false)
-  const [isValidating, setIsValidating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  async function handleFile(file?: File) {
-    if (!file || isValidating) return
+  function handleFile(file?: File) {
+    if (!file) return
     setError(null)
-    setIsValidating(true)
     try {
-      const result = await validate(file)
+      const result = validate(file)
       if (!result.ok) {
         setError(result.message)
         return
@@ -25,15 +23,13 @@ export function UploadScreen({ onFileAccepted, validate = validatePdfFile }: Upl
       onFileAccepted(file)
     } catch {
       setError('We couldn’t check that PDF. Try choosing it again.')
-    } finally {
-      setIsValidating(false)
     }
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault()
     setIsDragging(false)
-    void handleFile(event.dataTransfer.files[0])
+    handleFile(event.dataTransfer.files[0])
   }
 
   return (
@@ -71,15 +67,14 @@ export function UploadScreen({ onFileAccepted, validate = validatePdfFile }: Upl
             type="file"
             accept="application/pdf,.pdf"
             aria-label="Choose PDF"
-            onChange={(event) => void handleFile(event.target.files?.[0])}
+            onChange={(event) => handleFile(event.target.files?.[0])}
           />
           <button
             className="primary-button"
             type="button"
-            disabled={isValidating}
             onClick={() => inputRef.current?.click()}
           >
-            {isValidating ? 'Checking PDF…' : 'Choose PDF'}
+            Choose PDF
           </button>
           {error ? <p className="upload-error" role="alert">{error}</p> : null}
         </div>
