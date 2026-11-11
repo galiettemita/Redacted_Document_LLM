@@ -26,3 +26,13 @@
 - [x] Audit upload, rendering, paging, zoom, marking, predictions, replacement, and responsive views in real browsers.
 - [x] Remove on-document prediction previews and emphasize the selected sidebar prediction.
 - [x] Complete an independent software-quality and production-readiness review against the written design.
+
+## Real retrieval-assisted backend
+
+- [x] Read Andrew Tang's paper and extract the realistic retrieval-assisted method.
+- [x] Review the current frontend, passage-selection behavior, and prediction-service boundary.
+- [x] Verify the existing frontend baseline (35 tests and TypeScript checks pass).
+- [x] Identify the exact-method assets that are present and the corpus/code details that are still missing.
+- [ ] Approve the real-backend architecture and written design.
+- [ ] Write the task-by-task implementation plan.
+- [ ] Connect and verify one real backend feature at a time.
