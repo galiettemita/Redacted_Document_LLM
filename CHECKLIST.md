@@ -25,3 +25,4 @@
 - [x] Use the compatibility PDF.js build for Safari and older browser runtimes.
 - [x] Audit upload, rendering, paging, zoom, marking, predictions, replacement, and responsive views in real browsers.
 - [x] Remove on-document prediction previews and emphasize the selected sidebar prediction.
+- [x] Complete an independent software-quality and production-readiness review against the written design.
