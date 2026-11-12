@@ -42,10 +42,15 @@ export function useBackendDocument(
   ))
   const recordRef = useRef<BackendDocumentRecord | null>(null)
   const uploadControllerRef = useRef<AbortController | null>(null)
+  const uploadPromiseRef = useRef<Promise<BackendDocumentRecord> | null>(null)
+  const removingRef = useRef(false)
+  const removalPromiseRef = useRef<Promise<void> | null>(null)
 
   useEffect(() => {
     if (!file) {
       recordRef.current = null
+      uploadPromiseRef.current = null
+      removingRef.current = false
       setSnapshot(IDLE_SNAPSHOT)
       return
     }
@@ -53,20 +58,27 @@ export function useBackendDocument(
     const controller = new AbortController()
     let active = true
     uploadControllerRef.current = controller
+    removingRef.current = false
     recordRef.current = null
     setSnapshot({ status: 'uploading', record: null, error: null })
 
-    void api.uploadDocument(file, controller.signal).then(
+    const uploadPromise = api.uploadDocument(file, controller.signal)
+    uploadPromiseRef.current = uploadPromise
+    void uploadPromise.then(
       (record) => {
+        if (uploadPromiseRef.current === uploadPromise) uploadPromiseRef.current = null
         if (!active) {
           void api.deleteDocument(record.id).catch(() => undefined)
           return
         }
         recordRef.current = record
-        setSnapshot({ status: 'ready', record, error: null })
+        if (!removingRef.current) {
+          setSnapshot({ status: 'ready', record, error: null })
+        }
       },
       (error: unknown) => {
-        if (!active || isAbortError(error)) return
+        if (uploadPromiseRef.current === uploadPromise) uploadPromiseRef.current = null
+        if (!active || removingRef.current || isAbortError(error)) return
         const unavailable = error instanceof BackendApiError
           && (
             error.code === 'backend_unavailable'
@@ -93,28 +105,51 @@ export function useBackendDocument(
     }
   }, [api, file])
 
-  const remove = useCallback(async () => {
-    uploadControllerRef.current?.abort()
-    uploadControllerRef.current = null
-    const record = recordRef.current
-    if (!record) {
-      setSnapshot(IDLE_SNAPSHOT)
-      return
-    }
+  const remove = useCallback(() => {
+    if (removalPromiseRef.current) return removalPromiseRef.current
 
-    setSnapshot({ status: 'deleting', record, error: null })
-    try {
-      await api.deleteDocument(record.id)
-      recordRef.current = null
+    removingRef.current = true
+    const pendingUpload = uploadPromiseRef.current
+    let record = recordRef.current
+    if (!record && !pendingUpload) {
+      removingRef.current = false
       setSnapshot(IDLE_SNAPSHOT)
-    } catch (error) {
-      setSnapshot({
-        status: 'failed',
-        record,
-        error: error instanceof Error ? error.message : 'The stored PDF could not be removed.',
-      })
-      throw error
+      return Promise.resolve()
     }
+    setSnapshot({ status: 'deleting', record, error: null })
+
+    const operation = (async () => {
+      if (!record && pendingUpload) {
+        try {
+          record = await pendingUpload
+        } catch {
+          setSnapshot(IDLE_SNAPSHOT)
+          return
+        }
+      }
+      if (!record) {
+        setSnapshot(IDLE_SNAPSHOT)
+        return
+      }
+
+      try {
+        await api.deleteDocument(record.id)
+        recordRef.current = null
+        setSnapshot(IDLE_SNAPSHOT)
+      } catch (error) {
+        setSnapshot({
+          status: 'failed',
+          record,
+          error: error instanceof Error ? error.message : 'The stored PDF could not be removed.',
+        })
+        throw error
+      }
+    })().finally(() => {
+      removingRef.current = false
+      removalPromiseRef.current = null
+    })
+    removalPromiseRef.current = operation
+    return operation
   }, [api])
 
   return { ...snapshot, remove }

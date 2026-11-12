@@ -42,3 +42,4 @@
   - [x] Task 3: Persist stable passage identities, corrections, merge/split provenance, revisions, and invalidation events.
   - [x] Task 4: Extract visible words, suppress covered text, preserve reading order, and build hidden-answer-free passage examples.
   - [x] Task 5: Connect real PDF upload, cleanup, and stable manual passage persistence to the existing website.
+  - [x] Pre-test hardening: clean up late upload records and lock document navigation until confirmed deletion.

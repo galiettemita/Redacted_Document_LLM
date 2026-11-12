@@ -78,6 +78,7 @@ export function DocumentWorkspace({
   const backendReady = document.mode === 'uploaded'
     && backendDocument?.status === 'ready'
     && Boolean(document.backendDocumentId)
+  const deletionInProgress = backendDocument?.status === 'deleting'
   const markingUnavailable = !backendReady || passageSaveStatus === 'saving'
 
   async function handleMarkPassage(page: number, rect: PassageRect) {
@@ -144,10 +145,11 @@ export function DocumentWorkspace({
         <button
           className="secondary-button"
           type="button"
-          aria-label="Replace document"
+          aria-label={deletionInProgress ? 'Removing document…' : 'Replace document'}
+          disabled={deletionInProgress}
           onClick={onReplace}
         >
-          Replace document
+          {deletionInProgress ? 'Removing document…' : 'Replace document'}
         </button>
       </header>
 
@@ -226,7 +228,14 @@ export function DocumentWorkspace({
               <div className="uploaded-document-note">
                 <h3>{backendNoteTitle(backendDocument, passageSaveStatus)}</h3>
                 <p>{backendNoteMessage(backendDocument, passageSaveStatus)}</p>
-                <button className="text-button" type="button" onClick={onViewSample}>View interactive sample</button>
+                <button
+                  className="text-button"
+                  type="button"
+                  disabled={deletionInProgress}
+                  onClick={onViewSample}
+                >
+                  View interactive sample
+                </button>
               </div>
             ) : null}
           </PredictionSidebar>
@@ -278,6 +287,9 @@ function markingToolbarMessage(
   if (backendDocument?.status === 'uploading') {
     return ' Uploading to the loopback-only local backend. Marking becomes available when persistence finishes.'
   }
+  if (backendDocument?.status === 'deleting') {
+    return ' Waiting for confirmed backend deletion before leaving this document.'
+  }
   if (backendDocument?.status === 'unavailable') {
     return ' The local PDF remains visible, but passage persistence needs the local backend.'
   }
@@ -295,6 +307,7 @@ function backendNoteTitle(
   passageSaveStatus: PassageSaveStatus,
 ): string {
   if (backendDocument?.status === 'uploading') return 'Backend upload in progress'
+  if (backendDocument?.status === 'deleting') return 'Removing stored PDF'
   if (backendDocument?.status === 'unavailable') return 'Local backend unavailable'
   if (backendDocument?.status === 'failed') return 'PDF upload failed'
   if (passageSaveStatus === 'saving') return 'Saving Passage 1'
@@ -309,6 +322,9 @@ function backendNoteMessage(
 ): string {
   if (backendDocument?.status === 'uploading') {
     return 'Uploading to the loopback-only local backend while the browser displays its local copy.'
+  }
+  if (backendDocument?.status === 'deleting') {
+    return 'The app will return to the upload screen after the backend confirms deletion.'
   }
   if (backendDocument?.status === 'unavailable') {
     return 'The PDF is displayed locally, but the backend copy and passage coordinates have not been saved.'

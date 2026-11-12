@@ -131,6 +131,18 @@ describe('DocumentWorkspace', () => {
     expect(createPassage).not.toHaveBeenCalled()
   })
 
+  it('locks destructive navigation while the stored document is being removed', () => {
+    const deleting: BackendDocumentState = {
+      ...readyBackendDocument,
+      status: 'deleting',
+    }
+    render(<DocumentWorkspace document={uploadedDocument} backendDocument={deleting} backendApi={apiWithCreate()} onReplace={vi.fn()} onViewSample={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: 'Removing document…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'View interactive sample' })).toBeDisabled()
+    expect(screen.getByRole('heading', { name: 'Removing stored PDF' })).toBeInTheDocument()
+  })
+
   it('returns to the document view when a prediction card is activated', async () => {
     render(<DocumentWorkspace document={SAMPLE_DOCUMENT} onReplace={vi.fn()} onViewSample={vi.fn()} />)
     await act(async () => vi.advanceTimersByTimeAsync(1400))

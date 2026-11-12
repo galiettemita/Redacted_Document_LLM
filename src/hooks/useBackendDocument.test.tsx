@@ -90,6 +90,38 @@ describe('useBackendDocument', () => {
     expect(result.current.status).toBe('idle')
   })
 
+  it('waits for an in-flight upload and deletes the late backend record', async () => {
+    let resolveUpload!: (value: BackendDocumentRecord) => void
+    let observedSignal: AbortSignal | undefined
+    const uploadDocument = vi.fn((_file: File, signal?: AbortSignal) => {
+      observedSignal = signal
+      return new Promise<BackendDocumentRecord>((resolve) => {
+        resolveUpload = resolve
+      })
+    })
+    const deleteDocument = vi.fn().mockResolvedValue(undefined)
+    const api = apiWith({ uploadDocument, deleteDocument })
+    const file = new File(['%PDF-1.7'], 'record.pdf', { type: 'application/pdf' })
+    const { result } = renderHook(() => useBackendDocument(file, api))
+
+    let removal!: Promise<void>
+    act(() => {
+      removal = result.current.remove()
+    })
+
+    expect(result.current.status).toBe('deleting')
+    expect(observedSignal?.aborted).toBe(false)
+    expect(deleteDocument).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveUpload(record)
+      await removal
+    })
+
+    expect(deleteDocument).toHaveBeenCalledWith(record.id)
+    expect(result.current.status).toBe('idle')
+  })
+
   it('aborts an upload when the selected file is cleared', async () => {
     let observedSignal: AbortSignal | undefined
     const uploadDocument = vi.fn((_file: File, signal?: AbortSignal) => {

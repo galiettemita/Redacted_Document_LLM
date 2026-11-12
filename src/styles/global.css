@@ -414,6 +414,12 @@ input:focus-visible {
   background: var(--soft);
 }
 
+.secondary-button:disabled,
+.text-button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
 .marking-toolbar button:disabled {
   cursor: not-allowed;
   opacity: 0.58;
