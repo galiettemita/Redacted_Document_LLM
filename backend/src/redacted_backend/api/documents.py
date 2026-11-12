@@ -13,6 +13,7 @@ from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
 from redacted_backend.config import Settings
 from redacted_backend.db.base import Database
 from redacted_backend.db.repositories.documents import DocumentRepository
+from redacted_backend.db.repositories.passages import PassageRepository
 from redacted_backend.documents.validation import (
     PdfLimits,
     PdfValidationError,
@@ -86,11 +87,21 @@ def create_documents_router(
     ) -> DocumentRecord:
         ready_database, _ = _require_services(database, document_store)
         with ready_database.session_factory() as session, session.begin():
-            record = DocumentRepository(session).set_visible_date(
+            documents = DocumentRepository(session)
+            existing = documents.get(document_id)
+            record = documents.set_visible_date(
                 document_id,
                 visible_date=update.visible_date,
                 provenance=update.date_provenance,
             )
+            if (
+                existing is not None
+                and (
+                    existing.visible_date != update.visible_date
+                    or existing.date_provenance != update.date_provenance
+                )
+            ):
+                PassageRepository(session).invalidate_document_date(document_id)
         if record is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
         return record
@@ -106,6 +117,7 @@ def create_documents_router(
             record = repository.mark_deleted(document_id)
             if record is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+            PassageRepository(session).delete_for_document(document_id)
             live_references = repository.live_reference_count(record.storage_key)
         if live_references == 0:
             ready_store.delete(record.storage_key)

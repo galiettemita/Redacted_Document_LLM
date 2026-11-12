@@ -150,12 +150,12 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - Produces: create, patch, delete, merge, and split endpoints from the spec.
 - Invalidation contract: any geometry/date change increments `revision`, cancels active jobs, and tombstones derived visible examples, retrieval traces, and predictions.
 
-- [ ] **Step 1: Write failing API tests asserting rectangles reject values outside 0-1, a manual passage keeps its UUID after patch, merge keeps the first document-order UUID, split keeps the original UUID for its first result, and each mutation increments `revision`.**
-- [ ] **Step 2: Write a failing idempotency test sending the same `Idempotency-Key` twice and asserting one passage record and one response UUID.**
-- [ ] **Step 3: Run `cd backend && uv run pytest tests/api/test_passages.py -v`; expect missing passage routes.**
-- [ ] **Step 4: Implement the migration, repository transaction rules, route schemas, and idempotency record without adding prediction fields.**
-- [ ] **Step 5: Run focused tests and `uv run alembic upgrade head`; expect PASS.**
-- [ ] **Step 6: Update the checklist, commit with `feat: add stable passage lifecycle`, and push.**
+- [x] **Step 1: Write failing API tests asserting rectangles reject values outside 0-1, a manual passage keeps its UUID after patch, merge keeps the first document-order UUID, split keeps the original UUID for its first result, and each mutation increments `revision`.**
+- [x] **Step 2: Write a failing idempotency test sending the same `Idempotency-Key` twice and asserting one passage record and one response UUID.**
+- [x] **Step 3: Run `cd backend && uv run pytest tests/api/test_passages.py -v`; expect missing passage routes.**
+- [x] **Step 4: Implement the migration, repository transaction rules, route schemas, and idempotency record without adding prediction fields.**
+- [x] **Step 5: Run focused tests and `uv run alembic upgrade head`; expect PASS.**
+- [x] **Step 6: Update the checklist, commit with `feat: add stable passage lifecycle`, and push.**
 
 ### Task 4: Visible-only extraction, mask safety, and example construction
 
