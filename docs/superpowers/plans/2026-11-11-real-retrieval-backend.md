@@ -237,6 +237,32 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - [x] **Step 7: Run focused and full backend/frontend tests, lint/format, typecheck, build, both Compose configs, migrations, and browser QA using a real generated PDF.**
 - [x] **Step 8: Update checklist/docs, commit with `feat: expose visible context checkpoint`, and push.**
 
+### Task 5B: Automatically prove the visible document date
+
+**Files:**
+- Create: `backend/src/redacted_backend/documents/dates.py`, `backend/tests/documents/test_dates.py`
+- Create: `backend/alembic/versions/0004_visible_date_evidence.py`
+- Modify: `backend/src/redacted_backend/documents/preparation.py`, `domain/documents.py`, `db/models.py`, `db/repositories/documents.py`, `api/context.py`
+- Modify: backend preparation/context/document tests and public PDF fixtures
+- Modify: `src/services/backendApi.ts`, associated transport/hook tests
+- Modify: `src/features/workspace/DocumentWorkspace.tsx`, its tests, and `src/styles/global.css`
+- Modify: `README.md`, `CHECKLIST.md`, and Task 11's future migration number
+
+**Interfaces:**
+- Produces: `detect_visible_document_date(pages, discoveries) -> VisibleDateEvidence` from confirmed visible words in the first-page header, with a frozen parser version and exact page/line/word-box evidence.
+- `prepare_visible_context(...) -> PreparedVisibleContext` always derives the prompt date from the same visible extraction used for the transcript; it never accepts user-entered, corpus-derived, model-inferred, hidden, or uncorroborated PDF-metadata dates.
+- `DocumentRepository.set_detected_visible_date(...)` persists `visible_text` provenance and evidence without changing passage revision; conflicting later extraction fails closed.
+- The website exposes no date input or date-mutation request. **Prepare visible context** becomes available after a real passage is saved and displays the detected date only after successful processing.
+
+- [ ] **Step 1: Write failing pure tests for ISO, month-name day-first/day-last, OCR words, repeated identical dates, ambiguous multiple dates, missing dates, body-only dates, and dates hidden by confirmed masks.**
+- [ ] **Step 2: Run focused date tests and confirm the detector is missing.**
+- [ ] **Step 3: Implement deterministic visible-header date detection and evidence without adding a model or third-party date service.**
+- [ ] **Step 4: Write failing preparation/API tests proving automatic persistence, evidence provenance, same-revision reuse, conflict refusal, and removal of the manual metadata dependency.**
+- [ ] **Step 5: Implement preparation persistence and migration; remove the manual metadata product route and update Task 11 to `0005_analysis_jobs.py`.**
+- [ ] **Step 6: Write failing frontend tests proving there is no date input/request and one saved passage can directly prepare and display its automatically detected date.**
+- [ ] **Step 7: Remove the manual date client/UI/styles and implement permanent processing copy and states.**
+- [ ] **Step 8: Run full backend/frontend/container/migration/browser verification with the real generated PDF; update docs/checklist, commit with `feat: detect visible document dates`, and push.**
+
 ### Task 6: Frozen corpus snapshot, exclusions, preflight, and deterministic chunks
 
 **Files:**
@@ -374,7 +400,7 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 **Files:**
 - Create: `backend/src/redacted_backend/jobs/messages.py`, `orchestrator.py`, `tasks.py`, `events.py`
 - Create: `backend/src/redacted_backend/api/analysis.py`, `events.py`
-- Create: `backend/alembic/versions/0004_analysis_jobs.py`
+- Create: `backend/alembic/versions/0005_analysis_jobs.py`
 - Create: `backend/tests/jobs/test_orchestrator.py`, `test_events.py`, `backend/tests/api/test_analysis.py`
 - Create: `src/services/httpPredictionService.ts`, `src/services/httpPredictionService.test.ts`
 - Create: `src/hooks/usePredictionStream.ts`, `src/hooks/usePredictionStream.test.tsx`

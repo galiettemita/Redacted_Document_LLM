@@ -43,6 +43,7 @@
   - [x] Task 4: Extract visible words, suppress covered text, preserve reading order, and build hidden-answer-free passage examples.
   - [x] Task 5: Connect real PDF upload, cleanup, and stable manual passage persistence to the existing website.
   - [x] Task 5A: Persist a marked passage's real visible-only context and show its readiness summary in the existing sidebar.
+  - [ ] Task 5B: Detect and persist the document date automatically from confirmed visible PDF text/OCR; remove the manual date product flow.
   - [x] Pre-test hardening: clean up late upload records and lock document navigation until confirmed deletion.
   - [x] Task 6: Add immutable corpus locking, fail-closed exclusions, storage preflight, deterministic chunks, and reproducible manifests without downloading the gated corpus.
   - [ ] Task 6A: Freeze the complete History Lab API source with explicit collection labels and verified FRUS/CIA exclusions.
