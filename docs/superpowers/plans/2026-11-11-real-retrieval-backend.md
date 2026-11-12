@@ -328,6 +328,28 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - [ ] **Step 5: Run focused tests, readiness, and deterministic sample rebuild checks; expect PASS.**
 - [ ] **Step 6: Update the checklist, commit with `feat: add corpus BM25 retrieval`, and push.**
 
+### Task 7A: Persist the real visible-only context query
+
+**Files:**
+- Modify: `backend/src/redacted_backend/retrieval/context_query.py`, `types.py`
+- Modify: `backend/src/redacted_backend/db/models.py`, `db/repositories/visible_examples.py`, `api/context.py`
+- Create: `backend/alembic/versions/0005_context_queries.py`
+- Modify: backend context-query, API, repository, and passage-invalidation tests
+- Modify: `src/services/backendApi.ts`, `src/features/workspace/DocumentWorkspace.tsx`, and associated tests
+- Modify: `README.md`, `CHECKLIST.md`, and Task 11's future migration number
+
+**Interfaces:**
+- Produces: `prepare_context_query(example) -> PreparedContextQuery` using only the persisted `VisibleExample.context_window`, after removing structural `[[TARGET]]` and `[REDACTED]` markers and the frozen stop-word list.
+- Persists query text, SHA-256, visible-term count, and `context-query-v1` on the same passage revision as the visible example. Same-revision retries reuse or safely backfill the deterministic artifact; passage invalidation continues to invalidate the containing visible-example artifact.
+- Extends `POST /v1/passages/{passage_id}:prepare-context` with a safe query-ready summary. It performs no corpus search and returns no evidence while the Task 6A coverage gate and matching BM25 index are unavailable.
+- The website displays the passage-linked query-ready checkpoint in the existing sidebar and continues to state that corpus retrieval and model prediction are disconnected. No query or prediction text appears over the PDF.
+
+- [ ] **Step 1: Write failing tests proving structural markers never become search terms, query text/hash/count/version persist for the exact passage revision, same-revision retries reuse/backfill it, stopword-only context fails closed, and no BM25 transport is called.**
+- [ ] **Step 2: Run focused tests and confirm the persistence/API contract is missing.**
+- [ ] **Step 3: Implement deterministic query preparation, revision-bound persistence, migration `0005_context_queries.py`, and safe summary fields; update Task 11 to `0006_analysis_jobs.py`.**
+- [ ] **Step 4: Write failing frontend tests for the query-ready summary and absence of search-result or PDF-overlay text, then implement the existing-design sidebar copy.**
+- [ ] **Step 5: Run full backend/frontend/migration/container/browser verification with the real generated PDF; confirm zero retrieval/model calls, update docs/checklist, commit with `feat: persist visible context queries`, and push.**
+
 ### Task 8: Pinned BGE embeddings and exact-rescored dense retrieval
 
 **Files:**
@@ -400,7 +422,7 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 **Files:**
 - Create: `backend/src/redacted_backend/jobs/messages.py`, `orchestrator.py`, `tasks.py`, `events.py`
 - Create: `backend/src/redacted_backend/api/analysis.py`, `events.py`
-- Create: `backend/alembic/versions/0005_analysis_jobs.py`
+- Create: `backend/alembic/versions/0006_analysis_jobs.py`
 - Create: `backend/tests/jobs/test_orchestrator.py`, `test_events.py`, `backend/tests/api/test_analysis.py`
 - Create: `src/services/httpPredictionService.ts`, `src/services/httpPredictionService.test.ts`
 - Create: `src/hooks/usePredictionStream.ts`, `src/hooks/usePredictionStream.test.tsx`

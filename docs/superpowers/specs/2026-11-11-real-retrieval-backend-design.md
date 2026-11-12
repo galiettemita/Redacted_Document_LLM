@@ -226,6 +226,8 @@ OpenSearch stores the chunk text and metadata and returns BM25 top 300. The anal
 
 The context query is the visible paragraph window with that same frozen stop-word list removed. The own query is generated from the whole visible bulletin by the paper's Appendix F prompt and is validated as one line, at most 30 words, with the permitted punctuation removed exactly as instructed.
 
+Before a verified corpus index is available, context preparation also persists the deterministic `context-query-v1` artifact for the same passage revision. Structural `[[TARGET]]` and `[REDACTED]` markers are removed before tokenization so they can never become search terms. The artifact records the query text, SHA-256, visible-term count, stop-word version, and query version. The browser receives only the hash/count/version checkpoint, not retrieved evidence. This is the permanent input to the later BM25 and dense context-query calls; it does not perform or simulate retrieval while corpus readiness is false.
+
 ### Dense lists
 
 `BAAI/bge-base-en-v1.5` is pinned by model revision. Documents use raw chunk text; queries use the model's published retrieval instruction. Embeddings are L2-normalized and searched by inner product, which is cosine similarity after normalization.
