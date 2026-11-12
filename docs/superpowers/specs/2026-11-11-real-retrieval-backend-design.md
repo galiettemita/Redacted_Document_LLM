@@ -140,11 +140,16 @@ There is deliberately no `answer`, `reveal`, `ground_truth`, or later-release fi
 - `POST /v1/passages/{passage_id}:split`: keeps the original UUID for the first resulting passage and creates new UUIDs with `split_from` provenance for the rest.
 - `POST /v1/documents/{document_id}/passages:detect`: starts automatic OCR/box detection when that slice is enabled.
 - `POST /v1/passages/{passage_id}:analyze`: idempotently advances one passage through context, retrieval, and prediction.
+- `POST /v1/passages/{passage_id}:prepare-context`: the pre-model vertical slice. It extracts and persists the current passage revision's visible-only example, returns only a safe readiness summary, and never performs retrieval or a model call.
 - `POST /v1/documents/{document_id}:analyze`: schedules every ready passage with bounded concurrency.
 - `GET /v1/documents/{document_id}/events`: server-sent events for passage status and predictions.
 - `DELETE /v1/documents/{document_id}`: cancels jobs and removes transient document artifacts through the storage interface.
 
 Idempotency keys prevent a double click or reconnect from paying for the same stage twice. Jobs checkpoint after context construction, retrieval, and generation. A failed stage may retry without discarding earlier deterministic artifacts.
+
+Before retrieval is available, an uploaded-document sidebar exposes the real context checkpoint. The user copies the bulletin date from visible PDF text into a date field, saves it with `manual_visible_document` provenance, marks a passage, and activates **Prepare visible context**. The backend renders and extracts the stored PDF, detects masks across every page, removes an automatically detected mask that overlaps a manually marked passage before inserting that passage's stable target marker, builds the visible example, and stores it against the passage revision. The UI shows the date, geometry-derived length cue, visible-word count, and confirmed mask count for that same passage. It does not display transcript text as a prediction and continues to say that retrieval and model prediction are not connected.
+
+Preparation fails closed with a passage-linked explanation when the date is missing, any page has uncertain mask coverage, OCR is unavailable, visible geometry cannot support a length cue, or the passage changes while work is running. Repeating preparation for the same revision returns the persisted artifact; correcting geometry or document date invalidates it.
 
 ## Document processing
 

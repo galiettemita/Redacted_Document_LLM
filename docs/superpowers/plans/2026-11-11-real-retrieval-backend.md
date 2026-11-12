@@ -209,6 +209,34 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - [x] **Step 7: Run browser QA for choose/drop, immediate rendering, backend pending/failed/ready, marking, hover/pin, replacement, and mobile view switching.**
 - [x] **Step 8: Update the checklist, commit with `feat: connect PDF uploads to backend`, and push.**
 
+### Task 5A: Persist and show the real visible-context checkpoint
+
+**Files:**
+- Create: `backend/src/redacted_backend/documents/preparation.py`
+- Create: `backend/src/redacted_backend/db/repositories/visible_examples.py`
+- Create: `backend/src/redacted_backend/api/context.py`
+- Create: `backend/alembic/versions/0003_visible_examples.py`
+- Create: `backend/tests/documents/test_preparation.py`, `backend/tests/api/test_context.py`
+- Modify: `backend/src/redacted_backend/documents/visible_example.py`, `db/models.py`, `db/repositories/passages.py`, `main.py`
+- Modify: `src/services/backendApi.ts`, `backendApi.test.ts`
+- Modify: `src/features/workspace/DocumentWorkspace.tsx`, `DocumentWorkspace.test.tsx`, `src/styles/global.css`
+- Modify: `README.md`, `CHECKLIST.md`
+
+**Interfaces:**
+- Produces: `prepare_visible_context(pdf_path, document, passages, target_id) -> PreparedVisibleContext` using the stored PDF, whole-document visible extraction, page-mask discovery, and the existing hidden-answer-free `build_visible_example`.
+- Produces: `POST /v1/passages/{passage_id}:prepare-context -> VisibleContextSummary` with the same passage ID and revision, document date, length-cue bucket, estimated words, visible-word count, confirmed-mask count, and `context_ready`; no transcript or prediction text is returned.
+- Persists one active `VisibleExample` payload per passage revision. Repeating the request for the same revision returns it without re-extraction; passage/date mutation invalidates it.
+- Frontend adds `BackendApi.updateDocumentMetadata` and `prepareVisibleContext`. The existing uploaded-document sidebar owns the date form, preparation button, status, and summary while hover/pin remains owned by the current passage selection code.
+
+- [ ] **Step 1: Write failing pure tests proving page images feed mask discovery, an auto mask overlapping the manual target is deduplicated, covered embedded text never reaches the example, and OCR/mask/length failures return stable safe codes.**
+- [ ] **Step 2: Write failing API/persistence tests for missing date, same-revision reuse, revision-bound summary, persisted payload with no hidden-answer fields, correction/date invalidation, deleted passage/document, and no retrieval/model call boundary.**
+- [ ] **Step 3: Run the focused backend tests and verify the new preparation interfaces are missing.**
+- [ ] **Step 4: Implement rendering/preparation, migration, repository invalidation, route, and safe response contract; update Task 11's future analysis migration number to `0004_analysis_jobs.py`.**
+- [ ] **Step 5: Write and run failing frontend transport/component tests for the manual-visible-date request, Prepare visible context button, in-progress state, passage-linked ready summary, stable error copy, cancellation on replacement, and absence of prediction text over `.pdf-page-shell`.**
+- [ ] **Step 6: Implement the typed client and existing-design sidebar controls without adding a transcript, fake prediction, retrieval claim, or PDF overlay text.**
+- [ ] **Step 7: Run focused and full backend/frontend tests, lint/format, typecheck, build, both Compose configs, migrations, and browser QA using a real generated PDF.**
+- [ ] **Step 8: Update checklist/docs, commit with `feat: expose visible context checkpoint`, and push.**
+
 ### Task 6: Frozen corpus snapshot, exclusions, preflight, and deterministic chunks
 
 **Files:**
@@ -346,7 +374,7 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 **Files:**
 - Create: `backend/src/redacted_backend/jobs/messages.py`, `orchestrator.py`, `tasks.py`, `events.py`
 - Create: `backend/src/redacted_backend/api/analysis.py`, `events.py`
-- Create: `backend/alembic/versions/0003_analysis_jobs.py`
+- Create: `backend/alembic/versions/0004_analysis_jobs.py`
 - Create: `backend/tests/jobs/test_orchestrator.py`, `test_events.py`, `backend/tests/api/test_analysis.py`
 - Create: `src/services/httpPredictionService.ts`, `src/services/httpPredictionService.test.ts`
 - Create: `src/hooks/usePredictionStream.ts`, `src/hooks/usePredictionStream.test.tsx`
