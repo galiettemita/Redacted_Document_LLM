@@ -414,6 +414,11 @@ input:focus-visible {
   background: var(--soft);
 }
 
+.marking-toolbar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 .workspace-grid {
   flex: 1;
   min-height: 0;

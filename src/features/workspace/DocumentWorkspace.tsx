@@ -1,9 +1,15 @@
-import { useEffect, useMemo, useReducer, useRef } from 'react'
-import { MODEL_NAME } from '../../config'
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { SAMPLE_PASSAGES, SAMPLE_PREDICTIONS } from '../../data/sampleDocument'
+import type { BackendDocumentState } from '../../hooks/useBackendDocument'
 import { usePredictionSimulation } from '../../hooks/usePredictionSimulation'
+import {
+  BackendApiError,
+  backendApi as defaultBackendApi,
+  type BackendApi,
+  type BackendPassageRecord,
+} from '../../services/backendApi'
 import { createMockPredictionService } from '../../services/mockPredictionService'
-import type { DocumentDescriptor, Passage, PassageRect, Prediction } from '../../types'
+import type { DocumentDescriptor, Passage, PassageRect } from '../../types'
 import { PredictionSidebar } from '../predictions/PredictionSidebar'
 import { PdfViewer } from '../viewer/PdfViewer'
 import { getEffectivePassageId } from './selectionState'
@@ -13,13 +19,24 @@ interface DocumentWorkspaceProps {
   document: DocumentDescriptor
   onReplace: () => void
   onViewSample: () => void
+  backendDocument?: BackendDocumentState
+  backendApi?: BackendApi
 }
 
-const UPLOADED_SAMPLE_TEXT = 'This marked area uses a sample prediction to demonstrate how a future analysis could connect a passage on the page with readable predicted text. No part of this PDF was analyzed.'
+type PassageSaveStatus = 'idle' | 'saving' | 'saved' | 'failed'
 
-export function DocumentWorkspace({ document, onReplace, onViewSample }: DocumentWorkspaceProps) {
+export function DocumentWorkspace({
+  document,
+  onReplace,
+  onViewSample,
+  backendDocument,
+  backendApi = defaultBackendApi,
+}: DocumentWorkspaceProps) {
   const [state, dispatch] = useReducer(workspaceReducer, initialWorkspaceState)
+  const [passageSaveStatus, setPassageSaveStatus] = useState<PassageSaveStatus>('idle')
+  const [passageError, setPassageError] = useState<string | null>(null)
   const passageTargets = useRef(new Map<string, HTMLElement>())
+  const passageRequest = useRef<AbortController | null>(null)
   const sampleService = useMemo(() => createMockPredictionService({
     predictionsByDocument: { [document.id]: document.mode === 'sample' ? SAMPLE_PREDICTIONS : [] },
     delayMs: 650,
@@ -28,7 +45,13 @@ export function DocumentWorkspace({ document, onReplace, onViewSample }: Documen
 
   useEffect(() => {
     dispatch({ type: 'reset' })
+    setPassageSaveStatus('idle')
+    setPassageError(null)
+    passageRequest.current?.abort()
+    passageRequest.current = null
   }, [document.id])
+
+  useEffect(() => () => passageRequest.current?.abort(), [])
 
   useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {
@@ -46,27 +69,61 @@ export function DocumentWorkspace({ document, onReplace, onViewSample }: Documen
   }, [state.page, state.pinnedId])
 
   const uploadedPassages = state.markedPassage ? [state.markedPassage] : []
-  const uploadedPredictions: Prediction[] = state.markedPassage ? [{
-    passageId: state.markedPassage.id,
-    page: state.markedPassage.page,
-    model: MODEL_NAME,
-    text: UPLOADED_SAMPLE_TEXT,
-  }] : []
   const passages = document.mode === 'sample' ? SAMPLE_PASSAGES : uploadedPassages
-  const predictions = document.mode === 'sample' ? simulation.predictions : uploadedPredictions
+  const predictions = document.mode === 'sample' ? simulation.predictions : []
   const phase = document.mode === 'sample'
     ? simulation.phase
-    : (uploadedPredictions.length ? 'complete' as const : 'idle' as const)
+    : 'idle' as const
   const activePassageId = getEffectivePassageId(state.hoveredId, state.pinnedId)
+  const backendReady = document.mode === 'uploaded'
+    && backendDocument?.status === 'ready'
+    && Boolean(document.backendDocumentId)
+  const markingUnavailable = !backendReady || passageSaveStatus === 'saving'
 
-  function handleMarkPassage(page: number, rect: PassageRect) {
+  async function handleMarkPassage(page: number, rect: PassageRect) {
+    if (!backendReady || !document.backendDocumentId) return
+    passageRequest.current?.abort()
+    const controller = new AbortController()
+    passageRequest.current = controller
+    const existingPassage = state.markedPassage
     const passage: Passage = {
-      id: 'user-passage-1',
+      id: existingPassage?.id ?? `pending-${createIdempotencyKey()}`,
       label: 'Passage 1',
       page,
       rects: [rect],
     }
     dispatch({ type: 'mark-passage', passage })
+    setPassageSaveStatus('saving')
+    setPassageError(null)
+
+    try {
+      let saved: BackendPassageRecord
+      if (existingPassage && !existingPassage.id.startsWith('pending-')) {
+        saved = await backendApi.updatePassage(
+          existingPassage.id,
+          { page, rects: [rect] },
+          { signal: controller.signal },
+        )
+      } else {
+        saved = await backendApi.createPassage(
+          document.backendDocumentId,
+          { label: passage.label, page, rects: [rect] },
+          { signal: controller.signal, idempotencyKey: createIdempotencyKey() },
+        )
+      }
+      dispatch({ type: 'mark-passage', passage: toPassage(saved) })
+      setPassageSaveStatus('saved')
+    } catch (error) {
+      if (isAbortError(error)) return
+      setPassageSaveStatus('failed')
+      setPassageError(
+        error instanceof BackendApiError || error instanceof Error
+          ? error.message
+          : 'The passage could not be saved.',
+      )
+    } finally {
+      if (passageRequest.current === controller) passageRequest.current = null
+    }
   }
 
   function handleSelectPassage(passageId: string) {
@@ -88,11 +145,7 @@ export function DocumentWorkspace({ document, onReplace, onViewSample }: Documen
           className="secondary-button"
           type="button"
           aria-label="Replace document"
-          onClick={() => {
-            dispatch({ type: 'reset' })
-            simulation.reset()
-            onReplace()
-          }}
+          onClick={onReplace}
         >
           Replace document
         </button>
@@ -121,12 +174,14 @@ export function DocumentWorkspace({ document, onReplace, onViewSample }: Documen
           {document.mode === 'uploaded' ? (
             <div className="marking-toolbar">
               <p>
-                <strong>{state.markingEnabled ? 'Draw over one passage' : 'Interaction preview'}</strong>
-                {state.markingEnabled
-                  ? ' Drag a rectangle over the area you want to mark.'
-                  : ' Mark one area to see how a future prediction could connect to it.'}
+                <strong>{markingToolbarTitle(backendDocument, state.markingEnabled, passageSaveStatus)}</strong>
+                {markingToolbarMessage(backendDocument, state.markingEnabled, passageSaveStatus)}
               </p>
-              <button type="button" onClick={() => dispatch({ type: 'start-marking' })}>
+              <button
+                type="button"
+                disabled={markingUnavailable}
+                onClick={() => dispatch({ type: 'start-marking' })}
+              >
                 {state.markedPassage ? 'Mark another area' : 'Mark a passage'}
               </button>
             </div>
@@ -155,21 +210,22 @@ export function DocumentWorkspace({ document, onReplace, onViewSample }: Documen
             passages={passages}
             predictions={predictions}
             phase={phase}
-            error={simulation.error}
+            error={document.mode === 'sample'
+              ? simulation.error
+              : passageError ?? backendDocumentError(backendDocument)}
             activePassageId={activePassageId}
             onSelectPassage={handleSelectPassage}
             onDismissSelection={() => dispatch({ type: 'dismiss' })}
+            missingPredictionMessage={document.mode === 'uploaded'
+              ? passageSaveStatus === 'saving'
+                ? 'Saving this passage to the backend…'
+                : 'No prediction has been requested. Retrieval and model prediction are not connected yet.'
+              : undefined}
           >
             {document.mode === 'uploaded' ? (
               <div className="uploaded-document-note">
-                {!state.markedPassage ? (
-                  <>
-                    <h3>This PDF is displayed locally</h3>
-                    <p>Automatic passage detection and predictions aren’t connected yet. Mark one area to preview the interaction, or explore the complete fictional sample.</p>
-                  </>
-                ) : (
-                  <p>Your marked area is only an interaction preview. Explore the fictional sample for the complete automatic experience.</p>
-                )}
+                <h3>{backendNoteTitle(backendDocument, passageSaveStatus)}</h3>
+                <p>{backendNoteMessage(backendDocument, passageSaveStatus)}</p>
                 <button className="text-button" type="button" onClick={onViewSample}>View interactive sample</button>
               </div>
             ) : null}
@@ -178,4 +234,98 @@ export function DocumentWorkspace({ document, onReplace, onViewSample }: Documen
       </div>
     </main>
   )
+}
+
+function toPassage(record: BackendPassageRecord): Passage {
+  return {
+    id: record.id,
+    label: record.label,
+    page: record.page_number,
+    rects: record.rects,
+  }
+}
+
+function createIdempotencyKey(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID()
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function isAbortError(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'name' in error
+    && error.name === 'AbortError'
+}
+
+function markingToolbarTitle(
+  backendDocument: BackendDocumentState | undefined,
+  markingEnabled: boolean,
+  passageSaveStatus: PassageSaveStatus,
+): string {
+  if (backendDocument?.status === 'uploading') return 'Uploading PDF'
+  if (backendDocument?.status === 'deleting') return 'Removing PDF'
+  if (backendDocument?.status === 'unavailable') return 'Backend unavailable'
+  if (backendDocument?.status === 'failed') return 'Upload not saved'
+  if (passageSaveStatus === 'saving') return 'Saving passage'
+  return markingEnabled ? 'Draw over one passage' : 'Mark a real passage'
+}
+
+function markingToolbarMessage(
+  backendDocument: BackendDocumentState | undefined,
+  markingEnabled: boolean,
+  passageSaveStatus: PassageSaveStatus,
+): string {
+  if (backendDocument?.status === 'uploading') {
+    return ' Uploading to the loopback-only local backend. Marking becomes available when persistence finishes.'
+  }
+  if (backendDocument?.status === 'unavailable') {
+    return ' The local PDF remains visible, but passage persistence needs the local backend.'
+  }
+  if (backendDocument?.status === 'failed') {
+    return ` ${backendDocument.error ?? 'The PDF could not be persisted.'}`
+  }
+  if (passageSaveStatus === 'saving') return ' Keeping this rectangle linked to its stable backend passage.'
+  return markingEnabled
+    ? ' Drag a rectangle over the area you want to save.'
+    : ' Mark one area to save its normalized coordinates under a stable passage ID.'
+}
+
+function backendNoteTitle(
+  backendDocument: BackendDocumentState | undefined,
+  passageSaveStatus: PassageSaveStatus,
+): string {
+  if (backendDocument?.status === 'uploading') return 'Backend upload in progress'
+  if (backendDocument?.status === 'unavailable') return 'Local backend unavailable'
+  if (backendDocument?.status === 'failed') return 'PDF upload failed'
+  if (passageSaveStatus === 'saving') return 'Saving Passage 1'
+  if (passageSaveStatus === 'saved') return 'Passage 1 is saved'
+  if (passageSaveStatus === 'failed') return 'Passage save failed'
+  return 'PDF upload complete'
+}
+
+function backendNoteMessage(
+  backendDocument: BackendDocumentState | undefined,
+  passageSaveStatus: PassageSaveStatus,
+): string {
+  if (backendDocument?.status === 'uploading') {
+    return 'Uploading to the loopback-only local backend while the browser displays its local copy.'
+  }
+  if (backendDocument?.status === 'unavailable') {
+    return 'The PDF is displayed locally, but the backend copy and passage coordinates have not been saved.'
+  }
+  if (backendDocument?.status === 'failed') {
+    return backendDocument.error ?? 'The backend rejected this PDF.'
+  }
+  if (passageSaveStatus === 'saved') {
+    return 'Passage 1 is saved. The visible-only extraction engine is installed; automatic processing, retrieval and model prediction are not connected in this screen yet.'
+  }
+  if (passageSaveStatus === 'failed') {
+    return 'The rectangle remains visible locally, but it was not saved. Try marking the passage again.'
+  }
+  return 'The PDF is stored temporarily by the local backend. You can save one passage now; automatic retrieval and model prediction are not connected yet.'
+}
+
+function backendDocumentError(backendDocument: BackendDocumentState | undefined): string | null {
+  if (backendDocument?.status !== 'failed' && backendDocument?.status !== 'unavailable') return null
+  return backendDocument.error ?? 'The local backend is unavailable.'
 }

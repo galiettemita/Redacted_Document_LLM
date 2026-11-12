@@ -4,9 +4,15 @@ interface SelectedPassageProps {
   passage: Passage | null
   prediction: Prediction | null
   onDismiss: () => void
+  missingPredictionMessage?: string
 }
 
-export function SelectedPassage({ passage, prediction, onDismiss }: SelectedPassageProps) {
+export function SelectedPassage({
+  passage,
+  prediction,
+  onDismiss,
+  missingPredictionMessage = 'Prediction is still processing…',
+}: SelectedPassageProps) {
   return (
     <section className="selected-passage" aria-labelledby="selected-passage-heading">
       <div className="selected-heading-row">
@@ -30,7 +36,7 @@ export function SelectedPassage({ passage, prediction, onDismiss }: SelectedPass
               <p className="simulated-label">Simulated prediction</p>
             </>
           ) : (
-            <p className="selected-empty">Prediction is still processing…</p>
+            <p className="selected-empty">{missingPredictionMessage}</p>
           )}
         </div>
       ) : (

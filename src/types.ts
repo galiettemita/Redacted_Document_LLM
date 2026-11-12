@@ -28,6 +28,7 @@ export interface DocumentDescriptor {
   mode: DocumentMode
   pageCount?: number
   label?: string
+  backendDocumentId?: string
 }
 
 export type PredictionPhase = 'idle' | 'predicting' | 'partial' | 'complete' | 'empty' | 'failed'

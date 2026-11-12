@@ -200,14 +200,14 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - Produces: `useBackendDocument(file: File | null) -> BackendDocumentState` with `uploading | ready | unavailable | failed | deleting`.
 - `DocumentDescriptor` gains optional `backendDocumentId`; local object URL remains `source`.
 
-- [ ] **Step 1: Write failing transport tests asserting multipart upload shape, normalized passage rectangles, typed error mapping, abort behavior, and deletion request.**
-- [ ] **Step 2: Write failing component tests asserting the PDF workspace opens immediately while backend upload is pending, uploaded copy no longer says `stays on your device`, a mark calls the backend, and no fake prediction appears after marking.**
-- [ ] **Step 3: Run the focused Vitest files; expect failures against the current synchronous/local-only flow.**
-- [ ] **Step 4: Implement the API client, hook, Vite `/v1` proxy, immediate local viewer plus background backend upload, real passage creation, honest readiness/error copy, and replacement cleanup.**
-- [ ] **Step 5: Keep the fictional sample explicitly simulated for now, but remove `UPLOADED_SAMPLE_TEXT` and every uploaded-document production use of `MODEL_NAME`.**
-- [ ] **Step 6: Run `npm test -- --run`, `npm run typecheck`, and `npm run build`; expect all existing and new tests PASS.**
-- [ ] **Step 7: Run browser QA for choose/drop, immediate rendering, backend pending/failed/ready, marking, hover/pin, replacement, and mobile view switching.**
-- [ ] **Step 8: Update the checklist, commit with `feat: connect PDF uploads to backend`, and push.**
+- [x] **Step 1: Write failing transport tests asserting multipart upload shape, normalized passage rectangles, typed error mapping, abort behavior, and deletion request.**
+- [x] **Step 2: Write failing component tests asserting the PDF workspace opens immediately while backend upload is pending, uploaded copy no longer says `stays on your device`, a mark calls the backend, and no fake prediction appears after marking.**
+- [x] **Step 3: Run the focused Vitest files; expect failures against the current synchronous/local-only flow.**
+- [x] **Step 4: Implement the API client, hook, Vite `/v1` proxy, immediate local viewer plus background backend upload, real passage creation, honest readiness/error copy, and replacement cleanup.**
+- [x] **Step 5: Keep the fictional sample explicitly simulated for now, but remove `UPLOADED_SAMPLE_TEXT` and every uploaded-document production use of `MODEL_NAME`.**
+- [x] **Step 6: Run `npm test -- --run`, `npm run typecheck`, and `npm run build`; expect all existing and new tests PASS.**
+- [x] **Step 7: Run browser QA for choose/drop, immediate rendering, backend pending/failed/ready, marking, hover/pin, replacement, and mobile view switching.**
+- [x] **Step 8: Update the checklist, commit with `feat: connect PDF uploads to backend`, and push.**
 
 ### Task 6: Frozen corpus snapshot, exclusions, preflight, and deterministic chunks
 

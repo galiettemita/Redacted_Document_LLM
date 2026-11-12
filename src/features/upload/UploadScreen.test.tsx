@@ -26,6 +26,8 @@ describe('UploadScreen', () => {
 
     expect(screen.queryByText('Checking PDF…')).not.toBeInTheDocument()
     await waitFor(() => expect(onFileAccepted).toHaveBeenCalledWith(file))
+    expect(screen.queryByText(/stays on your device/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/stored temporarily by this local app/i)).toBeInTheDocument()
   })
 
   it('recovers the button when validation fails unexpectedly', async () => {

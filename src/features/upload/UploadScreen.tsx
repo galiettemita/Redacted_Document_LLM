@@ -60,7 +60,7 @@ export function UploadScreen({ onFileAccepted, validate = validatePdfFile }: Upl
             <span />
           </div>
           <p className="drop-title">{isDragging ? 'Release to open this PDF' : 'Drop your redacted document here'}</p>
-          <p className="drop-support">PDF files only · stays on your device</p>
+          <p className="drop-support">PDF files only · stored temporarily by this local app</p>
           <input
             ref={inputRef}
             className="visually-hidden"

@@ -11,6 +11,7 @@ interface PredictionSidebarProps {
   onSelectPassage: (passageId: string) => void
   onDismissSelection: () => void
   children?: React.ReactNode
+  missingPredictionMessage?: string
 }
 
 export function PredictionSidebar({
@@ -22,6 +23,7 @@ export function PredictionSidebar({
   onSelectPassage,
   onDismissSelection,
   children,
+  missingPredictionMessage,
 }: PredictionSidebarProps) {
   const activePassage = passages.find((passage) => passage.id === activePassageId) ?? null
   const activePrediction = predictions.find((prediction) => prediction.passageId === activePassageId) ?? null
@@ -34,6 +36,7 @@ export function PredictionSidebar({
           passage={activePassage}
           prediction={activePrediction}
           onDismiss={onDismissSelection}
+          missingPredictionMessage={missingPredictionMessage}
         />
 
         <div className="prediction-list-heading">
