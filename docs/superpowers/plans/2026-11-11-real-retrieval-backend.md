@@ -246,9 +246,9 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - Produces: `Bm25Index.build(chunks, manifest)` and `Bm25Index.search(query, limit=300) -> list[RankedChunk]`.
 - Readiness requires an index manifest matching the frozen corpus/scientific hashes.
 
-- [ ] **Step 1: Write failing tests for stop-word removal without stemming names, exact 300-result limit, deterministic tie order, incompatible manifest rejection, and context-query result provenance.**
-- [ ] **Step 2: Run focused tests; expect missing retrieval code.**
-- [ ] **Step 3: Add a pinned OpenSearch service/profile and implement index settings with standard Unicode tokenizer, vendored lowercase English stop words, `k1=1.2`, and `b=0.75`.**
+- [x] **Step 1: Write failing tests for stop-word removal without stemming names, exact 300-result limit, deterministic tie order, incompatible manifest rejection, and context-query result provenance.**
+- [x] **Step 2: Run focused tests; expect missing retrieval code.**
+- [x] **Step 3: Add a pinned OpenSearch service/profile and implement index settings with standard Unicode tokenizer, vendored lowercase English stop words, `k1=1.2`, and `b=0.75`.**
 - [ ] **Step 4: Build the real index from the locked corpus on approved storage, record counts/checksums/timing, and run one visible context query without a model call.**
 - [ ] **Step 5: Run focused tests, readiness, and deterministic sample rebuild checks; expect PASS.**
 - [ ] **Step 6: Update the checklist, commit with `feat: add corpus BM25 retrieval`, and push.**

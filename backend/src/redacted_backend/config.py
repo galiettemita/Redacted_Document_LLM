@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     database_url: str | None = None
     redis_url: str | None = None
     corpus_manifest_path: Path | None = None
+    bm25_manifest_path: Path | None = None
+    opensearch_url: str | None = None
     openai_api_key: SecretStr | None = None
     document_storage_root: Path = Path("/var/lib/redacted/documents")
     document_retention_hours: int = 24

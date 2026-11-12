@@ -44,6 +44,8 @@ services:
       REDACTED_DATABASE_URL: postgresql://redacted:redacted-local@postgres:5432/redacted
       REDACTED_REDIS_URL: redis://redis:6379/0
       REDACTED_CORPUS_MANIFEST_PATH: /artifacts/corpus/manifest.json
+      REDACTED_BM25_MANIFEST_PATH: /artifacts/corpus/bm25-manifest.json
+      REDACTED_OPENSEARCH_URL: http://opensearch:9200
     healthcheck:
       test:
         - CMD
@@ -59,6 +61,32 @@ services:
     volumes:
       - backend-data:/var/lib/redacted
       - corpus-artifacts:/artifacts
+
+  opensearch:
+    image: opensearchproject/opensearch:3.9.0
+    profiles: ["retrieval"]
+    environment:
+      discovery.type: single-node
+      bootstrap.memory_lock: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_JAVA_OPTS: -Xms4g -Xmx4g
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:9200/_cluster/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    ports:
+      - "127.0.0.1:59200:9200"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - ${REDACTED_CORPUS_ROOT:-./var/corpus}/opensearch:/usr/share/opensearch/data
 
 volumes:
   backend-data:

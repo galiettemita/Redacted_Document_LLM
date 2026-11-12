@@ -5,6 +5,7 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
+from redacted_backend.corpus.build_bm25 import build_bm25_from_files
 from redacted_backend.corpus.exclusions import load_exclusion_manifest
 from redacted_backend.corpus.manifest import build_chunk_file
 from redacted_backend.corpus.preflight import run_preflight
@@ -39,6 +40,15 @@ def run(argv: Sequence[str] | None = None) -> int:
         _write_json(Path(args.manifest), manifest.model_dump(mode="json"))
         print(json.dumps(manifest.model_dump(mode="json"), sort_keys=True, indent=2))
         return 0
+    if args.command == "build-bm25":
+        report = build_bm25_from_files(
+            Path(args.chunks),
+            Path(args.corpus_manifest),
+            Path(args.output_manifest),
+            opensearch_url=args.opensearch_url,
+        )
+        print(json.dumps(report.model_dump(mode="json"), sort_keys=True, indent=2))
+        return 0
     parser.error("A corpus command is required")
     return 2
 
@@ -64,6 +74,12 @@ def _parser() -> argparse.ArgumentParser:
     chunks.add_argument("--exclusions", required=True)
     chunks.add_argument("--output", required=True)
     chunks.add_argument("--manifest", required=True)
+
+    bm25 = subparsers.add_parser("build-bm25")
+    bm25.add_argument("--chunks", required=True)
+    bm25.add_argument("--corpus-manifest", required=True)
+    bm25.add_argument("--output-manifest", required=True)
+    bm25.add_argument("--opensearch-url", default="http://127.0.0.1:59200")
     return parser
 
 
