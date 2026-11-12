@@ -177,13 +177,13 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - Produces: `estimate_length_cue(target_rects, nearby_words) -> LengthEstimate` using the four paper buckets.
 - Produces: `build_visible_example(document, passages, target_id) -> VisibleExample`; its Pydantic schema forbids unknown fields and has no hidden-answer names.
 
-- [ ] **Step 1: Write failing tests for embedded words intersecting a black box, white boxes, multi-line targets, columns, repeated headers, line-break hyphenation, uncertain mask coverage, missing visible date, and all four length buckets.**
-- [ ] **Step 2: Add a schema test that recursively inspects `VisibleExample.model_json_schema()` and asserts none of `answer`, `reveal`, `ground_truth`, or `later_release` appears.**
-- [ ] **Step 3: Run `cd backend && uv run pytest tests/documents -v`; expect missing extraction modules. Unit tests inject OCR output and do not require a host Tesseract install.**
-- [ ] **Step 4: Add Tesseract and OpenCV to the backend image and implement embedded-text-first extraction, OCR fallback, early mask discovery, XY-cut ordering, target/other markers, visible date handling, and geometry-derived cue.**
-- [ ] **Step 5: Render every PDF fixture to PNG and visually verify mask alignment, reading order, and no covered text in the serialized transcript.**
-- [ ] **Step 6: Run `cd backend && uv run pytest tests/documents -v` for unit tests and `docker compose run --rm backend uv run pytest tests/documents/test_ocr_integration.py -v` for real Tesseract; expect PASS.**
-- [ ] **Step 7: Update the checklist, commit with `feat: build visible-only passage examples`, and push.**
+- [x] **Step 1: Write failing tests for embedded words intersecting a black box, white boxes, multi-line targets, columns, repeated headers, line-break hyphenation, uncertain mask coverage, missing visible date, and all four length buckets.**
+- [x] **Step 2: Add a schema test that recursively inspects `VisibleExample.model_json_schema()` and asserts none of `answer`, `reveal`, `ground_truth`, or `later_release` appears.**
+- [x] **Step 3: Run `cd backend && uv run pytest tests/documents -v`; expect missing extraction modules. Unit tests inject OCR output and do not require a host Tesseract install.**
+- [x] **Step 4: Add Tesseract and OpenCV to the backend image and implement embedded-text-first extraction, OCR fallback, early mask discovery, XY-cut ordering, target/other markers, visible date handling, and geometry-derived cue.**
+- [x] **Step 5: Render every PDF fixture to PNG and visually verify mask alignment, reading order, and no covered text in the serialized transcript.**
+- [x] **Step 6: Run `cd backend && uv run pytest tests/documents -v` for unit tests and `docker compose run --rm backend uv run pytest tests/documents/test_ocr_integration.py -v` for real Tesseract; expect PASS.**
+- [x] **Step 7: Update the checklist, commit with `feat: build visible-only passage examples`, and push.**
 
 ### Task 5: Connect real upload and manual passage marking to the frontend
 

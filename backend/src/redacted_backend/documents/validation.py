@@ -125,10 +125,10 @@ def _inspection_process(
     try:
         connection.send(("ok", inspector(path, max_decompressed_bytes)))
     except _InspectionError as error:
-        connection.send(
-            ("error", {"code": error.code, "message": error.message})
-        )
-    except Exception:
+        connection.send(("error", {"code": error.code, "message": error.message}))
+    # This child process is the isolation boundary for an untrusted parser. Any
+    # unexpected parser/library failure must become a generic validation error.
+    except Exception:  # noqa: BLE001
         connection.send(
             (
                 "error",
@@ -143,7 +143,9 @@ def _inspect_pdf(path: Path, max_decompressed_bytes: int) -> dict[str, int]:
     try:
         document = pymupdf.open(path)
     except Exception as error:
-        raise _InspectionError("malformed_pdf", "PDF parser rejected the file") from error
+        raise _InspectionError(
+            "malformed_pdf", "PDF parser rejected the file"
+        ) from error
     try:
         if document.needs_pass:
             raise _InspectionError("encrypted_pdf", "Encrypted PDFs are not accepted")
@@ -165,6 +167,8 @@ def _inspect_pdf(path: Path, max_decompressed_bytes: int) -> dict[str, int]:
     except _InspectionError:
         raise
     except Exception as error:
-        raise _InspectionError("malformed_pdf", "PDF parser rejected the file") from error
+        raise _InspectionError(
+            "malformed_pdf", "PDF parser rejected the file"
+        ) from error
     finally:
         document.close()

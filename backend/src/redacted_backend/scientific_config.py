@@ -16,6 +16,10 @@ class ScientificConfig(BaseModel):
     rrf_k: int = 60
     top_documents: int = 100
     chunks_per_document: int = 2
+    pdf_render_dpi: int = 144
+    visible_transcript_version: str = "visible-transcript-v1"
+    mask_detection_version: str = "mask-discovery-v1"
+    length_cue_version: str = "visible-geometry-v1"
     embedding_model: str = "BAAI/bge-base-en-v1.5"
     model: Literal["gpt-6-astra"] = "gpt-6-astra"
     reasoning_effort: Literal["medium"] = "medium"

@@ -40,7 +40,9 @@ class LocalDocumentStore:
                 os.fsync(destination.fileno())
             actual_sha256 = digest.hexdigest()
             if actual_sha256 != expected_sha256:
-                raise StorageIntegrityError("stream SHA-256 did not match expected_sha256")
+                raise StorageIntegrityError(
+                    "stream SHA-256 did not match expected_sha256"
+                )
 
             storage_key = self.key_for(expected_sha256)
             destination_path = self.resolve(storage_key)

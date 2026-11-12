@@ -5,7 +5,7 @@ import re
 import unicodedata
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import BinaryIO
+from typing import Annotated, BinaryIO
 from uuid import UUID
 
 from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
@@ -35,12 +35,15 @@ def create_documents_router(
         response_model=DocumentRecord,
         status_code=status.HTTP_201_CREATED,
     )
-    def upload_document(file: UploadFile = File(...)) -> DocumentRecord:
+    def upload_document(file: Annotated[UploadFile, File()]) -> DocumentRecord:
         ready_database, ready_store = _require_services(database, document_store)
         if file.content_type not in {"application/pdf", "application/x-pdf"}:
             raise HTTPException(
                 status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                detail={"code": "unsupported_media_type", "message": "Select a PDF file"},
+                detail={
+                    "code": "unsupported_media_type",
+                    "message": "Select a PDF file",
+                },
             )
         sha256 = _hash_stream(file.file, settings.pdf_max_file_bytes)
         file.file.seek(0)
@@ -52,7 +55,10 @@ def create_documents_router(
             )
         except PdfValidationError as error:
             with ready_database.session_factory() as session:
-                if DocumentRepository(session).live_reference_count(stored.storage_key) == 0:
+                if (
+                    DocumentRepository(session).live_reference_count(stored.storage_key)
+                    == 0
+                ):
                     ready_store.delete(stored.storage_key)
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -73,7 +79,10 @@ def create_documents_router(
             return record
         except Exception:
             with ready_database.session_factory() as session:
-                if DocumentRepository(session).live_reference_count(stored.storage_key) == 0:
+                if (
+                    DocumentRepository(session).live_reference_count(stored.storage_key)
+                    == 0
+                ):
                     ready_store.delete(stored.storage_key)
             raise
 
@@ -94,12 +103,9 @@ def create_documents_router(
                 visible_date=update.visible_date,
                 provenance=update.date_provenance,
             )
-            if (
-                existing is not None
-                and (
-                    existing.visible_date != update.visible_date
-                    or existing.date_provenance != update.date_provenance
-                )
+            if existing is not None and (
+                existing.visible_date != update.visible_date
+                or existing.date_provenance != update.date_provenance
             ):
                 PassageRepository(session).invalidate_document_date(document_id)
         if record is None:
@@ -133,7 +139,10 @@ def _require_services(
     if database is None or document_store is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"code": "backend_not_configured", "message": "Document storage is not configured"},
+            detail={
+                "code": "backend_not_configured",
+                "message": "Document storage is not configured",
+            },
         )
     return database, document_store
 

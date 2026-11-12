@@ -47,8 +47,7 @@ def passage_body(*, y: float = 0.2, rects: list[dict] | None = None) -> dict:
     return {
         "label": "Passage 1",
         "page_number": 1,
-        "rects": rects
-        or [{"x": 0.1, "y": y, "width": 0.4, "height": 0.05}],
+        "rects": rects or [{"x": 0.1, "y": y, "width": 0.4, "height": 0.05}],
     }
 
 
@@ -120,11 +119,7 @@ def test_patch_keeps_the_passage_uuid_and_increments_revision(tmp_path: Path) ->
             app,
             "PATCH",
             f"/v1/passages/{original['id']}",
-            json={
-                "rects": [
-                    {"x": 0.15, "y": 0.25, "width": 0.35, "height": 0.06}
-                ]
-            },
+            json={"rects": [{"x": 0.15, "y": 0.25, "width": 0.35, "height": 0.06}]},
         )
     )
 
@@ -216,9 +211,7 @@ def test_delete_tombstones_the_passage_and_increments_revision(tmp_path: Path) -
     app, document_id = create_test_app_and_document(tmp_path)
     original = create_passage(app, document_id, y=0.2, key="create-delete")
 
-    response = asyncio.run(
-        request(app, "DELETE", f"/v1/passages/{original['id']}")
-    )
+    response = asyncio.run(request(app, "DELETE", f"/v1/passages/{original['id']}"))
 
     assert response.status_code == 200
     deleted = response.json()
@@ -231,9 +224,7 @@ def test_deleting_a_document_tombstones_its_live_passages(tmp_path: Path) -> Non
     app, document_id = create_test_app_and_document(tmp_path)
     original = create_passage(app, document_id, y=0.2, key="create-document-delete")
 
-    response = asyncio.run(
-        request(app, "DELETE", f"/v1/documents/{document_id}")
-    )
+    response = asyncio.run(request(app, "DELETE", f"/v1/documents/{document_id}"))
 
     assert response.status_code == 204
     with app.state.database.session_factory() as session:

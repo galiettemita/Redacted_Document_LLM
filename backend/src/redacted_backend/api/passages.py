@@ -43,7 +43,7 @@ class PatchPassageRequest(BaseModel):
     )
 
     @model_validator(mode="after")
-    def contains_a_change(self) -> "PatchPassageRequest":
+    def contains_a_change(self) -> PatchPassageRequest:
         if self.label is None and self.page_number is None and self.rects is None:
             raise ValueError("at least one passage field is required")
         return self
@@ -55,7 +55,7 @@ class MergePassagesRequest(BaseModel):
     passage_ids: list[UUID] = Field(min_length=2, max_length=50)
 
     @model_validator(mode="after")
-    def contains_unique_passages(self) -> "MergePassagesRequest":
+    def contains_unique_passages(self) -> MergePassagesRequest:
         if len(set(self.passage_ids)) != len(self.passage_ids):
             raise ValueError("passage_ids must be unique")
         return self

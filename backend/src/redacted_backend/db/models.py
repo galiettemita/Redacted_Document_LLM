@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Date, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func
+from sqlalchemy import (
+    JSON,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from redacted_backend.db.base import Base
@@ -40,9 +50,7 @@ class Document(Base):
 
 class Passage(Base):
     __tablename__ = "passages"
-    __table_args__ = (
-        Index("ix_passages_document_status", "document_id", "status"),
-    )
+    __table_args__ = (Index("ix_passages_document_status", "document_id", "status"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     document_id: Mapped[str] = mapped_column(

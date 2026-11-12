@@ -230,7 +230,9 @@ class PassageRepository:
                 f"page {page_number} exceeds document page count {document.page_count}"
             )
 
-    def _invalidate(self, model: Passage, reason: str, *, deleted: bool = False) -> None:
+    def _invalidate(
+        self, model: Passage, reason: str, *, deleted: bool = False
+    ) -> None:
         previous_revision = model.revision
         model.revision += 1
         model.status = (

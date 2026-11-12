@@ -16,7 +16,7 @@ class Database:
     session_factory: sessionmaker[Session]
 
     @classmethod
-    def connect(cls, database_url: str) -> "Database":
+    def connect(cls, database_url: str) -> Database:
         connect_args: dict[str, object] = {}
         if database_url.startswith("sqlite"):
             connect_args["check_same_thread"] = False

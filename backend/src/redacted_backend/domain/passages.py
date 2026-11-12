@@ -31,7 +31,7 @@ class PassageRect(BaseModel):
     height: float = Field(gt=0, le=1)
 
     @model_validator(mode="after")
-    def fits_on_page(self) -> "PassageRect":
+    def fits_on_page(self) -> PassageRect:
         if self.x + self.width > 1 or self.y + self.height > 1:
             raise ValueError("rectangle must fit inside normalized page bounds")
         return self

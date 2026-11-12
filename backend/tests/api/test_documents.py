@@ -164,9 +164,7 @@ def test_delete_tombstones_the_record_and_removes_unreferenced_bytes(
     stored_path = app.state.document_store.resolve(body["storage_key"])
     assert stored_path.is_file()
 
-    response = asyncio.run(
-        request(app, "DELETE", f"/v1/documents/{body['id']}")
-    )
+    response = asyncio.run(request(app, "DELETE", f"/v1/documents/{body['id']}"))
 
     assert response.status_code == 204
     assert not stored_path.exists()

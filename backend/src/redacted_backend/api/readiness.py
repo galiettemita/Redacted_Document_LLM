@@ -11,11 +11,19 @@ def create_readiness_router(settings: Settings) -> APIRouter:
     def readiness() -> ReadinessResponse:
         database = ComponentReadiness(
             ready=False,
-            detail=("not configured" if settings.database_url is None else "probe not connected"),
+            detail=(
+                "not configured"
+                if settings.database_url is None
+                else "probe not connected"
+            ),
         )
         worker = ComponentReadiness(
             ready=False,
-            detail=("not configured" if settings.redis_url is None else "heartbeat not connected"),
+            detail=(
+                "not configured"
+                if settings.redis_url is None
+                else "heartbeat not connected"
+            ),
         )
         corpus = ComponentReadiness(
             ready=False,
@@ -27,7 +35,11 @@ def create_readiness_router(settings: Settings) -> APIRouter:
         )
         model = ComponentReadiness(
             ready=settings.openai_api_key is not None,
-            detail=("configured" if settings.openai_api_key is not None else "not configured"),
+            detail=(
+                "configured"
+                if settings.openai_api_key is not None
+                else "not configured"
+            ),
         )
         components = (database, worker, corpus, model)
         return ReadinessResponse(
