@@ -23,9 +23,29 @@ export interface BackendDocumentRecord {
   status: 'uploaded' | 'extracting' | 'ready' | 'failed' | 'deleted'
   storage_key: string
   visible_date: string | null
-  date_provenance: 'visible_text' | 'pdf_metadata_corroborated' | 'manual_visible_document' | null
+  date_provenance: 'visible_text' | 'pdf_metadata_corroborated' | null
+  visible_date_evidence: VisibleDateEvidence | null
   created_at: string
   expires_at: string
+}
+
+export interface VisibleDateEvidence {
+  value: string
+  page_number: number
+  line_text: string
+  words: Array<{
+    text: string
+    page_number: number
+    x: number
+    y: number
+    width: number
+    height: number
+    block_id: number
+    line_id: number
+    source: 'embedded' | 'ocr'
+    confidence: number
+  }>
+  parser_version: 'visible-date-v1'
 }
 
 export interface BackendPassageRecord {
@@ -88,11 +108,6 @@ export interface BackendApi {
   getReadiness(signal?: AbortSignal): Promise<BackendReadiness>
   uploadDocument(file: File, signal?: AbortSignal): Promise<BackendDocumentRecord>
   deleteDocument(documentId: string, signal?: AbortSignal): Promise<void>
-  updateDocumentMetadata(
-    documentId: string,
-    visibleDate: string,
-    signal?: AbortSignal,
-  ): Promise<BackendDocumentRecord>
   createPassage(
     documentId: string,
     passage: PassageMutation & { label: string },
@@ -133,22 +148,6 @@ export function createBackendApi(fetchImplementation?: typeof fetch): BackendApi
         fetchRequest,
         `/v1/documents/${encodeURIComponent(documentId)}`,
         { method: 'DELETE', signal },
-      )
-    },
-
-    updateDocumentMetadata(documentId, visibleDate, signal) {
-      return requestJson<BackendDocumentRecord>(
-        fetchRequest,
-        `/v1/documents/${encodeURIComponent(documentId)}/metadata`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            visible_date: visibleDate,
-            date_provenance: 'manual_visible_document',
-          }),
-          signal,
-        },
       )
     },
 

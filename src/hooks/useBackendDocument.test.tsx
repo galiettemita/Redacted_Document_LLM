@@ -12,6 +12,7 @@ const record: BackendDocumentRecord = {
   storage_key: 'sha256/aa/aaaaaaaa',
   visible_date: null,
   date_provenance: null,
+  visible_date_evidence: null,
   created_at: '2026-11-11T12:00:00Z',
   expires_at: '2026-11-12T12:00:00Z',
 }
@@ -21,7 +22,6 @@ function apiWith(overrides: Partial<BackendApi> = {}): BackendApi {
     getReadiness: vi.fn(),
     uploadDocument: vi.fn().mockResolvedValue(record),
     deleteDocument: vi.fn().mockResolvedValue(undefined),
-    updateDocumentMetadata: vi.fn(),
     createPassage: vi.fn(),
     updatePassage: vi.fn(),
     prepareVisibleContext: vi.fn(),

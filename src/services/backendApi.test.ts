@@ -16,6 +16,7 @@ const documentRecord: BackendDocumentRecord = {
   storage_key: 'sha256/aa/aaaaaaaa',
   visible_date: null,
   date_provenance: null,
+  visible_date_evidence: null,
   created_at: '2026-11-11T12:00:00Z',
   expires_at: '2026-11-12T12:00:00Z',
 }
@@ -103,43 +104,18 @@ describe('BackendApi', () => {
     })
   })
 
-  it('saves explicit visible-date provenance and prepares the exact passage', async () => {
-    const datedDocument = {
-      ...documentRecord,
-      visible_date: '1945-05-08',
-      date_provenance: 'manual_visible_document' as const,
-    }
-    const fetchMock = vi.fn<typeof fetch>()
-      .mockResolvedValueOnce(jsonResponse(datedDocument))
-      .mockResolvedValueOnce(jsonResponse(visibleContext))
+  it('prepares the exact passage without sending document date metadata', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(visibleContext))
     const api = createBackendApi(fetchMock)
     const controller = new AbortController()
 
-    await expect(api.updateDocumentMetadata(
-      documentRecord.id,
-      '1945-05-08',
-      controller.signal,
-    )).resolves.toEqual(datedDocument)
     await expect(api.prepareVisibleContext(
       passageRecord.id,
       controller.signal,
     )).resolves.toEqual(visibleContext)
 
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      `/v1/documents/${documentRecord.id}/metadata`,
-      {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          visible_date: '1945-05-08',
-          date_provenance: 'manual_visible_document',
-        }),
-        signal: controller.signal,
-      },
-    )
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(fetchMock).toHaveBeenCalledWith(
       `/v1/passages/${passageRecord.id}:prepare-context`,
       { method: 'POST', signal: controller.signal },
     )

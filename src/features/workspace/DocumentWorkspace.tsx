@@ -25,7 +25,6 @@ interface DocumentWorkspaceProps {
 }
 
 type PassageSaveStatus = 'idle' | 'saving' | 'saved' | 'failed'
-type MetadataSaveStatus = 'idle' | 'saving' | 'saved' | 'failed'
 type ContextPreparationStatus = 'idle' | 'preparing' | 'ready' | 'failed'
 
 export function DocumentWorkspace({
@@ -38,18 +37,11 @@ export function DocumentWorkspace({
   const [state, dispatch] = useReducer(workspaceReducer, initialWorkspaceState)
   const [passageSaveStatus, setPassageSaveStatus] = useState<PassageSaveStatus>('idle')
   const [passageError, setPassageError] = useState<string | null>(null)
-  const [visibleDate, setVisibleDate] = useState(backendDocument?.record?.visible_date ?? '')
-  const [savedVisibleDate, setSavedVisibleDate] = useState(
-    backendDocument?.record?.visible_date ?? '',
-  )
-  const [metadataSaveStatus, setMetadataSaveStatus] = useState<MetadataSaveStatus>('idle')
-  const [metadataError, setMetadataError] = useState<string | null>(null)
   const [contextStatus, setContextStatus] = useState<ContextPreparationStatus>('idle')
   const [contextSummary, setContextSummary] = useState<VisibleContextSummary | null>(null)
   const [contextError, setContextError] = useState<string | null>(null)
   const passageTargets = useRef(new Map<string, HTMLElement>())
   const passageRequest = useRef<AbortController | null>(null)
-  const metadataRequest = useRef<AbortController | null>(null)
   const contextRequest = useRef<AbortController | null>(null)
   const sampleService = useMemo(() => createMockPredictionService({
     predictionsByDocument: { [document.id]: document.mode === 'sample' ? SAMPLE_PREDICTIONS : [] },
@@ -61,33 +53,17 @@ export function DocumentWorkspace({
     dispatch({ type: 'reset' })
     setPassageSaveStatus('idle')
     setPassageError(null)
-    const storedDate = backendDocument?.record?.visible_date ?? ''
-    setVisibleDate(storedDate)
-    setSavedVisibleDate(storedDate)
-    setMetadataSaveStatus(storedDate ? 'saved' : 'idle')
-    setMetadataError(null)
     setContextStatus('idle')
     setContextSummary(null)
     setContextError(null)
     passageRequest.current?.abort()
     passageRequest.current = null
-    metadataRequest.current?.abort()
-    metadataRequest.current = null
     contextRequest.current?.abort()
     contextRequest.current = null
   }, [document.id])
 
-  useEffect(() => {
-    const storedDate = backendDocument?.record?.visible_date
-    if (!storedDate) return
-    setVisibleDate(storedDate)
-    setSavedVisibleDate(storedDate)
-    setMetadataSaveStatus('saved')
-  }, [backendDocument?.record?.visible_date])
-
   useEffect(() => () => {
     passageRequest.current?.abort()
-    metadataRequest.current?.abort()
     contextRequest.current?.abort()
   }, [])
 
@@ -121,12 +97,9 @@ export function DocumentWorkspace({
   const stablePassageId = state.markedPassage?.id.startsWith('pending-')
     ? null
     : state.markedPassage?.id ?? null
-  const dateIsSaved = Boolean(savedVisibleDate) && visibleDate === savedVisibleDate
   const contextPreparationUnavailable = !backendReady
     || !stablePassageId
     || passageSaveStatus !== 'saved'
-    || !dateIsSaved
-    || metadataSaveStatus === 'saving'
     || contextStatus === 'preparing'
 
   async function handleMarkPassage(page: number, rect: PassageRect) {
@@ -177,37 +150,6 @@ export function DocumentWorkspace({
       )
     } finally {
       if (passageRequest.current === controller) passageRequest.current = null
-    }
-  }
-
-  async function handleSaveVisibleDate() {
-    if (!backendReady || !document.backendDocumentId || !visibleDate) return
-    metadataRequest.current?.abort()
-    contextRequest.current?.abort()
-    const controller = new AbortController()
-    metadataRequest.current = controller
-    const dateToSave = visibleDate
-    setMetadataSaveStatus('saving')
-    setMetadataError(null)
-    setContextStatus('idle')
-    setContextSummary(null)
-    setContextError(null)
-
-    try {
-      const updated = await backendApi.updateDocumentMetadata(
-        document.backendDocumentId,
-        dateToSave,
-        controller.signal,
-      )
-      setVisibleDate(updated.visible_date ?? dateToSave)
-      setSavedVisibleDate(updated.visible_date ?? dateToSave)
-      setMetadataSaveStatus('saved')
-    } catch (error) {
-      if (isAbortError(error)) return
-      setMetadataSaveStatus('failed')
-      setMetadataError(errorMessage(error, 'The visible date could not be saved.'))
-    } finally {
-      if (metadataRequest.current === controller) metadataRequest.current = null
     }
   }
 
@@ -327,7 +269,6 @@ export function DocumentWorkspace({
             error={document.mode === 'sample'
               ? simulation.error
               : passageError
-                ?? metadataError
                 ?? contextError
                 ?? backendDocumentError(backendDocument)}
             activePassageId={activePassageId}
@@ -346,43 +287,9 @@ export function DocumentWorkspace({
                 <h3>{backendNoteTitle(backendDocument, passageSaveStatus, contextStatus)}</h3>
                 <p>{backendNoteMessage(backendDocument, passageSaveStatus, contextStatus)}</p>
                 <div className="visible-context-controls">
-                  <label htmlFor="visible-document-date">Document date shown on PDF</label>
-                  <div className="visible-date-row">
-                    <input
-                      id="visible-document-date"
-                      type="date"
-                      value={visibleDate}
-                      disabled={!backendReady || metadataSaveStatus === 'saving'}
-                      onChange={(event) => {
-                        contextRequest.current?.abort()
-                        contextRequest.current = null
-                        setVisibleDate(event.target.value)
-                        setMetadataSaveStatus(
-                          event.target.value === savedVisibleDate && savedVisibleDate
-                            ? 'saved'
-                            : 'idle',
-                        )
-                        setMetadataError(null)
-                        setContextStatus('idle')
-                        setContextSummary(null)
-                        setContextError(null)
-                      }}
-                    />
-                    <button
-                      className="text-button"
-                      type="button"
-                      disabled={!backendReady
-                        || !visibleDate
-                        || metadataSaveStatus === 'saving'
-                        || (metadataSaveStatus === 'saved' && dateIsSaved)}
-                      onClick={() => void handleSaveVisibleDate()}
-                    >
-                      {metadataSaveStatus === 'saving' ? 'Saving date…' : 'Save visible date'}
-                    </button>
-                  </div>
-                  <p className="visible-date-help">
-                    Copy this only from a date you can see on the uploaded document.
-                    {metadataSaveStatus === 'saved' && dateIsSaved ? ' Date saved.' : ''}
+                  <p>
+                    Preparing reads the visible first-page header and stops if its date is
+                    missing, covered, or ambiguous.
                   </p>
                   <button
                     className="prepare-context-button"
@@ -525,12 +432,12 @@ function backendNoteMessage(
     return 'The backend prepared this passage from visible PDF content and geometry only. Retrieval and model prediction are not connected yet.'
   }
   if (passageSaveStatus === 'saved') {
-    return 'Passage 1 is saved. Save a date printed on the PDF, then prepare its visible-only context below. Retrieval and model prediction are not connected yet.'
+    return 'Passage 1 is saved. Prepare its visible-only context below; the backend will detect the date from the PDF. Retrieval and model prediction are not connected yet.'
   }
   if (passageSaveStatus === 'failed') {
     return 'The rectangle remains visible locally, but it was not saved. Try marking the passage again.'
   }
-  return 'The PDF is stored temporarily by the local backend. Save its visible date and one passage to prepare visible-only context. Retrieval and model prediction are not connected yet.'
+  return 'The PDF is stored temporarily by the local backend. Save one passage to prepare visible-only context and detect its visible date. Retrieval and model prediction are not connected yet.'
 }
 
 function backendDocumentError(backendDocument: BackendDocumentState | undefined): string | null {

@@ -51,6 +51,7 @@ describe('document lifecycle', () => {
         storage_key: 'sha256/aa/aaaaaaaa',
         visible_date: null,
         date_provenance: null,
+        visible_date_evidence: null,
         created_at: '2026-11-11T12:00:00Z',
         expires_at: '2026-11-12T12:00:00Z',
       }), { status: 201, headers: { 'Content-Type': 'application/json' } }))

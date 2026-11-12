@@ -41,6 +41,7 @@ const readyBackendDocument: BackendDocumentState = {
     storage_key: 'sha256/aa/aaaaaaaa',
     visible_date: null,
     date_provenance: null,
+    visible_date_evidence: null,
     created_at: '2026-11-11T12:00:00Z',
     expires_at: '2026-11-12T12:00:00Z',
   },
@@ -85,11 +86,6 @@ function apiWithCreate(
     deleteDocument: vi.fn(),
     createPassage,
     updatePassage: vi.fn().mockResolvedValue({ ...savedPassage, revision: 2 }),
-    updateDocumentMetadata: vi.fn().mockResolvedValue({
-      ...readyBackendDocument.record,
-      visible_date: '1945-05-08',
-      date_provenance: 'manual_visible_document',
-    }),
     prepareVisibleContext: vi.fn().mockResolvedValue(preparedContext),
     ...overrides,
   }
@@ -142,16 +138,10 @@ describe('DocumentWorkspace', () => {
     expect(screen.getByRole('button', { name: 'View interactive sample' })).toBeInTheDocument()
   })
 
-  it('saves the visible date and shows the real passage-linked context checkpoint', async () => {
+  it('detects the visible date while preparing the real passage-linked context', async () => {
     vi.useRealTimers()
-    const updateDocumentMetadata = vi.fn().mockResolvedValue({
-      ...readyBackendDocument.record,
-      visible_date: '1945-05-08',
-      date_provenance: 'manual_visible_document',
-    })
     const prepareVisibleContext = vi.fn().mockResolvedValue(preparedContext)
     const api = apiWithCreate(undefined, {
-      updateDocumentMetadata,
       prepareVisibleContext,
     })
     const { container } = render(
@@ -164,15 +154,8 @@ describe('DocumentWorkspace', () => {
       />,
     )
 
-    fireEvent.change(screen.getByLabelText('Document date shown on PDF'), {
-      target: { value: '1945-05-08' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Save visible date' }))
-    await waitFor(() => expect(updateDocumentMetadata).toHaveBeenCalledWith(
-      uploadedDocument.backendDocumentId,
-      '1945-05-08',
-      expect.any(AbortSignal),
-    ))
+    expect(screen.queryByLabelText('Document date shown on PDF')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save visible date' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Mark a passage' }))
     fireEvent.click(screen.getByRole('button', { name: 'Complete marked rectangle' }))
@@ -190,6 +173,7 @@ describe('DocumentWorkspace', () => {
       expect.any(AbortSignal),
     )
     expect(screen.getByText('part of a sentence')).toBeInTheDocument()
+    expect(screen.getByText('1945-05-08')).toBeInTheDocument()
     expect(screen.getByText('8 estimated words')).toBeInTheDocument()
     expect(screen.getByText('37 visible words')).toBeInTheDocument()
     expect(screen.getByText('2 confirmed masks')).toBeInTheDocument()
@@ -197,7 +181,7 @@ describe('DocumentWorkspace', () => {
     expect(container.querySelector('.pdf-page-shell')).toHaveTextContent('')
   })
 
-  it('keeps context preparation disabled until both date and passage are saved', () => {
+  it('keeps context preparation disabled until a real passage is saved', () => {
     render(
       <DocumentWorkspace
         document={uploadedDocument}
