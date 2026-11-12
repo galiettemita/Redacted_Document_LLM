@@ -33,6 +33,10 @@ class Document(Base):
     storage_key: Mapped[str] = mapped_column(String(255), nullable=False)
     visible_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     date_provenance: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    visible_date_evidence: Mapped[dict[str, object] | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

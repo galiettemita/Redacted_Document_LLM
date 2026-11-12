@@ -130,30 +130,6 @@ def test_patch_keeps_the_passage_uuid_and_increments_revision(tmp_path: Path) ->
     assert corrected["status"] == "marked"
 
 
-def test_document_date_change_invalidates_every_live_passage(tmp_path: Path) -> None:
-    app, document_id = create_test_app_and_document(tmp_path)
-    passage = create_passage(app, document_id, y=0.2, key="create-date")
-
-    metadata_response = asyncio.run(
-        request(
-            app,
-            "PATCH",
-            f"/v1/documents/{document_id}/metadata",
-            json={
-                "visible_date": "1962-10-22",
-                "date_provenance": "manual_visible_document",
-            },
-        )
-    )
-
-    assert metadata_response.status_code == 200
-    with app.state.database.session_factory() as session:
-        persisted = session.get(Passage, passage["id"])
-        assert persisted is not None
-        assert persisted.revision == passage["revision"] + 1
-        assert persisted.status == "marked"
-
-
 def test_merge_keeps_the_first_passage_in_document_order(tmp_path: Path) -> None:
     app, document_id = create_test_app_and_document(tmp_path)
     later = create_passage(app, document_id, y=0.7, key="create-later")

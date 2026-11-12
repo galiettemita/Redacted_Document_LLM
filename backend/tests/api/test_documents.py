@@ -89,7 +89,7 @@ def test_upload_rejects_non_pdf_content_without_retaining_it(tmp_path: Path) -> 
     assert list((tmp_path / "stored-documents").rglob("*.pdf")) == []
 
 
-def test_visible_date_metadata_requires_explicit_visible_provenance(
+def test_browser_cannot_supply_document_date_metadata(
     tmp_path: Path,
 ) -> None:
     app = create_test_app(tmp_path)
@@ -117,35 +117,7 @@ def test_visible_date_metadata_requires_explicit_visible_provenance(
         )
     )
 
-    assert response.status_code == 200
-    assert response.json()["visible_date"] == "1945-05-08"
-    assert response.json()["date_provenance"] == "manual_visible_document"
-
-
-def test_browser_cannot_forge_automatic_date_provenance(tmp_path: Path) -> None:
-    app = create_test_app(tmp_path)
-    upload = asyncio.run(
-        request(
-            app,
-            "POST",
-            "/v1/documents",
-            files={"file": ("bulletin.pdf", make_pdf(), "application/pdf")},
-        )
-    )
-
-    response = asyncio.run(
-        request(
-            app,
-            "PATCH",
-            f"/v1/documents/{upload.json()['id']}/metadata",
-            json={
-                "visible_date": "1945-05-08",
-                "date_provenance": "visible_text",
-            },
-        )
-    )
-
-    assert response.status_code == 422
+    assert response.status_code == 404
 
 
 def test_delete_tombstones_the_record_and_removes_unreferenced_bytes(

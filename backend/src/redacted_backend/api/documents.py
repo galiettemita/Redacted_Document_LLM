@@ -19,7 +19,7 @@ from redacted_backend.documents.validation import (
     PdfValidationError,
     validate_pdf,
 )
-from redacted_backend.domain.documents import DocumentMetadataUpdate, DocumentRecord
+from redacted_backend.domain.documents import DocumentRecord
 from redacted_backend.storage.local import LocalDocumentStore
 
 
@@ -85,32 +85,6 @@ def create_documents_router(
                 ):
                     ready_store.delete(stored.storage_key)
             raise
-
-    @router.patch(
-        "/documents/{document_id}/metadata",
-        response_model=DocumentRecord,
-    )
-    def update_document_metadata(
-        document_id: UUID,
-        update: DocumentMetadataUpdate,
-    ) -> DocumentRecord:
-        ready_database, _ = _require_services(database, document_store)
-        with ready_database.session_factory() as session, session.begin():
-            documents = DocumentRepository(session)
-            existing = documents.get(document_id)
-            record = documents.set_visible_date(
-                document_id,
-                visible_date=update.visible_date,
-                provenance=update.date_provenance,
-            )
-            if existing is not None and (
-                existing.visible_date != update.visible_date
-                or existing.date_provenance != update.date_provenance
-            ):
-                PassageRepository(session).invalidate_document_date(document_id)
-        if record is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-        return record
 
     @router.delete(
         "/documents/{document_id}",

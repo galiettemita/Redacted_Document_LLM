@@ -15,9 +15,9 @@ from redacted_backend.db.models import VisibleExampleArtifact
 from redacted_backend.db.repositories.documents import DocumentRepository
 from redacted_backend.db.repositories.passages import PassageRepository
 from redacted_backend.documents.preparation import PreparedVisibleContext
-from redacted_backend.domain.documents import DateProvenance
+from redacted_backend.domain.documents import DateProvenance, VisibleDateEvidence
 from redacted_backend.domain.passages import PassageRect
-from redacted_backend.domain.visible_examples import LengthEstimate, VisibleExample
+from redacted_backend.domain.visible_examples import LengthEstimate, PageWord, VisibleExample
 from redacted_backend.main import create_app
 
 
@@ -29,7 +29,7 @@ async def request(app, method: str, path: str, **kwargs):
         return await client.request(method, path, **kwargs)
 
 
-def create_test_app_and_passage(tmp_path: Path, *, with_date: bool = True):
+def create_test_app_and_passage(tmp_path: Path):
     app = create_app(
         Settings(
             database_url=f"sqlite+pysqlite:///{tmp_path / 'context.sqlite3'}",
@@ -47,13 +47,6 @@ def create_test_app_and_passage(tmp_path: Path, *, with_date: bool = True):
             storage_key=f"sha256/aa/aa/{'a' * 64}.pdf",
             expires_at=datetime.now(UTC) + timedelta(hours=24),
         )
-        if with_date:
-            document = documents.set_visible_date(
-                document.id,
-                visible_date=date(1945, 5, 8),
-                provenance=DateProvenance.MANUAL_VISIBLE_DOCUMENT,
-            )
-            assert document is not None
         passage = PassageRepository(session).create(
             document_id=document.id,
             label="Passage 1",
@@ -70,7 +63,7 @@ def install_fake_preparation(monkeypatch, *, calls: list[int]) -> None:
             example=VisibleExample(
                 passage_id=target_id,
                 document_id=document.id,
-                document_date=document.visible_date,
+                document_date=date(1945, 5, 8),
                 before_target="visible before",
                 after_target="visible after",
                 context_window="visible before [[TARGET]] visible after",
@@ -86,16 +79,39 @@ def install_fake_preparation(monkeypatch, *, calls: list[int]) -> None:
             ),
             confirmed_mask_count=2,
             visible_word_count=17,
+            date_evidence=_date_evidence(date(1945, 5, 8)),
         )
 
     monkeypatch.setattr(context_api, "prepare_visible_context", fake_prepare)
 
 
-def test_prepare_requires_a_visible_document_date(tmp_path: Path, monkeypatch) -> None:
-    app, _document, passage = create_test_app_and_passage(
-        tmp_path,
-        with_date=False,
+def _date_evidence(value: date) -> VisibleDateEvidence:
+    return VisibleDateEvidence(
+        value=value,
+        page_number=1,
+        line_text=f"DATE: {value.isoformat()}",
+        words=[
+            PageWord(
+                text=value.isoformat(),
+                page_number=1,
+                x=0.1,
+                y=0.08,
+                width=0.15,
+                height=0.02,
+                block_id=0,
+                line_id=1,
+                source="embedded",
+                confidence=1.0,
+            )
+        ],
     )
+
+
+def test_prepare_detects_and_persists_the_visible_document_date(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app, document, passage = create_test_app_and_passage(tmp_path)
     calls: list[int] = []
     install_fake_preparation(monkeypatch, calls=calls)
 
@@ -103,9 +119,15 @@ def test_prepare_requires_a_visible_document_date(tmp_path: Path, monkeypatch) -
         request(app, "POST", f"/v1/passages/{passage.id}:prepare-context")
     )
 
-    assert response.status_code == 422
-    assert response.json()["detail"]["code"] == "missing_visible_date"
-    assert calls == []
+    assert response.status_code == 200
+    assert response.json()["document_date"] == "1945-05-08"
+    assert calls == [1]
+    with app.state.database.session_factory() as session:
+        persisted = DocumentRepository(session).get(document.id)
+        assert persisted is not None
+        assert persisted.visible_date == date(1945, 5, 8)
+        assert persisted.date_provenance == DateProvenance.VISIBLE_TEXT
+        assert persisted.visible_date_evidence == _date_evidence(date(1945, 5, 8))
 
 
 def test_prepare_persists_one_revision_and_reuses_it(
@@ -137,7 +159,7 @@ def test_prepare_persists_one_revision_and_reuses_it(
         "confirmed_mask_count": 2,
         "serialization_version": "visible-transcript-v1",
     }
-    assert document.visible_date == date(1945, 5, 8)
+    assert document.visible_date is None
     assert calls == [1]
     with app.state.database.session_factory() as session:
         artifacts = session.scalars(select(VisibleExampleArtifact)).all()
@@ -211,34 +233,32 @@ def test_passage_correction_invalidates_context_and_builds_new_revision(
         assert artifacts[1].invalidated_at is None
 
 
-def test_document_date_change_invalidates_prepared_context(
+def test_conflicting_automatic_date_is_refused_without_overwriting_evidence(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
     app, document, passage = create_test_app_and_passage(tmp_path)
+    with app.state.database.session_factory() as session, session.begin():
+        stored = DocumentRepository(session).set_detected_visible_date(
+            document.id,
+            _date_evidence(date(1945, 5, 9)),
+        )
+        assert stored is not None
+
     calls: list[int] = []
     install_fake_preparation(monkeypatch, calls=calls)
-    path = f"/v1/passages/{passage.id}:prepare-context"
-    assert asyncio.run(request(app, "POST", path)).status_code == 200
-
-    metadata = asyncio.run(
-        request(
-            app,
-            "PATCH",
-            f"/v1/documents/{document.id}/metadata",
-            json={
-                "visible_date": "1945-05-09",
-                "date_provenance": "manual_visible_document",
-            },
-        )
+    response = asyncio.run(
+        request(app, "POST", f"/v1/passages/{passage.id}:prepare-context")
     )
-    rebuilt = asyncio.run(request(app, "POST", path))
 
-    assert metadata.status_code == 200
-    assert rebuilt.status_code == 200
-    assert rebuilt.json()["document_date"] == "1945-05-09"
-    assert rebuilt.json()["passage_revision"] == 2
-    assert calls == [1, 1]
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "visible_date_conflict"
+    assert calls == [1]
+    with app.state.database.session_factory() as session:
+        persisted = DocumentRepository(session).get(document.id)
+        assert persisted is not None
+        assert persisted.visible_date == date(1945, 5, 9)
+        assert persisted.visible_date_evidence == _date_evidence(date(1945, 5, 9))
 
 
 def test_deleted_passage_cannot_prepare_context(tmp_path: Path, monkeypatch) -> None:

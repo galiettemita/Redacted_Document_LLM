@@ -20,7 +20,7 @@ DOCUMENT_ID = UUID("00000000-0000-0000-0000-000000000001")
 TARGET_ID = UUID("00000000-0000-0000-0000-000000000010")
 
 
-def document_record(*, visible_date: date | None = date(1945, 5, 8)) -> DocumentRecord:
+def document_record() -> DocumentRecord:
     now = datetime.now(UTC)
     return DocumentRecord(
         id=DOCUMENT_ID,
@@ -30,8 +30,8 @@ def document_record(*, visible_date: date | None = date(1945, 5, 8)) -> Document
         page_count=1,
         status="uploaded",
         storage_key=f"sha256/aa/aa/{'a' * 64}.pdf",
-        visible_date=visible_date,
-        date_provenance=("manual_visible_document" if visible_date else None),
+        visible_date=None,
+        date_provenance=None,
         created_at=now,
         expires_at=now + timedelta(hours=24),
     )
@@ -46,6 +46,8 @@ def target_passage():
 
 def visible_page():
     return page(
+        word("DATE:", x=0.05, y=0.08, block_id=0, line_id=1),
+        word("1945-05-08", x=0.12, y=0.08, block_id=0, line_id=1),
         word("alpha", x=0.05, y=0.2, block_id=1, line_id=1),
         word("bravo", x=0.12, y=0.2, block_id=1, line_id=1),
         word("delta", x=0.19, y=0.2, block_id=1, line_id=1),
@@ -80,9 +82,18 @@ def test_preparation_feeds_each_rendered_page_to_mask_discovery() -> None:
         _discoverer=discover,
     )
 
-    assert seen == [(rendered, ["alpha", "bravo", "delta", "HIDDEN"], 1)]
+    assert seen == [
+        (
+            rendered,
+            ["DATE:", "1945-05-08", "alpha", "bravo", "delta", "HIDDEN"],
+            1,
+        )
+    ]
     assert result.confirmed_mask_count == 1
-    assert result.visible_word_count == 4
+    assert result.visible_word_count == 6
+    assert result.example.document_date == date(1945, 5, 8)
+    assert result.date_evidence.value == date(1945, 5, 8)
+    assert result.date_evidence.line_text == "DATE: 1945-05-08"
 
 
 def test_preparation_never_serializes_text_covered_by_a_confirmed_mask() -> None:
@@ -148,7 +159,7 @@ def test_preparation_converts_processing_failures_to_stable_safe_codes(
     ("discoveries", "expected_code"),
     [
         ([discovery(1, coverage_confident=False)], "mask_coverage_uncertain"),
-        ([discovery(1)], "insufficient_visible_text_for_length"),
+        ([discovery(1)], "visible_date_not_found"),
     ],
 )
 def test_preparation_preserves_safe_visible_example_failure_codes(

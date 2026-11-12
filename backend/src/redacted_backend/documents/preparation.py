@@ -11,12 +11,16 @@ import pytesseract
 from PIL import Image
 
 from redacted_backend.documents.extract import extract_visible_words
+from redacted_backend.documents.dates import (
+    VisibleDateDetectionError,
+    detect_visible_document_date,
+)
 from redacted_backend.documents.masks import discover_candidate_masks
 from redacted_backend.documents.visible_example import (
     VisibleExampleError,
     build_visible_example,
 )
-from redacted_backend.domain.documents import DocumentRecord
+from redacted_backend.domain.documents import DocumentRecord, VisibleDateEvidence
 from redacted_backend.domain.passages import PassageRecord
 from redacted_backend.domain.visible_examples import (
     MaskDiscovery,
@@ -42,6 +46,7 @@ class PreparedVisibleContext:
     example: VisibleExample
     confirmed_mask_count: int
     visible_word_count: int
+    date_evidence: VisibleDateEvidence
 
 
 def prepare_visible_context(
@@ -84,9 +89,14 @@ def prepare_visible_context(
             "The PDF could not be processed safely",
         ) from error
 
+    try:
+        date_evidence = detect_visible_document_date(pages, discoveries)
+    except VisibleDateDetectionError as error:
+        raise VisibleContextPreparationError(error.code, str(error)) from error
+
     visible_document = VisibleDocument(
         id=document.id,
-        visible_date=document.visible_date,
+        visible_date=date_evidence.value,
         pages=pages,
         mask_discoveries=discoveries,
     )
@@ -103,6 +113,7 @@ def prepare_visible_context(
             for candidate in discovery.masks
         ),
         visible_word_count=len(example.visible_words),
+        date_evidence=date_evidence,
     )
 
 

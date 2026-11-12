@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
@@ -11,7 +11,12 @@ from redacted_backend.domain.documents import (
     DateProvenance,
     DocumentRecord,
     DocumentStatus,
+    VisibleDateEvidence,
 )
+
+
+class VisibleDateConflictError(ValueError):
+    pass
 
 
 class DocumentRepository:
@@ -47,18 +52,26 @@ class DocumentRepository:
         document = self._session.get(Document, str(document_id))
         return _to_record(document) if document is not None else None
 
-    def set_visible_date(
+    def set_detected_visible_date(
         self,
         document_id: UUID | str,
-        *,
-        visible_date: date,
-        provenance: DateProvenance,
+        evidence: VisibleDateEvidence,
     ) -> DocumentRecord | None:
         document = self._session.get(Document, str(document_id))
         if document is None or document.status == DocumentStatus.DELETED.value:
             return None
-        document.visible_date = visible_date
-        document.date_provenance = provenance.value
+        if document.visible_date is not None:
+            if (
+                document.visible_date != evidence.value
+                or document.date_provenance != DateProvenance.VISIBLE_TEXT.value
+            ):
+                raise VisibleDateConflictError(
+                    "Visible date evidence conflicts with the stored document date"
+                )
+            return _to_record(document)
+        document.visible_date = evidence.value
+        document.date_provenance = DateProvenance.VISIBLE_TEXT.value
+        document.visible_date_evidence = evidence.model_dump(mode="json")
         self._session.flush()
         return _to_record(document)
 
@@ -94,6 +107,7 @@ def _to_record(document: Document) -> DocumentRecord:
         storage_key=document.storage_key,
         visible_date=document.visible_date,
         date_provenance=document.date_provenance,
+        visible_date_evidence=document.visible_date_evidence,
         created_at=document.created_at,
         expires_at=document.expires_at,
     )

@@ -9,7 +9,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import IntegrityError
 
 from redacted_backend.db.base import Database
-from redacted_backend.db.repositories.documents import DocumentRepository
+from redacted_backend.db.repositories.documents import (
+    DocumentRepository,
+    VisibleDateConflictError,
+)
 from redacted_backend.db.repositories.passages import (
     PassageConflictError,
     PassageRepository,
@@ -72,13 +75,6 @@ def create_context_router(
             )
             if existing is not None:
                 return _summary(existing)
-            if document.visible_date is None:
-                raise _preparation_error(
-                    VisibleContextPreparationError(
-                        "missing_visible_date",
-                        "Save a date copied from the visible document first",
-                    )
-                )
             all_passages = passages.list_live_for_document(document.id)
             expected_revision = passage.revision
             pdf_path = ready_store.resolve(document.storage_key)
@@ -105,12 +101,20 @@ def create_context_router(
                     raise PassageConflictError(
                         "passage revision changed during preparation"
                     )
-                current_document = DocumentRepository(session).get(current.document_id)
+                documents = DocumentRepository(session)
+                current_document = documents.get(current.document_id)
                 if (
                     current_document is None
                     or current_document.status == DocumentStatus.DELETED
-                    or current_document.visible_date != prepared.example.document_date
+                    or current_document.sha256 != document.sha256
+                    or current_document.storage_key != document.storage_key
                 ):
+                    raise PassageConflictError("document changed during preparation")
+                persisted_document = documents.set_detected_visible_date(
+                    current_document.id,
+                    prepared.date_evidence,
+                )
+                if persisted_document is None:
                     raise PassageConflictError("document changed during preparation")
                 artifacts = VisibleExampleRepository(session)
                 existing = artifacts.get_current(current.id, current.revision)
@@ -125,6 +129,14 @@ def create_context_router(
                     expected_revision=current.revision,
                 )
                 return _summary(artifact)
+        except VisibleDateConflictError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "visible_date_conflict",
+                    "message": str(error),
+                },
+            ) from error
         except PassageConflictError as error:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,

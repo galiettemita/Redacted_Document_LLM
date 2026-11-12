@@ -48,12 +48,6 @@ class DocumentRecord(BaseModel):
     storage_key: str
     visible_date: date | None = None
     date_provenance: DateProvenance | None = None
+    visible_date_evidence: VisibleDateEvidence | None = None
     created_at: datetime
     expires_at: datetime
-
-
-class DocumentMetadataUpdate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    visible_date: date
-    date_provenance: Literal[DateProvenance.MANUAL_VISIBLE_DOCUMENT]
