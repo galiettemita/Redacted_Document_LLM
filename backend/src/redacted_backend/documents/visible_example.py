@@ -42,11 +42,27 @@ def build_visible_example(
         raise VisibleExampleError("target_not_found", "Target passage does not exist")
 
     passage_ids = {str(passage.id) for passage in passages}
+    manual_rects_by_page = {
+        page_number: [
+            rect
+            for passage in passages
+            if passage.page_number == page_number
+            for rect in passage.rects
+        ]
+        for page_number in {passage.page_number for passage in passages}
+    }
     by_page = {
         discovery.page_number: [
             candidate
             for candidate in discovery.masks
             if candidate.id not in passage_ids
+            and not any(
+                _substantial_overlap(candidate.rect, manual_rect)
+                for manual_rect in manual_rects_by_page.get(
+                    discovery.page_number,
+                    [],
+                )
+            )
         ]
         for discovery in document.mask_discoveries
     }
@@ -115,3 +131,15 @@ def _target_paragraph(text: str) -> str:
     start = max(0, target_index - 1)
     end = min(len(paragraphs), target_index + 2)
     return "\n\n".join(paragraphs[start:end])
+
+
+def _substantial_overlap(first, second) -> bool:
+    left = max(first.x, second.x)
+    top = max(first.y, second.y)
+    right = min(first.x + first.width, second.x + second.width)
+    bottom = min(first.y + first.height, second.y + second.height)
+    if right <= left or bottom <= top:
+        return False
+    intersection = (right - left) * (bottom - top)
+    smaller_area = min(first.width * first.height, second.width * second.height)
+    return intersection / smaller_area >= 0.5

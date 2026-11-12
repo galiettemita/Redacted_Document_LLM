@@ -107,6 +107,47 @@ class PassageInvalidation(Base):
     )
 
 
+class VisibleExampleArtifact(Base):
+    __tablename__ = "visible_example_artifacts"
+    __table_args__ = (
+        UniqueConstraint(
+            "passage_id",
+            "passage_revision",
+            name="uq_visible_example_passage_revision",
+        ),
+        Index(
+            "ix_visible_example_passage_active",
+            "passage_id",
+            "invalidated_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    passage_id: Mapped[str] = mapped_column(
+        ForeignKey("passages.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    passage_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    visible_word_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    confirmed_mask_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    invalidated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+
 class IdempotencyRecord(Base):
     __tablename__ = "idempotency_records"
     __table_args__ = (

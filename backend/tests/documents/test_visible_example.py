@@ -127,3 +127,34 @@ def test_builds_target_and_other_markers_from_visible_inputs_only() -> None:
     assert "[REDACTED]" in example.after_target
     assert "[[TARGET]]" in example.context_window
     assert example.length_cue.bucket == "a few words"
+
+
+def test_deduplicates_an_automatic_mask_overlapping_the_manual_target() -> None:
+    target_rect = PassageRect(x=0.35, y=0.2, width=0.18, height=0.025)
+    target = passage(TARGET_ID, rects=[target_rect])
+    document = visible_document(
+        pages=[
+            page(
+                word("alpha", x=0.05, y=0.2, block_id=1, line_id=1),
+                word("bravo", x=0.12, y=0.2, block_id=1, line_id=1),
+                word("delta", x=0.19, y=0.2, block_id=1, line_id=1),
+            )
+        ],
+        discoveries=[
+            discovery(
+                1,
+                mask(
+                    "auto-black-1-1",
+                    x=0.345,
+                    y=0.195,
+                    width=0.19,
+                    height=0.035,
+                ),
+            )
+        ],
+    )
+
+    example = build_visible_example(document, [target], UUID(TARGET_ID))
+
+    assert example.context_window.count("[[TARGET]]") == 1
+    assert "[REDACTED]" not in example.context_window

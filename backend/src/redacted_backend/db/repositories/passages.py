@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from redacted_backend.db.models import (
@@ -11,6 +11,7 @@ from redacted_backend.db.models import (
     IdempotencyRecord,
     Passage,
     PassageInvalidation,
+    VisibleExampleArtifact,
 )
 from redacted_backend.domain.documents import DocumentStatus
 from redacted_backend.domain.passages import (
@@ -70,6 +71,34 @@ class PassageRepository:
     def get(self, passage_id: UUID | str) -> PassageRecord | None:
         model = self._session.get(Passage, str(passage_id))
         return _to_record(model) if model is not None else None
+
+    def list_live_for_document(
+        self,
+        document_id: UUID | str,
+    ) -> list[PassageRecord]:
+        models = self._session.scalars(
+            select(Passage)
+            .where(
+                Passage.document_id == str(document_id),
+                Passage.status != PassageStatus.DELETED.value,
+            )
+            .order_by(Passage.page_number, Passage.created_at, Passage.id)
+        ).all()
+        return [_to_record(model) for model in models]
+
+    def mark_context_ready(
+        self,
+        passage_id: UUID | str,
+        *,
+        expected_revision: int,
+    ) -> PassageRecord:
+        model = self._get_live(passage_id)
+        if model.revision != expected_revision:
+            raise PassageConflictError("passage revision changed during preparation")
+        model.status = PassageStatus.CONTEXT_READY.value
+        model.updated_at = datetime.now(UTC)
+        self._session.flush()
+        return _to_record(model)
 
     def get_idempotent(
         self,
@@ -241,6 +270,14 @@ class PassageRepository:
         model.updated_at = datetime.now(UTC)
         if deleted:
             model.deleted_at = model.updated_at
+        self._session.execute(
+            update(VisibleExampleArtifact)
+            .where(
+                VisibleExampleArtifact.passage_id == model.id,
+                VisibleExampleArtifact.invalidated_at.is_(None),
+            )
+            .values(invalidated_at=model.updated_at)
+        )
         self._session.add(
             PassageInvalidation(
                 id=str(uuid4()),

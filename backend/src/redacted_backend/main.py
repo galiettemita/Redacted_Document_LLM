@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from redacted_backend.api.context import create_context_router
 from redacted_backend.api.documents import create_documents_router
 from redacted_backend.api.passages import create_passages_router
 from redacted_backend.api.readiness import create_readiness_router
@@ -29,6 +30,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         prefix="/v1",
     )
     app.include_router(create_passages_router(database), prefix="/v1")
+    app.include_router(
+        create_context_router(database, document_store),
+        prefix="/v1",
+    )
     return app
 
 
