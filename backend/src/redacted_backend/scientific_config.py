@@ -10,6 +10,9 @@ class ScientificConfig(BaseModel):
 
     chunk_words: int = 300
     chunk_overlap: int = 0
+    corpus_chunker_version: str = "paragraph-sentence-word-v1"
+    corpus_exclusion_version: str = "foiarchive-exclusions-v1"
+    corpus_snapshot_repo: str = "HistoryLab/foiarchive"
     bm25_k1: float = 1.2
     bm25_b: float = 0.75
     top_chunks_per_list: int = 300

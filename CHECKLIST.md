@@ -43,3 +43,4 @@
   - [x] Task 4: Extract visible words, suppress covered text, preserve reading order, and build hidden-answer-free passage examples.
   - [x] Task 5: Connect real PDF upload, cleanup, and stable manual passage persistence to the existing website.
   - [x] Pre-test hardening: clean up late upload records and lock document navigation until confirmed deletion.
+  - [x] Task 6: Add immutable corpus locking, fail-closed exclusions, storage preflight, deterministic chunks, and reproducible manifests without downloading the gated corpus.

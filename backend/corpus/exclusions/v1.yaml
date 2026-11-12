@@ -1,0 +1,19 @@
+version: v1
+included_sources:
+  - briefing
+  - cabinet
+  - cfpf
+  - cia
+  - clinton
+  - cpdoc
+  - frus
+  - kissinger
+  - nato
+  - un
+  - worldbank
+cia_reading_room_excluded_doc_ids: []
+cia_confirmed_pre_cutoff_doc_ids: []
+frus_publication_years: {}
+cia_coverage_complete: false
+frus_coverage_complete: false
+

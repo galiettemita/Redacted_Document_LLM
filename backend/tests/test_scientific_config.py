@@ -7,6 +7,9 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters() -> No
     assert config.model_dump() == {
         "chunk_words": 300,
         "chunk_overlap": 0,
+        "corpus_chunker_version": "paragraph-sentence-word-v1",
+        "corpus_exclusion_version": "foiarchive-exclusions-v1",
+        "corpus_snapshot_repo": "HistoryLab/foiarchive",
         "bm25_k1": 1.2,
         "bm25_b": 0.75,
         "top_chunks_per_list": 300,
