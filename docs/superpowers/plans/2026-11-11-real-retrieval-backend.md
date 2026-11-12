@@ -224,14 +224,35 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - Produces: `chunk_document(document, max_words=300) -> list[CorpusChunk]` using paragraph/sentence/word splitting and no overlap.
 - Produces CLI commands `corpus preflight`, `corpus lock-snapshot`, `corpus build-chunks`.
 
-- [ ] **Step 1: Write failing tests for immutable revision locking, checksum mismatch, 149/150/250 GiB preflight boundaries, CIA reading-room exclusion, 2019-2024 FRUS exclusion, unknown provenance, 300/301-word paragraphs, and deterministic chunk IDs.**
-- [ ] **Step 2: Run the focused corpus tests; expect missing modules.**
-- [ ] **Step 3: Implement the pure corpus pipeline and CLI without downloading the gated dataset in tests. Use small JSONL fixtures with the same nine public fields.**
-- [ ] **Step 4: Run `corpus preflight` against the current machine and assert it reports insufficient disk without writing corpus data.**
-- [ ] **Step 5: Run all backend/frontend tests; expect PASS.**
-- [ ] **Step 6: Update the checklist, commit with `feat: add reproducible corpus builder`, and push.**
+- [x] **Step 1: Write failing tests for immutable revision locking, checksum mismatch, 149/150/250 GiB preflight boundaries, CIA reading-room exclusion, 2019-2024 FRUS exclusion, unknown provenance, 300/301-word paragraphs, and deterministic chunk IDs.**
+- [x] **Step 2: Run the focused corpus tests; expect missing modules.**
+- [x] **Step 3: Implement the pure corpus pipeline and CLI without downloading the gated dataset in tests. Use small JSONL fixtures with the same nine public fields.**
+- [x] **Step 4: Run `corpus preflight` against the current machine and record the result without writing corpus data.**
+- [x] **Step 5: Run all backend/frontend tests; expect PASS.**
+- [x] **Step 6: Update the checklist, commit with `feat: add reproducible corpus builder`, and push.**
 
-**Execution gate after Task 6:** Ask the user to accept the `HistoryLab/foiarchive` terms and choose either an external fast volume with at least 150 GiB free or a separately costed remote index build. Do not start Task 7's full build until answered.
+**Execution gate after Task 6:** Satisfied. The user accepted the `HistoryLab/foiarchive` terms and supplied at least 150 GiB of local headroom. The immutable snapshot was downloaded and verified, then rejected as the complete paper corpus after schema and collection-count inspection.
+
+### Task 6A: Reconcile and freeze the complete History Lab source
+
+**Files:**
+- Create: `backend/src/redacted_backend/corpus/historylab_export.py`, `frus_metadata.py`
+- Create: `backend/tests/corpus/test_historylab_export.py`, `test_frus_metadata.py`
+- Modify: `backend/src/redacted_backend/corpus/chunker.py`, `exclusions.py`, `manifest.py`, `cli.py`
+- Modify: `backend/corpus/exclusions/v1.yaml`, `README.md`, `CHECKLIST.md`
+
+**Interfaces:**
+- Produces: `capture_historylab_corpus(base_url, output_root, resume=True) -> ApiCaptureManifest` with explicit collection labels, keyset pagination, atomic checkpoints, exact count checks before and after each collection, and per-file SHA-256.
+- Produces: `load_frus_metadata(xml_path) -> FrusPublicationManifest` from the Office of the Historian's canonical volume IDs and publication years.
+- Produces: `validate_capture_for_paper(capture, exclusions, frus) -> CorpusCoverageReport` that requires a non-empty `cables` collection, a verified whole-collection CIA reading-room exclusion, no unknown collections or FRUS IDs, and exactly ten present 2019-2024 FRUS volumes.
+- Normalized records distinguish `corpus` (the archive collection used for filtering) from `source_url` (origin provenance). Downstream chunk and retrieval metadata use `corpus`.
+
+- [ ] **Step 1: Write failing tests for stable keyset pagination, interrupted-page recovery, duplicate/missing IDs, API count drift, safe paths, checksums, absent `cables`, unknown collections, FRUS longest-prefix matching, unmatched IDs, and the exact ten-volume invariant.**
+- [ ] **Step 2: Run the focused tests and verify they fail against the missing capture/FRUS interfaces.**
+- [ ] **Step 3: Implement the resumable API capture, normalized schema, official FRUS parser, coverage report, and CLI commands. Keep every large artifact outside Git and make partial output visibly incomplete.**
+- [ ] **Step 4: Freeze the already downloaded official FRUS feed and record its checksum. When the public History Lab API is healthy, capture all collections and verify before/after exact counts and file checksums. Do not mix the API capture with the older Hugging Face export.**
+- [ ] **Step 5: Populate the exclusion manifest from verified public metadata and run the full coverage gate. If the API remains unavailable or the archive contains a different number of post-cutoff FRUS volumes, stop with an explicit source gap.**
+- [ ] **Step 6: Run focused and full backend/frontend verification, update the checklist, commit with `feat: freeze complete History Lab corpus source`, and push.**
 
 ### Task 7: BM25 index and context-query retrieval
 
@@ -249,7 +270,7 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - [x] **Step 1: Write failing tests for stop-word removal without stemming names, exact 300-result limit, deterministic tie order, incompatible manifest rejection, and context-query result provenance.**
 - [x] **Step 2: Run focused tests; expect missing retrieval code.**
 - [x] **Step 3: Add a pinned OpenSearch service/profile and implement index settings with standard Unicode tokenizer, vendored lowercase English stop words, `k1=1.2`, and `b=0.75`.**
-- [ ] **Step 4: Build the real index from the locked corpus on approved storage, record counts/checksums/timing, and run one visible context query without a model call.**
+- [ ] **Step 4: Build the real index only from a Task 6A capture that passes every coverage invariant, record counts/checksums/timing, and run one visible context query without a model call.**
 - [ ] **Step 5: Run focused tests, readiness, and deterministic sample rebuild checks; expect PASS.**
 - [ ] **Step 6: Update the checklist, commit with `feat: add corpus BM25 retrieval`, and push.**
 

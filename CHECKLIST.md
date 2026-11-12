@@ -44,6 +44,12 @@
   - [x] Task 5: Connect real PDF upload, cleanup, and stable manual passage persistence to the existing website.
   - [x] Pre-test hardening: clean up late upload records and lock document navigation until confirmed deletion.
   - [x] Task 6: Add immutable corpus locking, fail-closed exclusions, storage preflight, deterministic chunks, and reproducible manifests without downloading the gated corpus.
+  - [ ] Task 6A: Freeze the complete History Lab API source with explicit collection labels and verified FRUS/CIA exclusions.
+    - [x] Download and checksum the authenticated Hugging Face export for audit.
+    - [x] Identify and document its missing `cables` collection and ambiguous `source` field before indexing.
+    - [x] Freeze and checksum the official Office of the Historian FRUS metadata feed.
+    - [ ] Implement and test resumable collection-aware API capture and coverage validation.
+    - [ ] Capture the full public archive when the History Lab API is healthy and pass every source invariant.
   - [ ] Task 7: Add BM25 indexing and visible context-query retrieval.
     - [x] Implement and test the pinned OpenSearch index, exact chunk checksum verification, deterministic top-300 search, provenance manifests, and readiness checks.
     - [ ] Complete the real exclusion maps, build the locked corpus/index, and record one visible-only context query.

@@ -180,9 +180,17 @@ Instead, it estimates capacity from visible geometry. For each redaction line, i
 
 ## Corpus build and provenance
 
-The corpus builder consumes `HistoryLab/foiarchive`, default configuration, from an immutable Hugging Face revision. At the first authenticated metadata fetch, it resolves and records the exact repository commit and all JSONL filenames before downloading; `latest` is never a run input. Access acceptance is a hard gate before Slice 3. The builder records revision hash, file checksums, license, and source counts. Corpus files and indexes never enter Git.
+### Source reconciliation
 
-The local preflight requires at least 150 GiB free disk for the source snapshot, normalized/chunk data, OpenSearch index, float16 embeddings, and FAISS artifacts; 250 GiB is recommended to leave safe rebuild headroom. It also records RAM, CPU, and accelerator availability and estimates build time before starting. The current development machine has 32 GiB RAM and an Apple M5 GPU but only about 23 GiB free disk, so it cannot host the full build as-is. Slices 1-2 can proceed locally; before Slice 3 the user must provide an external fast volume with sufficient space or approve a separately costed remote index build. A remote build is not a deployment and still requires explicit approval before incurring cost.
+The authenticated `HistoryLab/foiarchive` Hugging Face snapshot remains a useful immutable source artifact, but inspection proved that it is not the complete paper corpus. Its card describes about 4.95 million documents across 11 collections, while Appendix C reports 5.55 million files. The current History Lab public catalog also exposes a separate `cables` collection of about 718,000 documents that is absent from that snapshot. In addition, the snapshot's field named `source` contains an origin URL or null rather than the archive collection label required to apply Andrew's collection-level exclusions. The application therefore must not call a corpus or index made directly from that file a reproduction of the paper's public collection.
+
+The corrected source boundary is a frozen local capture of the History Lab public document API. The capture records the exact base URL, projection, ordering, capture time, before-and-after exact counts, and one checksummed JSONL artifact per collection. Keyset pagination by `doc_id` is checkpointed so an interrupted multi-million-document transfer resumes without restarting. Every normalized record carries an explicit `corpus` label; an absent or unknown label fails closed. Because the API is a mutable service rather than a content-addressed release, the resulting local checksums and count-consistency report are the immutable input to every later build.
+
+The existing Hugging Face snapshot is retained outside Git with its repository commit, byte size, and SHA-256 for audit and reconciliation. It is not mixed with a later API capture to manufacture a hybrid corpus: doing so would silently combine source versions. If the History Lab API is unavailable or changes while a capture is in progress, the export pauses and readiness remains false.
+
+Official FRUS publication metadata comes from the Office of the Historian's open `frus-metadata.xml` feed and is also frozen by URL, retrieval time, and SHA-256. Every FRUS document ID must match a canonical volume identifier. The captured archive must contain exactly the ten 2019-2024 FRUS volumes described by Appendix C; a different count is reported as a source-version mismatch rather than waived. The whole History Lab collection corresponding to the paper's CIA reading-room bucket is excluded only after its mapping is verified from public collection metadata. The `cables` collection must be present and non-empty.
+
+The local preflight requires at least 150 GiB free disk for the source capture, normalized/chunk data, OpenSearch index, float16 embeddings, and FAISS artifacts; 250 GiB is recommended to leave safe rebuild headroom. It records RAM, CPU, accelerator availability, and free bytes before each material stage. The user has supplied the minimum local headroom, so the capture may proceed while storage is monitored. A remote build would be separately costed and still requires explicit approval before incurring cost.
 
 The paper's known cutoffs are encoded as a versioned exclusion manifest:
 
@@ -191,7 +199,7 @@ The paper's known cutoffs are encoded as a versioned exclusion manifest:
 - retain other pre-cutoff archive collections used by the paper;
 - exclude a target bulletin under every known earlier/later identifier before retrieval.
 
-The builder produces a coverage report. Readiness remains false if a required exclusion rule cannot be applied to the downloaded schema. Unknown release provenance is surfaced in that report; it is never silently treated as pre-cutoff.
+The builder produces a coverage report. Readiness remains false if a required exclusion rule cannot be applied to the captured schema, the archive changes during capture, `cables` is absent, the CIA collection mapping is unverified, a FRUS identifier is unmatched, or the expected ten excluded FRUS volumes are not present. Unknown release provenance is surfaced in that report; it is never silently treated as pre-cutoff.
 
 ### Deterministic chunks
 
