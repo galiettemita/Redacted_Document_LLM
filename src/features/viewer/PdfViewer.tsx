@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
 import { configurePdfViewerWorker } from '../../pdfRuntime'
 import type { Passage, PassageRect } from '../../types'
+import { PdfErrorBoundary } from './PdfErrorBoundary'
 import { PassageOverlayLayer } from './PassageOverlayLayer'
 import { PdfToolbar } from './PdfToolbar'
 
@@ -66,37 +67,43 @@ export function PdfViewer({
         onFitWidth={() => setScale(1)}
       />
       <div ref={viewportRef} className="pdf-viewport">
-        <Document
-          file={source}
-          loading={<p className="viewer-state">Opening PDF…</p>}
-          error={<p className="viewer-state is-error">This PDF could not be displayed. It has not left your device.</p>}
-          onLoadSuccess={({ numPages }) => {
-            setPageCount(numPages)
-            if (page > numPages) onPageChange(1)
-          }}
-        >
-          <div className="pdf-page-shell" style={{ width: renderedWidth }}>
-            <Page
-              pageNumber={page}
-              width={renderedWidth}
-              renderAnnotationLayer={false}
-              renderTextLayer={false}
-              loading={<p className="viewer-state">Rendering page {page}…</p>}
-            />
-            <PassageOverlayLayer
-              page={page}
-              passages={passages}
-              hoveredId={hoveredId}
-              pinnedId={pinnedId}
-              onHover={onHoverPassage}
-              onPin={onPinPassage}
-              onDismiss={onDismissSelection}
-              markingEnabled={markingEnabled}
-              onMarkPassage={onMarkPassage}
-              registerPassageTarget={registerPassageTarget}
-            />
-          </div>
-        </Document>
+        <PdfErrorBoundary key={source}>
+          <Document
+            file={source}
+            loading={<p className="viewer-state">Opening PDF…</p>}
+            error={(
+              <p className="viewer-state is-error" role="alert">
+                This PDF could not be displayed. The backend will still report whether it was accepted.
+              </p>
+            )}
+            onLoadSuccess={({ numPages }) => {
+              setPageCount(numPages)
+              if (page > numPages) onPageChange(1)
+            }}
+          >
+            <div className="pdf-page-shell" style={{ width: renderedWidth }}>
+              <Page
+                pageNumber={page}
+                width={renderedWidth}
+                renderAnnotationLayer={false}
+                renderTextLayer={false}
+                loading={<p className="viewer-state">Rendering page {page}…</p>}
+              />
+              <PassageOverlayLayer
+                page={page}
+                passages={passages}
+                hoveredId={hoveredId}
+                pinnedId={pinnedId}
+                onHover={onHoverPassage}
+                onPin={onPinPassage}
+                onDismiss={onDismissSelection}
+                markingEnabled={markingEnabled}
+                onMarkPassage={onMarkPassage}
+                registerPassageTarget={registerPassageTarget}
+              />
+            </div>
+          </Document>
+        </PdfErrorBoundary>
       </div>
     </section>
   )
