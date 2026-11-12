@@ -128,12 +128,12 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - Produces: `validate_pdf(path: Path, limits: PdfLimits) -> PdfMetadata` with 100 MiB and 500-page defaults.
 - Produces: `POST /v1/documents`, `PATCH /v1/documents/{document_id}/metadata` for a visible document date plus its provenance, and `DELETE /v1/documents/{document_id}`.
 
-- [ ] **Step 1: Write failing upload tests for a valid PDF, incorrect `%PDF-` signature, malformed/encrypted/decompression-heavy PDF, parser timeout, 100 MiB boundary, 500-page boundary, sanitized filename, SHA-256 storage key, visible-date metadata, and deletion.**
-- [ ] **Step 2: Add an integration test proving two identical uploads share content bytes but receive separate document records, and deletion never removes bytes still referenced by another live record.**
-- [ ] **Step 3: Run `cd backend && uv run pytest tests/api/test_documents.py tests/integration/test_document_persistence.py -v`; expect missing interfaces.**
-- [ ] **Step 4: Implement models, migration, repository, content-addressed storage, PyMuPDF validation, routes, and dependency injection. Never trust `UploadFile.filename` as a path.**
-- [ ] **Step 5: Run the focused tests, `uv run alembic upgrade head`, and a Compose-backed upload/delete smoke test; expect PASS and no files inside the Git checkout's tracked tree.**
-- [ ] **Step 6: Update the checklist, commit with `feat: persist validated PDF uploads`, and push.**
+- [x] **Step 1: Write failing upload tests for a valid PDF, incorrect `%PDF-` signature, malformed/encrypted/decompression-heavy PDF, parser timeout, 100 MiB boundary, 500-page boundary, sanitized filename, SHA-256 storage key, visible-date metadata, and deletion.**
+- [x] **Step 2: Add an integration test proving two identical uploads share content bytes but receive separate document records, and deletion never removes bytes still referenced by another live record.**
+- [x] **Step 3: Run `cd backend && uv run pytest tests/api/test_documents.py tests/integration/test_document_persistence.py -v`; expect missing interfaces.**
+- [x] **Step 4: Implement models, migration, repository, content-addressed storage, PyMuPDF validation, routes, and dependency injection. Never trust `UploadFile.filename` as a path.**
+- [x] **Step 5: Run the focused tests, `uv run alembic upgrade head`, and a Compose-backed upload/delete smoke test; expect PASS and no files inside the Git checkout's tracked tree.**
+- [x] **Step 6: Update the checklist, commit with `feat: persist validated PDF uploads`, and push.**
 
 ### Task 3: Stable passage records and correction operations
 

@@ -38,3 +38,4 @@
 - [x] Write the task-by-task implementation plan.
 - [ ] Connect and verify one real backend feature at a time.
   - [x] Task 1: Add the backend application, frozen scientific configuration, truthful readiness endpoint, and local service foundation.
+  - [x] Task 2: Validate, content-address, persist, annotate, and safely delete real PDF uploads.

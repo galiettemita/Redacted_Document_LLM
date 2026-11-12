@@ -13,6 +13,8 @@ WORKDIR /app
 COPY --from=uv /uv /uvx /bin/
 COPY backend/pyproject.toml backend/uv.lock ./
 COPY backend/src ./src
+COPY backend/alembic.ini ./alembic.ini
+COPY backend/alembic ./alembic
 RUN uv sync --frozen --no-dev
 
 RUN mkdir -p /var/lib/redacted /artifacts/corpus && chown -R app:app /app /var/lib/redacted /artifacts

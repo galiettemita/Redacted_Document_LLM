@@ -17,3 +17,9 @@ class Settings(BaseSettings):
     redis_url: str | None = None
     corpus_manifest_path: Path | None = None
     openai_api_key: SecretStr | None = None
+    document_storage_root: Path = Path("/var/lib/redacted/documents")
+    document_retention_hours: int = 24
+    pdf_max_file_bytes: int = 100 * 1024 * 1024
+    pdf_max_pages: int = 500
+    pdf_max_decompressed_bytes: int = 512 * 1024 * 1024
+    pdf_parser_timeout_seconds: float = 10.0

@@ -4,8 +4,13 @@ version = "0.1.0"
 description = "Visible-only retrieval-assisted backend for Redacted Document LLM"
 requires-python = ">=3.12,<3.14"
 dependencies = [
+  "alembic>=1.15,<2",
   "fastapi>=0.115,<1",
+  "psycopg[binary]>=3.2,<4",
   "pydantic-settings>=2.7,<3",
+  "pymupdf>=1.25,<2",
+  "python-multipart>=0.0.20,<1",
+  "sqlalchemy>=2.0,<3",
   "uvicorn[standard]>=0.34,<1",
 ]
 
@@ -26,6 +31,11 @@ packages = ["src/redacted_backend"]
 addopts = "-ra"
 pythonpath = ["src"]
 testpaths = ["tests"]
+filterwarnings = [
+  "ignore:builtin type SwigPyPacked has no __module__ attribute:DeprecationWarning",
+  "ignore:builtin type SwigPyObject has no __module__ attribute:DeprecationWarning",
+  "ignore:builtin type swigvarlink has no __module__ attribute:DeprecationWarning",
+]
 
 [tool.uv]
 package = true
