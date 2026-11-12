@@ -18,6 +18,7 @@ from redacted_backend.db.repositories.passages import (
     PassageRepository,
 )
 from redacted_backend.db.repositories.visible_examples import (
+    ContextQueryArtifactConflictError,
     VisibleExampleRepository,
     artifact_example,
 )
@@ -27,6 +28,12 @@ from redacted_backend.documents.preparation import (
 )
 from redacted_backend.domain.documents import DocumentStatus
 from redacted_backend.domain.passages import PassageStatus
+from redacted_backend.domain.visible_examples import VisibleExample
+from redacted_backend.retrieval.context_query import (
+    ContextQueryError,
+    prepare_context_query,
+)
+from redacted_backend.retrieval.types import PreparedContextQuery
 from redacted_backend.storage.local import LocalDocumentStore
 
 
@@ -47,6 +54,11 @@ class VisibleContextSummary(BaseModel):
     visible_word_count: int = Field(ge=0)
     confirmed_mask_count: int = Field(ge=0)
     serialization_version: Literal["visible-transcript-v1"]
+    context_query_status: Literal["ready"] = "ready"
+    context_query_term_count: int = Field(ge=1)
+    context_query_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    context_query_version: Literal["context-query-v1"]
+    context_stopwords_version: str = Field(min_length=1)
 
 
 def create_context_router(
@@ -61,23 +73,29 @@ def create_context_router(
     )
     def prepare_context(passage_id: UUID) -> VisibleContextSummary:
         ready_database, ready_store = _require_services(database, document_store)
-        with ready_database.session_factory() as session:
-            passages = PassageRepository(session)
-            passage = passages.get(passage_id)
-            if passage is None or passage.status == PassageStatus.DELETED:
-                raise _not_found()
-            document = DocumentRepository(session).get(passage.document_id)
-            if document is None or document.status == DocumentStatus.DELETED:
-                raise _not_found()
-            existing = VisibleExampleRepository(session).get_current(
-                passage.id,
-                passage.revision,
-            )
-            if existing is not None:
-                return _summary(existing)
-            all_passages = passages.list_live_for_document(document.id)
-            expected_revision = passage.revision
-            pdf_path = ready_store.resolve(document.storage_key)
+        try:
+            with ready_database.session_factory() as session, session.begin():
+                passages = PassageRepository(session)
+                passage = passages.get(passage_id)
+                if passage is None or passage.status == PassageStatus.DELETED:
+                    raise _not_found()
+                document = DocumentRepository(session).get(passage.document_id)
+                if document is None or document.status == DocumentStatus.DELETED:
+                    raise _not_found()
+                artifacts = VisibleExampleRepository(session)
+                existing = artifacts.get_current(
+                    passage.id,
+                    passage.revision,
+                )
+                if existing is not None:
+                    query = _prepare_query(artifact_example(existing))
+                    artifacts.ensure_context_query(existing, query)
+                    return _summary(existing)
+                all_passages = passages.list_live_for_document(document.id)
+                expected_revision = passage.revision
+                pdf_path = ready_store.resolve(document.storage_key)
+        except ContextQueryArtifactConflictError as error:
+            raise _query_conflict(error) from error
 
         try:
             prepared = prepare_visible_context(
@@ -88,6 +106,7 @@ def create_context_router(
             )
         except VisibleContextPreparationError as error:
             raise _preparation_error(error) from error
+        query = _prepare_query(prepared.example)
 
         try:
             with ready_database.session_factory() as session, session.begin():
@@ -119,9 +138,11 @@ def create_context_router(
                 artifacts = VisibleExampleRepository(session)
                 existing = artifacts.get_current(current.id, current.revision)
                 if existing is not None:
+                    artifacts.ensure_context_query(existing, query)
                     return _summary(existing)
                 artifact = artifacts.save(
                     prepared,
+                    query,
                     passage_revision=current.revision,
                 )
                 passages.mark_context_ready(
@@ -145,15 +166,19 @@ def create_context_router(
                     "message": str(error),
                 },
             ) from error
+        except ContextQueryArtifactConflictError as error:
+            raise _query_conflict(error) from error
         except IntegrityError:
-            with ready_database.session_factory() as session:
+            with ready_database.session_factory() as session, session.begin():
                 current = PassageRepository(session).get(passage.id)
                 if current is not None:
-                    existing = VisibleExampleRepository(session).get_current(
+                    artifacts = VisibleExampleRepository(session)
+                    existing = artifacts.get_current(
                         current.id,
                         current.revision,
                     )
                     if existing is not None:
+                        artifacts.ensure_context_query(existing, query)
                         return _summary(existing)
             raise
 
@@ -171,6 +196,27 @@ def _summary(artifact) -> VisibleContextSummary:
         visible_word_count=artifact.visible_word_count,
         confirmed_mask_count=artifact.confirmed_mask_count,
         serialization_version=example.serialization_version,
+        context_query_term_count=artifact.context_query_term_count,
+        context_query_sha256=artifact.context_query_sha256,
+        context_query_version=artifact.context_query_version,
+        context_stopwords_version=artifact.context_stopwords_version,
+    )
+
+
+def _prepare_query(example: VisibleExample) -> PreparedContextQuery:
+    try:
+        return prepare_context_query(example)
+    except ContextQueryError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "context_query_empty", "message": str(error)},
+        ) from error
+
+
+def _query_conflict(error: ContextQueryArtifactConflictError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"code": "context_query_conflict", "message": str(error)},
     )
 
 

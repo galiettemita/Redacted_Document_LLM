@@ -7,6 +7,16 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class PreparedContextQuery(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    text: str = Field(min_length=1)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    term_count: int = Field(ge=1)
+    query_version: Literal["context-query-v1"] = "context-query-v1"
+    stopwords_version: str = Field(min_length=1)
+
+
 class Bm25IndexManifest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 

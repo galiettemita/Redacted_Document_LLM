@@ -10,6 +10,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -141,6 +142,23 @@ class VisibleExampleArtifact(Base):
     payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     visible_word_count: Mapped[int] = mapped_column(Integer, nullable=False)
     confirmed_mask_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    context_query: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context_query_sha256: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+    context_query_term_count: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    context_query_version: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+    context_stopwords_version: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
