@@ -75,7 +75,7 @@ uv run corpus capture-api \
   --output-root /absolute/path/to/corpus/historylab-api
 ```
 
-The public source still needs an evidence-backed mapping from Andrew's “CIA reading-room files” bucket to one exact API collection. [`backend/corpus/exclusions/v1.yaml`](backend/corpus/exclusions/v1.yaml) remains deliberately unready until that mapping and the full capture are verified. The coverage command also requires a non-empty `cables` collection, no unknown collection or FRUS identifiers, and exactly the ten 2019-2024 FRUS volumes reported by Appendix C. A different count is reported as a source-version gap, not silently accepted.
+Andrew's removed “CIA reading-room files” bucket is mapped to History Lab's `briefing` collection: Appendix C explicitly retains CREST while removing the small 2019+ bucket, and History Lab describes `briefing` as the CIA Current/Central Intelligence Bulletin releases while its separate `cia` collection is CREST. The mapping and citations are hashed in [`backend/corpus/exclusions/v1.yaml`](backend/corpus/exclusions/v1.yaml). The policy remains unready only for full-capture FRUS verification. The coverage command requires a non-empty `cables` collection, no unknown collection or FRUS identifiers, and exactly the ten 2019-2024 FRUS volumes reported by Appendix C. A different count is reported as a source-version gap, not silently accepted.
 
 After the capture and exclusion manifest are complete, create the coverage report and deterministic chunks:
 

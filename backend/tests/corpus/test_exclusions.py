@@ -31,6 +31,7 @@ def complete_manifest() -> ExclusionManifest:
         known_corpora={"briefing", "frus", "cfpf", "cables"},
         required_corpora={"cables"},
         cia_reading_room_corpus="briefing",
+        cia_mapping_evidence=["paper Appendix C", "History Lab collections"],
         cia_coverage_complete=True,
         frus_publication_years={
             "frus-old": 2018,
@@ -88,7 +89,8 @@ def test_repository_manifest_stays_unready_until_public_mappings_are_verified() 
 
     manifest = load_exclusion_manifest(path)
 
-    assert manifest.cia_reading_room_corpus is None
-    assert manifest.cia_coverage_complete is False
+    assert manifest.cia_reading_room_corpus == "briefing"
+    assert manifest.cia_coverage_complete is True
+    assert manifest.cia_mapping_evidence
     assert manifest.frus_coverage_complete is False
     assert manifest.coverage_ready is False

@@ -40,6 +40,7 @@ def exclusions() -> ExclusionManifest:
         known_corpora={"briefing", "cables", "cfpf", "frus"},
         required_corpora={"cables"},
         cia_reading_room_corpus="briefing",
+        cia_mapping_evidence=["paper Appendix C", "History Lab collections"],
         cia_coverage_complete=True,
         frus_publication_years={"frus-old": 2018},
         frus_metadata_sha256="a" * 64,

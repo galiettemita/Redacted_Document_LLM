@@ -19,6 +19,7 @@ class ExclusionManifest(BaseModel):
     known_corpora: set[str]
     required_corpora: set[str]
     cia_reading_room_corpus: str | None
+    cia_mapping_evidence: list[str]
     cia_coverage_complete: bool
     frus_publication_years: dict[str, int]
     frus_metadata_sha256: str | None = Field(
@@ -39,6 +40,8 @@ class ExclusionManifest(BaseModel):
             raise ValueError("CIA reading-room corpus must be a known corpus")
         if self.cia_coverage_complete and self.cia_reading_room_corpus is None:
             raise ValueError("complete CIA coverage requires a verified corpus mapping")
+        if self.cia_coverage_complete and not self.cia_mapping_evidence:
+            raise ValueError("complete CIA coverage requires source evidence")
         if self.frus_coverage_complete and (
             not self.frus_publication_years or self.frus_metadata_sha256 is None
         ):
@@ -62,6 +65,7 @@ class ExclusionManifest(BaseModel):
                 "known_corpora": sorted(self.known_corpora),
                 "required_corpora": sorted(self.required_corpora),
                 "cia_reading_room_corpus": self.cia_reading_room_corpus,
+                "cia_mapping_evidence": self.cia_mapping_evidence,
                 "cia_coverage_complete": self.cia_coverage_complete,
                 "frus_publication_years": dict(
                     sorted(self.frus_publication_years.items())

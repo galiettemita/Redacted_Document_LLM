@@ -48,6 +48,7 @@
     - [x] Download and checksum the authenticated Hugging Face export for audit.
     - [x] Identify and document its missing `cables` collection and ambiguous `source` field before indexing.
     - [x] Freeze and checksum the official Office of the Historian FRUS metadata feed.
+    - [x] Map Andrew's removed CIA reading-room bucket to `briefing` from the paper and History Lab collection descriptions, without using retrieval results.
     - [x] Implement and test resumable collection-aware API capture and coverage validation.
     - [x] Separate archive collection labels from origin URLs through chunks and BM25 metadata.
     - [x] Preserve official FRUS volumes with missing publication years as fail-closed unknowns.

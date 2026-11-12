@@ -6,11 +6,15 @@ the collection labels described by its card. The complete History Lab API has a
 separate `corpus` field and an additional `cables` collection, so only a frozen,
 verified API capture can become the retrieval source.
 
-Before a real corpus build, generate and review two identifier maps from public
-source metadata:
+The CIA mapping is now fixed to `briefing`. Appendix C says CREST remains 57%
+of archive text while the removed whole bucket contains the CIA's 2019+ reading-
+room release. History Lab describes `briefing` as the CIA Current/Central
+Intelligence Bulletin releases and the separate `cia` collection as CREST. The
+mapping and both citations are hashed into the policy; it was selected before
+retrieval and without inspecting a target result.
 
-- The exact API collection corresponding to the paper's whole CIA reading-room
-  bucket. Do not infer this from a collection name or document count.
+Before a real corpus build, finish the remaining public metadata work:
+
 - Official FRUS volume IDs and publication years from the Office of the
   Historian metadata feed, excluding publications from 2019 through 2024.
 

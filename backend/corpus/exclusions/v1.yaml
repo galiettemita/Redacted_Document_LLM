@@ -14,8 +14,11 @@ known_corpora:
   - worldbank
 required_corpora:
   - cables
-cia_reading_room_corpus: null
-cia_coverage_complete: false
+cia_reading_room_corpus: briefing
+cia_mapping_evidence:
+  - "Tang et al., Redaction_RAG_NAACL_v3.pdf, Appendix C, page 16: CREST is retained while one CIA reading-room bucket carrying 2019+ releases is removed."
+  - "https://lab.history.columbia.edu/collections: the briefing collection is the CIA Current/Central Intelligence Bulletin releases; the separate cia collection is CREST."
+cia_coverage_complete: true
 frus_publication_years: {}
 frus_metadata_sha256: null
 frus_coverage_complete: false
