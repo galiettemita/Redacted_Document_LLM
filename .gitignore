@@ -1,4 +1,10 @@
 .worktrees/
+.env
+.pytest_cache/
+__pycache__/
+*.py[cod]
+backend/.venv/
+var/
 node_modules/
 dist/
 coverage/

@@ -1,0 +1,67 @@
+name: redacted-document-llm
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: redacted
+      POSTGRES_USER: redacted
+      POSTGRES_PASSWORD: redacted-local
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U redacted -d redacted"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "127.0.0.1:56379:6379"
+    volumes:
+      - redis-data:/data
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      REDACTED_ENVIRONMENT: development
+      REDACTED_DATABASE_URL: postgresql://redacted:redacted-local@postgres:5432/redacted
+      REDACTED_REDIS_URL: redis://redis:6379/0
+      REDACTED_CORPUS_MANIFEST_PATH: /artifacts/corpus/manifest.json
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/readiness', timeout=2)"
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    init: true
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - backend-data:/var/lib/redacted
+      - corpus-artifacts:/artifacts
+
+volumes:
+  backend-data:
+  corpus-artifacts:
+  postgres-data:
+  redis-data:

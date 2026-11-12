@@ -1,6 +1,36 @@
 # Redacted Document LLM
 
-A frontend-only demonstration for exploring how an LLM might predict hidden passages in redacted documents. The app renders PDFs locally in the browser and uses fictional, simulated predictions throughout.
+The repository is being extended with a real, visible-only retrieval-assisted backend. The current backend foundation exposes readiness only; PDF upload, document processing, corpus retrieval, and model prediction are connected incrementally and must remain visibly unavailable until their corresponding implementation task is complete.
+
+## Backend foundation
+
+Requirements:
+
+- Docker Desktop with Docker Compose.
+- `uv` for running Python tests directly.
+
+Run the backend tests:
+
+```bash
+cd backend
+uv run pytest
+```
+
+Validate the local service definition:
+
+```bash
+docker compose config
+```
+
+Start the readiness foundation:
+
+```bash
+docker compose up --build backend
+```
+
+Then open `http://127.0.0.1:8000/v1/readiness`. HTTP readiness is independent from database, worker, corpus, and model readiness, so prediction readiness remains false until every real dependency is connected.
+
+Until the incremental backend stages are connected, the current user-facing flow remains a frontend demonstration for exploring how an LLM might predict hidden passages in redacted documents. It renders PDFs locally in the browser and uses fictional, simulated predictions throughout; the new readiness endpoint does not yet receive uploads or produce predictions.
 
 ## Run locally
 
@@ -20,7 +50,7 @@ To create a production bundle, run `npm run build`. The output is written to `di
 
 ## Important limitations
 
-- There is no backend, database, account system, OCR, retrieval pipeline, redaction detector, or real LLM.
+- The readiness-only backend does not yet connect uploads, database persistence, OCR, retrieval, redaction detection, or a real LLM to the user-facing flow.
 - Arbitrary uploads are displayed locally but are not analyzed.
 - The bundled Northstar memorandum and all of its passage predictions are fictional.
 - `Demo LLM` is a configurable display label, not an active model.

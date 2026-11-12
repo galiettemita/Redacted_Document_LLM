@@ -87,7 +87,7 @@
 - Produces: `ScientificConfig.manifest_hash() -> str` with `chunk_words=300`, `chunk_overlap=0`, `bm25_k1=1.2`, `bm25_b=0.75`, `top_chunks_per_list=300`, `rrf_k=60`, `top_documents=100`, `chunks_per_document=2`, `embedding_model='BAAI/bge-base-en-v1.5'`, `model='gpt-6-astra'`, `reasoning_effort='medium'`.
 - Produces: `GET /v1/readiness -> ReadinessResponse` with independent `database`, `worker`, `corpus`, and `model` components.
 
-- [ ] **Step 1: Write failing readiness and scientific-manifest tests**
+- [x] **Step 1: Write failing readiness and scientific-manifest tests**
 
 ```python
 def test_readiness_never_equates_http_health_with_prediction_readiness(client):
@@ -104,11 +104,11 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
     assert config.manifest_hash() == ScientificConfig().manifest_hash()
 ```
 
-- [ ] **Step 2: Run `cd backend && uv run pytest tests/test_readiness.py tests/test_scientific_config.py -v` and verify collection/import failure.**
-- [ ] **Step 3: Create the Python 3.12 package and implement the exact interfaces above; generate and commit `backend/uv.lock`.**
-- [ ] **Step 4: Add PostgreSQL, Redis, backend services, persistent named volumes, health checks, and non-secret defaults to `compose.yaml`; do not start OpenSearch yet.**
-- [ ] **Step 5: Run `docker compose config`, `cd backend && uv run pytest -v`, and `npm test -- --run`; expect all to pass.**
-- [ ] **Step 6: Update the checklist, commit with `feat: add backend readiness foundation`, and push.**
+- [x] **Step 2: Run `cd backend && uv run pytest tests/test_readiness.py tests/test_scientific_config.py -v` and verify collection/import failure.**
+- [x] **Step 3: Create the Python 3.12 package and implement the exact interfaces above; generate and commit `backend/uv.lock`.**
+- [x] **Step 4: Add PostgreSQL, Redis, backend services, persistent named volumes, health checks, and non-secret defaults to `compose.yaml`; do not start OpenSearch yet.**
+- [x] **Step 5: Run `docker compose config`, `cd backend && uv run pytest -v`, and `npm test -- --run`; expect all to pass.**
+- [x] **Step 6: Update the checklist, commit with `feat: add backend readiness foundation`, and push.**
 
 ### Task 2: Safe PDF persistence and upload API
 

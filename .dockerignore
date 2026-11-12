@@ -1,0 +1,14 @@
+.git
+.worktrees
+.env
+.env.*
+!.env.example
+node_modules
+dist
+coverage
+backend/.venv
+backend/.pytest_cache
+**/__pycache__
+*.py[cod]
+*.pdf
+var
