@@ -10,10 +10,12 @@ def corpus_document(*, doc_id: str = "doc-1", body: str) -> CorpusDocument:
         authored="Visible author",
         title="Visible title",
         body=body,
-        source="cfpf",
+        corpus="cfpf",
+        source_url="https://example.test/source",
         pg_cnt=2,
         char_cnt=len(body),
         word_cnt=len(body.split()),
+        doc_lang="en",
     )
 
 

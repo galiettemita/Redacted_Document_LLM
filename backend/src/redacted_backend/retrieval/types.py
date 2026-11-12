@@ -36,9 +36,11 @@ class RankedChunk(BaseModel):
     ordinal: int = Field(ge=0)
     text: str
     title: str | None
-    source: str
+    corpus: str
+    source_url: str | None
     classification: str | None
     authored: str | None
+    doc_lang: str | None
     rank: int = Field(ge=1)
     score: float
     retriever: Literal["bm25", "dense"]

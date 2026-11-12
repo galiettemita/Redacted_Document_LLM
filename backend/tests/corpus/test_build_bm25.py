@@ -17,8 +17,9 @@ def test_build_rejects_a_chunk_file_that_does_not_match_its_manifest(
     chunks_path = tmp_path / "chunks.jsonl"
     chunks_path.write_text('{"tampered":true}\n', encoding="utf-8")
     corpus = CorpusManifest(
-        schema_version="foiarchive-nine-fields-v1",
-        snapshot_hash="1" * 64,
+        schema_version="historylab-normalized-v1",
+        source_manifest_hash="1" * 64,
+        coverage_report_hash="4" * 64,
         exclusion_hash="2" * 64,
         scientific_hash=scientific.manifest_hash(),
         chunker_version=scientific.corpus_chunker_version,
@@ -26,7 +27,7 @@ def test_build_rejects_a_chunk_file_that_does_not_match_its_manifest(
         chunk_overlap=scientific.chunk_overlap,
         document_count=1,
         chunk_count=1,
-        source_counts={"cfpf": 1},
+        corpus_counts={"cfpf": 1},
         exclusion_counts={},
         coverage_ready=True,
         chunks_sha256="3" * 64,

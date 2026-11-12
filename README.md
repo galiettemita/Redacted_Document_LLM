@@ -40,7 +40,9 @@ The upload screen now sends PDFs to the local backend for validation and tempora
 
 ## Corpus preparation
 
-The backend now includes an offline-safe corpus builder and BM25 retriever for the paper's public-document collection. It locks `HistoryLab/foiarchive` to an immutable 40-character commit, verifies every source and chunk checksum, streams the repository's gzip-compressed JSON Lines, applies fail-closed release exclusions, and creates deterministic paragraph-aware chunks of at most 300 words with no overlap.
+The backend includes a resumable corpus capture, fail-closed coverage gate, deterministic chunker, and BM25 retriever for the paper's public-document collection. The authenticated `HistoryLab/foiarchive` Hugging Face snapshot is retained as a checksummed audit artifact, but inspection proved it is not the complete paper corpus: it lacks the separate `cables` collection, and its `source` field contains origin URLs or null rather than the archive collection labels required for Andrew's exclusions. It is therefore never accepted as the finished retrieval source.
+
+The finished source must be a frozen local capture of the public History Lab document API. The capture stores collection labels separately from origin URLs, uses crash-safe keyset pagination, verifies exact counts before and after every collection, and checksums every collection file. Interrupted work resumes after the last committed document without duplicating evidence.
 
 Run the read-only storage preflight before acquiring any corpus files:
 
@@ -53,11 +55,49 @@ The minimum is 150 GiB free and 250 GiB is recommended. An insufficient result e
 
 Run this command on the host against the exact intended storage path. A Docker Desktop container's virtual filesystem capacity is not evidence that the Mac has enough physical free space.
 
-Do not run `corpus lock-snapshot` until you have accepted the dataset terms on Hugging Face and chosen approved storage. A later approved build uses the `HF_TOKEN` environment variable; credentials, source JSONL, chunks, and indexes remain outside Git.
+Run the preflight again immediately before a large capture or index build. Source JSONL, checkpoints, chunks, and indexes remain outside Git. A capture that is interrupted or sees the upstream count change stays visibly incomplete and cannot pass readiness.
 
-The public dataset's nine fields do not identify the CIA release bucket or the FRUS volume publication year. Those two public identifier maps are still required. [`backend/corpus/exclusions/v1.yaml`](backend/corpus/exclusions/v1.yaml) therefore remains deliberately unready and unknown identifiers are excluded rather than silently treated as pre-cutoff documents.
+Freeze a downloaded copy of the Office of the Historian's official FRUS metadata:
 
-Once those maps are complete and a verified chunk manifest exists, the pinned OpenSearch 3.9.0 profile can be started and the real index built:
+```bash
+cd backend
+uv run corpus freeze-frus \
+  --input /absolute/path/to/frus-metadata.xml \
+  --output /absolute/path/to/frus-publication-manifest.json \
+  --retrieved-at 2026-11-12T00:00:00-05:00
+```
+
+When `https://api.foiarchive.org/corpora` is healthy, start or resume the complete collection-aware capture:
+
+```bash
+cd backend
+uv run corpus capture-api \
+  --output-root /absolute/path/to/corpus/historylab-api
+```
+
+The public source still needs an evidence-backed mapping from Andrew's “CIA reading-room files” bucket to one exact API collection. [`backend/corpus/exclusions/v1.yaml`](backend/corpus/exclusions/v1.yaml) remains deliberately unready until that mapping and the full capture are verified. The coverage command also requires a non-empty `cables` collection, no unknown collection or FRUS identifiers, and exactly the ten 2019-2024 FRUS volumes reported by Appendix C. A different count is reported as a source-version gap, not silently accepted.
+
+After the capture and exclusion manifest are complete, create the coverage report and deterministic chunks:
+
+```bash
+cd backend
+uv run corpus validate-capture \
+  --capture-root /absolute/path/to/corpus/historylab-api \
+  --capture-manifest /absolute/path/to/corpus/historylab-api/capture-manifest.json \
+  --exclusions corpus/exclusions/v1.yaml \
+  --frus-manifest /absolute/path/to/frus-publication-manifest.json \
+  --output /absolute/path/to/corpus/coverage-report.json
+
+uv run corpus build-chunks \
+  --capture-root /absolute/path/to/corpus/historylab-api \
+  --capture-manifest /absolute/path/to/corpus/historylab-api/capture-manifest.json \
+  --coverage-report /absolute/path/to/corpus/coverage-report.json \
+  --exclusions corpus/exclusions/v1.yaml \
+  --output /absolute/path/to/corpus/chunks.jsonl \
+  --manifest /absolute/path/to/corpus/manifest.json
+```
+
+Only after that coverage report is ready may the pinned OpenSearch 3.9.0 profile be started and the real index built:
 
 ```bash
 REDACTED_CORPUS_ROOT=/absolute/path/to/corpus docker compose --profile retrieval up -d opensearch

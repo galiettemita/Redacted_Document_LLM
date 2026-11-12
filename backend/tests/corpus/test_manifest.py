@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import gzip
 import hashlib
 import json
 from pathlib import Path
@@ -8,88 +7,148 @@ from pathlib import Path
 import pytest
 
 from redacted_backend.corpus.exclusions import ExclusionManifest
-from redacted_backend.corpus.manifest import CorpusBuildError, build_chunk_file
-from redacted_backend.corpus.snapshot import (
-    SnapshotChecksumError,
-    SnapshotFile,
-    SnapshotLock,
+from redacted_backend.corpus.historylab_export import (
+    CAPTURE_SELECT_FIELDS,
+    ApiCaptureArtifact,
+    ApiCaptureManifest,
+    CorpusCaptureError,
+    CorpusCoverageReport,
 )
+from redacted_backend.corpus.manifest import CorpusBuildError, build_chunk_file
 from redacted_backend.scientific_config import ScientificConfig
 
-COMMIT = "0123456789abcdef0123456789abcdef01234567"
 
-
-def record(doc_id: str, body: str, source: str = "cfpf") -> dict[str, object]:
+def record(doc_id: str, body: str, corpus: str = "cfpf") -> dict[str, object]:
     return {
         "doc_id": doc_id,
         "classification": "UNCLASSIFIED",
-        "authored": "Visible author",
+        "authored": "1975-01-01",
         "title": "Visible title",
         "body": body,
-        "source": source,
+        "corpus": corpus,
+        "source_url": "https://example.test/source",
         "pg_cnt": 1,
         "char_cnt": len(body),
         "word_cnt": len(body.split()),
+        "doc_lang": "en",
     }
 
 
-def write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
-    path.write_text(
-        "".join(f"{json.dumps(row, sort_keys=True)}\n" for row in rows),
+def exclusions() -> ExclusionManifest:
+    return ExclusionManifest(
+        version="v2-test",
+        known_corpora={"briefing", "cables", "cfpf", "frus"},
+        required_corpora={"cables"},
+        cia_reading_room_corpus="briefing",
+        cia_coverage_complete=True,
+        frus_publication_years={"frus-old": 2018},
+        frus_metadata_sha256="a" * 64,
+        frus_coverage_complete=True,
+        expected_post_cutoff_frus_volumes=10,
+    )
+
+
+def capture_for(
+    root: Path,
+    rows_by_corpus: dict[str, list[dict[str, object]]],
+) -> ApiCaptureManifest:
+    artifacts: list[ApiCaptureArtifact] = []
+    for corpus, rows in sorted(rows_by_corpus.items()):
+        relative = f"collections/{corpus}.jsonl"
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "".join(
+                json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n"
+                for row in rows
+            ),
+            encoding="utf-8",
+        )
+        artifacts.append(
+            ApiCaptureArtifact(
+                corpus=corpus,
+                path=relative,
+                document_count=len(rows),
+                size_bytes=path.stat().st_size,
+                sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                first_doc_id=str(rows[0]["doc_id"]) if rows else None,
+                last_doc_id=str(rows[-1]["doc_id"]) if rows else None,
+            )
+        )
+    counts = {item.corpus: item.document_count for item in artifacts}
+    catalog = root / "catalog.json"
+    catalog.write_text(
+        json.dumps(
+            [
+                {"corpus": corpus, "doc_cnt": count}
+                for corpus, count in sorted(counts.items())
+            ],
+            separators=(",", ":"),
+        )
+        + "\n",
         encoding="utf-8",
     )
-
-
-def manifest() -> ExclusionManifest:
-    return ExclusionManifest(
-        version="v1-test",
-        included_sources={"cfpf", "cia", "frus"},
-        cia_reading_room_excluded_doc_ids=set(),
-        cia_confirmed_pre_cutoff_doc_ids={"cia-known"},
-        frus_publication_years={"frus-known": 2018},
-        cia_coverage_complete=False,
-        frus_coverage_complete=False,
+    return ApiCaptureManifest(
+        schema_version="historylab-postgrest-v1",
+        base_url="https://api.example.test",
+        captured_at="2026-11-12T12:00:00Z",
+        select_fields=list(CAPTURE_SELECT_FIELDS),
+        order="doc_id.asc",
+        catalog_path="catalog.json",
+        catalog_size_bytes=catalog.stat().st_size,
+        catalog_sha256=hashlib.sha256(catalog.read_bytes()).hexdigest(),
+        counts_before=counts,
+        counts_after=counts,
+        artifacts=artifacts,
+        complete=True,
     )
 
 
-def snapshot(path: Path) -> SnapshotLock:
-    checksum = hashlib.sha256(path.read_bytes()).hexdigest()
-    return SnapshotLock(
-        repo_id="HistoryLab/foiarchive",
-        revision=COMMIT,
-        license="cc-by-nc-4.0",
-        files=[
-            SnapshotFile(
-                path=path.name,
-                size_bytes=path.stat().st_size,
-                sha256=checksum,
-            )
-        ],
+def coverage_for(
+    capture: ApiCaptureManifest,
+    policy: ExclusionManifest,
+    *,
+    ready: bool = True,
+) -> CorpusCoverageReport:
+    return CorpusCoverageReport(
+        capture_manifest_hash=capture.manifest_hash(),
+        exclusion_manifest_hash=policy.manifest_hash(),
+        frus_manifest_hash="c" * 64,
+        ready=ready,
+        reasons=[] if ready else ["source_gap"],
+        corpus_counts={item.corpus: item.document_count for item in capture.artifacts},
+        post_cutoff_frus_volumes=[],
+        unmatched_frus_document_count=0,
+        unmatched_frus_document_samples=[],
     )
 
 
 def test_chunk_build_is_byte_deterministic_and_records_provenance(
     tmp_path: Path,
 ) -> None:
-    source = tmp_path / "source.jsonl"
+    source = capture_for(
+        tmp_path,
+        {"cfpf": [record("doc-1", "Alpha beta."), record("doc-2", "Gamma delta.")]},
+    )
+    policy = exclusions()
+    coverage = coverage_for(source, policy)
     first_output = tmp_path / "chunks-1.jsonl"
     second_output = tmp_path / "chunks-2.jsonl"
-    write_jsonl(
-        source, [record("doc-1", "Alpha beta."), record("doc-2", "Gamma delta.")]
-    )
 
     first = build_chunk_file(
-        [source],
+        tmp_path,
         first_output,
-        snapshot=snapshot(source),
-        exclusions=manifest(),
+        capture=source,
+        coverage=coverage,
+        exclusions=policy,
         scientific=ScientificConfig(),
     )
     second = build_chunk_file(
-        [source],
+        tmp_path,
         second_output,
-        snapshot=snapshot(source),
-        exclusions=manifest(),
+        capture=source,
+        coverage=coverage,
+        exclusions=policy,
         scientific=ScientificConfig(),
     )
 
@@ -97,97 +156,85 @@ def test_chunk_build_is_byte_deterministic_and_records_provenance(
     assert first.manifest_hash() == second.manifest_hash()
     assert first.document_count == 2
     assert first.chunk_count == 2
-    assert first.source_counts == {"cfpf": 2}
+    assert first.corpus_counts == {"cfpf": 2}
+    assert first.source_manifest_hash == source.manifest_hash()
+    assert first.coverage_report_hash == coverage.manifest_hash()
     assert first.chunk_words == 300
     assert first.chunk_overlap == 0
-    assert len(first.chunks_sha256) == 64
 
 
-def test_chunk_build_reports_unknown_provenance_without_silently_including_it(
+def test_chunk_build_excludes_the_whole_verified_cia_reading_room_collection(
     tmp_path: Path,
 ) -> None:
-    source = tmp_path / "source.jsonl"
-    output = tmp_path / "chunks.jsonl"
-    write_jsonl(source, [record("cia-unmapped", "Visible words.", source="cia")])
+    source = capture_for(
+        tmp_path,
+        {"briefing": [record("briefing-1", "Visible words.", "briefing")]},
+    )
+    policy = exclusions()
 
     result = build_chunk_file(
-        [source],
-        output,
-        snapshot=snapshot(source),
-        exclusions=manifest(),
+        tmp_path,
+        tmp_path / "chunks.jsonl",
+        capture=source,
+        coverage=coverage_for(source, policy),
+        exclusions=policy,
         scientific=ScientificConfig(),
     )
 
-    assert result.coverage_ready is False
     assert result.document_count == 0
-    assert result.exclusion_counts == {"unknown_release_provenance": 1}
-    assert output.read_text(encoding="utf-8") == ""
+    assert result.exclusion_counts == {"cia_reading_room_2019_plus": 1}
 
 
-def test_chunk_build_rejects_records_that_do_not_match_the_nine_public_fields(
+def test_chunk_build_rejects_records_outside_the_normalized_api_schema(
     tmp_path: Path,
 ) -> None:
-    source = tmp_path / "source.jsonl"
-    output = tmp_path / "chunks.jsonl"
-    invalid = record("doc-1", "Visible words.") | {"release_text": "not a public field"}
-    write_jsonl(source, [invalid])
+    invalid = record("doc-1", "Visible words.") | {"release_text": "not public"}
+    source = capture_for(tmp_path, {"cfpf": [invalid]})
+    policy = exclusions()
 
-    with pytest.raises(CorpusBuildError, match="nine-field schema"):
+    with pytest.raises(CorpusBuildError, match="normalized History Lab schema"):
         build_chunk_file(
-            [source],
-            output,
-            snapshot=snapshot(source),
-            exclusions=manifest(),
+            tmp_path,
+            tmp_path / "chunks.jsonl",
+            capture=source,
+            coverage=coverage_for(source, policy),
+            exclusions=policy,
             scientific=ScientificConfig(),
         )
 
 
-def test_chunk_build_refuses_input_bytes_that_do_not_match_the_snapshot(
+def test_chunk_build_refuses_capture_bytes_that_do_not_match_the_manifest(
     tmp_path: Path,
 ) -> None:
-    source = tmp_path / "source.jsonl"
+    source = capture_for(tmp_path, {"cfpf": [record("doc-1", "Visible words.")]})
+    policy = exclusions()
+    path = tmp_path / source.artifact_for("cfpf").path
+    path.write_text("tampered\n", encoding="utf-8")
     output = tmp_path / "chunks.jsonl"
-    write_jsonl(source, [record("doc-1", "Visible words.")])
-    incorrect = SnapshotLock(
-        repo_id="HistoryLab/foiarchive",
-        revision=COMMIT,
-        license="cc-by-nc-4.0",
-        files=[
-            SnapshotFile(
-                path=source.name,
-                size_bytes=source.stat().st_size,
-                sha256="0" * 64,
-            )
-        ],
-    )
 
-    with pytest.raises(SnapshotChecksumError, match="source.jsonl"):
+    with pytest.raises(CorpusCaptureError, match="size mismatch|checksum mismatch"):
         build_chunk_file(
-            [source],
+            tmp_path,
             output,
-            snapshot=incorrect,
-            exclusions=manifest(),
+            capture=source,
+            coverage=coverage_for(source, policy),
+            exclusions=policy,
             scientific=ScientificConfig(),
         )
 
     assert not output.exists()
 
 
-def test_chunk_build_streams_the_corpus_json_lines_from_gzip(tmp_path: Path) -> None:
-    source = tmp_path / "foiarchive.json.gz"
-    output = tmp_path / "chunks.jsonl"
-    encoded = f"{json.dumps(record('doc-gzip', 'Visible compressed words.'), sort_keys=True)}\n"
-    with gzip.open(source, "wt", encoding="utf-8") as destination:
-        destination.write(encoded)
+def test_chunk_build_refuses_an_unready_coverage_report(tmp_path: Path) -> None:
+    source = capture_for(tmp_path, {"cfpf": [record("doc-1", "Visible words.")]})
+    policy = exclusions()
 
-    result = build_chunk_file(
-        [source],
-        output,
-        snapshot=snapshot(source),
-        exclusions=manifest(),
-        scientific=ScientificConfig(),
-    )
-
-    assert result.document_count == 1
-    assert result.chunk_count == 1
-    assert json.loads(output.read_text(encoding="utf-8"))["document_id"] == "doc-gzip"
+    with pytest.raises(CorpusBuildError, match="coverage report is not ready"):
+        build_chunk_file(
+            tmp_path,
+            tmp_path / "chunks.jsonl",
+            capture=source,
+            coverage=coverage_for(source, policy, ready=False),
+            exclusions=policy,
+            scientific=ScientificConfig(),
+        )

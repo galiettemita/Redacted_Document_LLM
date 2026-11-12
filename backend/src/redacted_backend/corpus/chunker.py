@@ -6,22 +6,13 @@ import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from redacted_backend.corpus.historylab_export import NormalizedCorpusDocument
+
 _PARAGRAPH_BREAK = re.compile(r"\n\s*\n")
 _SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+")
 
 
-class CorpusDocument(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    doc_id: str = Field(min_length=1)
-    classification: str | None
-    authored: str | None
-    title: str | None
-    body: str
-    source: str = Field(min_length=1)
-    pg_cnt: int | None = Field(default=None, ge=0)
-    char_cnt: int = Field(ge=0)
-    word_cnt: int = Field(ge=0)
+CorpusDocument = NormalizedCorpusDocument
 
 
 class CorpusChunk(BaseModel):
@@ -33,9 +24,11 @@ class CorpusChunk(BaseModel):
     text: str
     word_count: int = Field(ge=1, le=300)
     title: str | None
-    source: str
+    corpus: str
+    source_url: str | None
     classification: str | None
     authored: str | None
+    doc_lang: str | None
 
 
 def chunk_document(
@@ -79,9 +72,11 @@ def chunk_document(
             text=text,
             word_count=len(text.split()),
             title=document.title,
-            source=document.source,
+            corpus=document.corpus,
+            source_url=document.source_url,
             classification=document.classification,
             authored=document.authored,
+            doc_lang=document.doc_lang,
         )
         for ordinal, text in enumerate(texts)
     ]

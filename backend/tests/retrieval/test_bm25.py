@@ -50,16 +50,19 @@ def chunk(ordinal: int = 0) -> CorpusChunk:
         text=text,
         word_count=len(text.split()),
         title=f"Title {ordinal}",
-        source="cfpf",
+        corpus="cfpf",
+        source_url="https://example.test/source",
         classification="UNCLASSIFIED",
         authored="Visible author",
+        doc_lang="en",
     )
 
 
 def corpus_manifest(scientific: ScientificConfig, chunk_count: int) -> CorpusManifest:
     return CorpusManifest(
-        schema_version="foiarchive-nine-fields-v1",
-        snapshot_hash="1" * 64,
+        schema_version="historylab-normalized-v1",
+        source_manifest_hash="1" * 64,
+        coverage_report_hash="4" * 64,
         exclusion_hash="2" * 64,
         scientific_hash=scientific.manifest_hash(),
         chunker_version=scientific.corpus_chunker_version,
@@ -67,7 +70,7 @@ def corpus_manifest(scientific: ScientificConfig, chunk_count: int) -> CorpusMan
         chunk_overlap=scientific.chunk_overlap,
         document_count=chunk_count,
         chunk_count=chunk_count,
-        source_counts={"cfpf": chunk_count},
+        corpus_counts={"cfpf": chunk_count},
         exclusion_counts={},
         coverage_ready=True,
         chunks_sha256="3" * 64,
@@ -84,9 +87,11 @@ def search_hit(item: CorpusChunk, score: float = 1.0) -> dict[str, Any]:
             "ordinal": item.ordinal,
             "text": item.text,
             "title": item.title,
-            "source": item.source,
+            "corpus": item.corpus,
+            "source_url": item.source_url,
             "classification": item.classification,
             "authored": item.authored,
+            "doc_lang": item.doc_lang,
         },
     }
 
@@ -128,9 +133,11 @@ def test_build_pins_standard_unicode_analysis_stopwords_and_bm25() -> None:
                 "ordinal": {"type": "integer"},
                 "text": {"type": "text", "analyzer": "visible_english"},
                 "title": {"type": "keyword", "index": False},
-                "source": {"type": "keyword"},
+                "corpus": {"type": "keyword"},
+                "source_url": {"type": "keyword", "index": False},
                 "classification": {"type": "keyword", "index": False},
                 "authored": {"type": "keyword", "index": False},
+                "doc_lang": {"type": "keyword", "index": False},
             },
         },
     }

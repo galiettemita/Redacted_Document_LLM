@@ -51,8 +51,9 @@ def test_corpus_readiness_requires_matching_corpus_and_bm25_manifests(
 ) -> None:
     scientific = ScientificConfig()
     corpus = CorpusManifest(
-        schema_version="foiarchive-nine-fields-v1",
-        snapshot_hash="1" * 64,
+        schema_version="historylab-normalized-v1",
+        source_manifest_hash="1" * 64,
+        coverage_report_hash="4" * 64,
         exclusion_hash="2" * 64,
         scientific_hash=scientific.manifest_hash(),
         chunker_version=scientific.corpus_chunker_version,
@@ -60,7 +61,7 @@ def test_corpus_readiness_requires_matching_corpus_and_bm25_manifests(
         chunk_overlap=scientific.chunk_overlap,
         document_count=1,
         chunk_count=1,
-        source_counts={"cfpf": 1},
+        corpus_counts={"cfpf": 1},
         exclusion_counts={},
         coverage_ready=True,
         chunks_sha256="3" * 64,
@@ -101,8 +102,9 @@ def test_corpus_readiness_requires_matching_corpus_and_bm25_manifests(
 def test_corpus_readiness_rejects_an_incompatible_bm25_definition_or_count() -> None:
     scientific = ScientificConfig()
     corpus = CorpusManifest(
-        schema_version="foiarchive-nine-fields-v1",
-        snapshot_hash="1" * 64,
+        schema_version="historylab-normalized-v1",
+        source_manifest_hash="1" * 64,
+        coverage_report_hash="4" * 64,
         exclusion_hash="2" * 64,
         scientific_hash=scientific.manifest_hash(),
         chunker_version=scientific.corpus_chunker_version,
@@ -110,7 +112,7 @@ def test_corpus_readiness_rejects_an_incompatible_bm25_definition_or_count() -> 
         chunk_overlap=scientific.chunk_overlap,
         document_count=1,
         chunk_count=1,
-        source_counts={"cfpf": 1},
+        corpus_counts={"cfpf": 1},
         exclusion_counts={},
         coverage_ready=True,
         chunks_sha256="3" * 64,

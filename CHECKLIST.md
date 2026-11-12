@@ -48,7 +48,9 @@
     - [x] Download and checksum the authenticated Hugging Face export for audit.
     - [x] Identify and document its missing `cables` collection and ambiguous `source` field before indexing.
     - [x] Freeze and checksum the official Office of the Historian FRUS metadata feed.
-    - [ ] Implement and test resumable collection-aware API capture and coverage validation.
+    - [x] Implement and test resumable collection-aware API capture and coverage validation.
+    - [x] Separate archive collection labels from origin URLs through chunks and BM25 metadata.
+    - [x] Preserve official FRUS volumes with missing publication years as fail-closed unknowns.
     - [ ] Capture the full public archive when the History Lab API is healthy and pass every source invariant.
   - [ ] Task 7: Add BM25 indexing and visible context-query retrieval.
     - [x] Implement and test the pinned OpenSearch index, exact chunk checksum verification, deterministic top-300 search, provenance manifests, and readiness checks.

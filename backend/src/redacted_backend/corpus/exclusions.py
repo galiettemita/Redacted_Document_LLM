@@ -7,40 +7,70 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from redacted_backend.corpus.frus_metadata import FrusMetadataError, match_frus_volume
 
 
 class ExclusionManifest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     version: str
-    included_sources: set[str]
-    cia_reading_room_excluded_doc_ids: set[str]
-    cia_confirmed_pre_cutoff_doc_ids: set[str]
-    frus_publication_years: dict[str, int]
+    known_corpora: set[str]
+    required_corpora: set[str]
+    cia_reading_room_corpus: str | None
     cia_coverage_complete: bool
+    frus_publication_years: dict[str, int]
+    frus_metadata_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
     frus_coverage_complete: bool
+    expected_post_cutoff_frus_volumes: int = Field(default=10, ge=1)
+
+    @model_validator(mode="after")
+    def validate_policy(self) -> ExclusionManifest:
+        if not self.required_corpora.issubset(self.known_corpora):
+            raise ValueError("required corpora must be a subset of known corpora")
+        if (
+            self.cia_reading_room_corpus is not None
+            and self.cia_reading_room_corpus not in self.known_corpora
+        ):
+            raise ValueError("CIA reading-room corpus must be a known corpus")
+        if self.cia_coverage_complete and self.cia_reading_room_corpus is None:
+            raise ValueError("complete CIA coverage requires a verified corpus mapping")
+        if self.frus_coverage_complete and (
+            not self.frus_publication_years or self.frus_metadata_sha256 is None
+        ):
+            raise ValueError("complete FRUS coverage requires official frozen metadata")
+        return self
 
     @property
     def coverage_ready(self) -> bool:
-        return self.cia_coverage_complete and self.frus_coverage_complete
+        return (
+            self.cia_coverage_complete
+            and self.cia_reading_room_corpus is not None
+            and self.frus_coverage_complete
+            and bool(self.frus_publication_years)
+            and self.frus_metadata_sha256 is not None
+        )
 
     def manifest_hash(self) -> str:
         canonical = json.dumps(
             {
                 "version": self.version,
-                "included_sources": sorted(self.included_sources),
-                "cia_reading_room_excluded_doc_ids": sorted(
-                    self.cia_reading_room_excluded_doc_ids
-                ),
-                "cia_confirmed_pre_cutoff_doc_ids": sorted(
-                    self.cia_confirmed_pre_cutoff_doc_ids
-                ),
+                "known_corpora": sorted(self.known_corpora),
+                "required_corpora": sorted(self.required_corpora),
+                "cia_reading_room_corpus": self.cia_reading_room_corpus,
+                "cia_coverage_complete": self.cia_coverage_complete,
                 "frus_publication_years": dict(
                     sorted(self.frus_publication_years.items())
                 ),
-                "cia_coverage_complete": self.cia_coverage_complete,
+                "frus_metadata_sha256": self.frus_metadata_sha256,
                 "frus_coverage_complete": self.frus_coverage_complete,
+                "expected_post_cutoff_frus_volumes": (
+                    self.expected_post_cutoff_frus_volumes
+                ),
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -67,47 +97,48 @@ def should_include(
     exclusion_manifest: ExclusionManifest,
 ) -> InclusionDecision:
     doc_id = str(document.get("doc_id", "")).strip()
-    source = str(document.get("source", "")).strip().lower()
+    corpus = str(document.get("corpus", "")).strip().lower()
     if not doc_id:
         return InclusionDecision(
             included=False,
             ready=False,
             reason="unknown_document_identifier",
         )
-    if source not in exclusion_manifest.included_sources:
+    if corpus not in exclusion_manifest.known_corpora:
         return InclusionDecision(
             included=False,
             ready=False,
-            reason="unknown_source",
+            reason="unknown_corpus",
         )
 
-    if source == "cia":
-        if doc_id in exclusion_manifest.cia_reading_room_excluded_doc_ids:
-            return InclusionDecision(
-                included=False,
-                ready=True,
-                reason="cia_reading_room_2019_plus",
+    if corpus == exclusion_manifest.cia_reading_room_corpus:
+        return InclusionDecision(
+            included=False,
+            ready=exclusion_manifest.cia_coverage_complete,
+            reason=(
+                "cia_reading_room_2019_plus"
+                if exclusion_manifest.cia_coverage_complete
+                else "cia_collection_mapping_unverified"
+            ),
+        )
+
+    if corpus == "frus":
+        try:
+            volume_id = match_frus_volume(
+                doc_id,
+                exclusion_manifest.frus_publication_years,
             )
-        if doc_id in exclusion_manifest.cia_confirmed_pre_cutoff_doc_ids:
-            return InclusionDecision(included=True, ready=True, reason="included")
-        return InclusionDecision(
-            included=False,
-            ready=False,
-            reason="unknown_release_provenance",
-        )
-
-    if source == "frus":
-        publication_year = exclusion_manifest.frus_publication_years.get(doc_id)
-        if publication_year is None:
+        except FrusMetadataError:
             return InclusionDecision(
                 included=False,
                 ready=False,
                 reason="unknown_release_provenance",
             )
+        publication_year = exclusion_manifest.frus_publication_years[volume_id]
         if 2019 <= publication_year <= 2024:
             return InclusionDecision(
                 included=False,
-                ready=True,
+                ready=exclusion_manifest.frus_coverage_complete,
                 reason="frus_published_2019_2024",
             )
         if publication_year > 2024:

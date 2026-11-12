@@ -1,7 +1,8 @@
-version: v1
-included_sources:
+version: v2
+known_corpora:
   - briefing
   - cabinet
+  - cables
   - cfpf
   - cia
   - clinton
@@ -11,9 +12,12 @@ included_sources:
   - nato
   - un
   - worldbank
-cia_reading_room_excluded_doc_ids: []
-cia_confirmed_pre_cutoff_doc_ids: []
-frus_publication_years: {}
+required_corpora:
+  - cables
+cia_reading_room_corpus: null
 cia_coverage_complete: false
+frus_publication_years: {}
+frus_metadata_sha256: null
 frus_coverage_complete: false
+expected_post_cutoff_frus_volumes: 10
 

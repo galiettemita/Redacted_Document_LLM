@@ -247,9 +247,9 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - Produces: `validate_capture_for_paper(capture, exclusions, frus) -> CorpusCoverageReport` that requires a non-empty `cables` collection, a verified whole-collection CIA reading-room exclusion, no unknown collections or FRUS IDs, and exactly ten present 2019-2024 FRUS volumes.
 - Normalized records distinguish `corpus` (the archive collection used for filtering) from `source_url` (origin provenance). Downstream chunk and retrieval metadata use `corpus`.
 
-- [ ] **Step 1: Write failing tests for stable keyset pagination, interrupted-page recovery, duplicate/missing IDs, API count drift, safe paths, checksums, absent `cables`, unknown collections, FRUS longest-prefix matching, unmatched IDs, and the exact ten-volume invariant.**
-- [ ] **Step 2: Run the focused tests and verify they fail against the missing capture/FRUS interfaces.**
-- [ ] **Step 3: Implement the resumable API capture, normalized schema, official FRUS parser, coverage report, and CLI commands. Keep every large artifact outside Git and make partial output visibly incomplete.**
+- [x] **Step 1: Write failing tests for stable keyset pagination, interrupted-page recovery, duplicate/missing IDs, API count drift, safe paths, checksums, absent `cables`, unknown collections, FRUS longest-prefix matching, unmatched IDs, and the exact ten-volume invariant.**
+- [x] **Step 2: Run the focused tests and verify they fail against the missing capture/FRUS interfaces.**
+- [x] **Step 3: Implement the resumable API capture, normalized schema, official FRUS parser, coverage report, and CLI commands. Keep every large artifact outside Git and make partial output visibly incomplete.**
 - [ ] **Step 4: Freeze the already downloaded official FRUS feed and record its checksum. When the public History Lab API is healthy, capture all collections and verify before/after exact counts and file checksums. Do not mix the API capture with the older Hugging Face export.**
 - [ ] **Step 5: Populate the exclusion manifest from verified public metadata and run the full coverage gate. If the API remains unavailable or the archive contains a different number of post-cutoff FRUS volumes, stop with an explicit source gap.**
 - [ ] **Step 6: Run focused and full backend/frontend verification, update the checklist, commit with `feat: freeze complete History Lab corpus source`, and push.**
