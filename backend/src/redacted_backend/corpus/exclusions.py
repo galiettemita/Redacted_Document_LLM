@@ -28,6 +28,8 @@ class ExclusionManifest(BaseModel):
     )
     frus_coverage_complete: bool
     expected_post_cutoff_frus_volumes: int = Field(default=10, ge=1)
+    expected_archive_document_count: int = Field(default=5_550_000, ge=1)
+    archive_document_count_tolerance: int = Field(default=5_000, ge=0)
 
     @model_validator(mode="after")
     def validate_policy(self) -> ExclusionManifest:
@@ -74,6 +76,12 @@ class ExclusionManifest(BaseModel):
                 "frus_coverage_complete": self.frus_coverage_complete,
                 "expected_post_cutoff_frus_volumes": (
                     self.expected_post_cutoff_frus_volumes
+                ),
+                "expected_archive_document_count": (
+                    self.expected_archive_document_count
+                ),
+                "archive_document_count_tolerance": (
+                    self.archive_document_count_tolerance
                 ),
             },
             sort_keys=True,

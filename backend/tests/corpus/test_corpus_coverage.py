@@ -108,6 +108,8 @@ def exclusions(years: dict[str, int]) -> ExclusionManifest:
         frus_metadata_sha256="a" * 64,
         frus_coverage_complete=True,
         expected_post_cutoff_frus_volumes=10,
+        expected_archive_document_count=3 + len(years),
+        archive_document_count_tolerance=0,
     )
 
 
@@ -145,6 +147,7 @@ def test_paper_coverage_requires_cables_and_exactly_ten_post_cutoff_frus_volumes
 
     assert report.ready is True
     assert report.reasons == []
+    assert report.archive_document_count == 14
     assert len(report.post_cutoff_frus_volumes) == 10
     assert report.unmatched_frus_document_count == 0
 
@@ -230,3 +233,22 @@ def test_paper_coverage_fails_closed_on_unmatched_frus_ids(tmp_path: Path) -> No
     assert report.ready is False
     assert report.unmatched_frus_document_count == 1
     assert "unmatched_frus_document_ids:1" in report.reasons
+
+
+def test_paper_coverage_reports_archive_document_count_source_gap(
+    tmp_path: Path,
+) -> None:
+    years = ten_post_cutoff_volumes()
+    policy = exclusions(years).model_copy(
+        update={"expected_archive_document_count": 5_550_000}
+    )
+
+    report = validate_capture_for_paper(
+        valid_capture(tmp_path, years),
+        tmp_path,
+        policy,
+        official_metadata(years),
+    )
+
+    assert report.ready is False
+    assert "archive_document_count:14:expected:5550000:tolerance:0" in report.reasons

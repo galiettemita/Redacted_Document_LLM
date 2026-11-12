@@ -20,8 +20,9 @@ Before a real corpus build, finish the remaining public metadata work:
 
 Set each `*_coverage_complete` flag only after the full capture passes its
 coverage report. The report requires non-empty `cables`, no unknown collections
-or FRUS IDs, and exactly the ten 2019-2024 FRUS volumes reported in the paper.
-A different count is a source-version gap, not permission to alter the rule.
+or FRUS IDs, a total within the rounding interval implied by the paper's 5.55M
+files, and exactly the ten 2019-2024 FRUS volumes reported in the paper. A
+different count is a source-version gap, not permission to alter the rule.
 Unknown identifiers fail closed. Never choose exclusions after inspecting
 retrieval results for a target.
 

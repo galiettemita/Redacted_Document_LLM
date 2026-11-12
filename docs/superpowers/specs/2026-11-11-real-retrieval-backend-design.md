@@ -199,7 +199,7 @@ The paper's known cutoffs are encoded as a versioned exclusion manifest:
 - retain other pre-cutoff archive collections used by the paper;
 - exclude a target bulletin under every known earlier/later identifier before retrieval.
 
-The builder produces a coverage report. Readiness remains false if a required exclusion rule cannot be applied to the captured schema, the archive changes during capture, `cables` is absent, the CIA collection mapping is unverified, a FRUS identifier is unmatched, or the expected ten excluded FRUS volumes are not present. Unknown release provenance is surfaced in that report; it is never silently treated as pre-cutoff.
+The builder produces a coverage report. Readiness remains false if a required exclusion rule cannot be applied to the captured schema, the archive changes during capture, the document total falls outside the rounding interval implied by the paper's 5.55M-file report, `cables` is absent, the CIA collection mapping is unverified, a FRUS identifier is unmatched, or the expected ten excluded FRUS volumes are not present. Unknown release provenance is surfaced in that report; it is never silently treated as pre-cutoff.
 
 ### Deterministic chunks
 

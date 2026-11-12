@@ -178,6 +178,7 @@ class CorpusCoverageReport(BaseModel):
     frus_manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     ready: bool
     reasons: list[str]
+    archive_document_count: int = Field(ge=0)
     corpus_counts: dict[str, int]
     post_cutoff_frus_volumes: list[str]
     unmatched_frus_document_count: int = Field(ge=0)
@@ -397,7 +398,15 @@ def validate_capture_for_paper(
     corpus_counts = {
         artifact.corpus: artifact.document_count for artifact in capture.artifacts
     }
+    archive_document_count = sum(corpus_counts.values())
     present_corpora = set(corpus_counts)
+    expected_count = exclusion_manifest.expected_archive_document_count
+    count_tolerance = exclusion_manifest.archive_document_count_tolerance
+    if abs(archive_document_count - expected_count) > count_tolerance:
+        reasons.append(
+            f"archive_document_count:{archive_document_count}:"
+            f"expected:{expected_count}:tolerance:{count_tolerance}"
+        )
     for corpus in sorted(exclusion_manifest.required_corpora):
         if corpus_counts.get(corpus, 0) == 0:
             reasons.append(f"required_corpus_missing:{corpus}")
@@ -464,6 +473,7 @@ def validate_capture_for_paper(
         frus_manifest_hash=frus_manifest.manifest_hash(),
         ready=not unique_reasons,
         reasons=unique_reasons,
+        archive_document_count=archive_document_count,
         corpus_counts=dict(sorted(corpus_counts.items())),
         post_cutoff_frus_volumes=sorted(post_cutoff_volumes),
         unmatched_frus_document_count=unmatched_count,

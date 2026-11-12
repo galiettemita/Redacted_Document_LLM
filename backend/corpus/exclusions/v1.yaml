@@ -23,4 +23,7 @@ frus_publication_years: {}
 frus_metadata_sha256: null
 frus_coverage_complete: false
 expected_post_cutoff_frus_volumes: 10
+expected_archive_document_count: 5550000
+# Appendix C reports 5.55M files; half of the final 0.01M rounding unit is 5,000.
+archive_document_count_tolerance: 5000
 

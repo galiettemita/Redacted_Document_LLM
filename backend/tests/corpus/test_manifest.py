@@ -117,6 +117,7 @@ def coverage_for(
         frus_manifest_hash="c" * 64,
         ready=ready,
         reasons=[] if ready else ["source_gap"],
+        archive_document_count=sum(item.document_count for item in capture.artifacts),
         corpus_counts={item.corpus: item.document_count for item in capture.artifacts},
         post_cutoff_frus_volumes=[],
         unmatched_frus_document_count=0,
