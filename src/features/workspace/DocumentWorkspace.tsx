@@ -343,8 +343,8 @@ export function DocumentWorkspace({
           >
             {document.mode === 'uploaded' ? (
               <div className="uploaded-document-note">
-                <h3>{backendNoteTitle(backendDocument, passageSaveStatus)}</h3>
-                <p>{backendNoteMessage(backendDocument, passageSaveStatus)}</p>
+                <h3>{backendNoteTitle(backendDocument, passageSaveStatus, contextStatus)}</h3>
+                <p>{backendNoteMessage(backendDocument, passageSaveStatus, contextStatus)}</p>
                 <div className="visible-context-controls">
                   <label htmlFor="visible-document-date">Document date shown on PDF</label>
                   <div className="visible-date-row">
@@ -354,6 +354,8 @@ export function DocumentWorkspace({
                       value={visibleDate}
                       disabled={!backendReady || metadataSaveStatus === 'saving'}
                       onChange={(event) => {
+                        contextRequest.current?.abort()
+                        contextRequest.current = null
                         setVisibleDate(event.target.value)
                         setMetadataSaveStatus(
                           event.target.value === savedVisibleDate && savedVisibleDate
@@ -489,12 +491,14 @@ function markingToolbarMessage(
 function backendNoteTitle(
   backendDocument: BackendDocumentState | undefined,
   passageSaveStatus: PassageSaveStatus,
+  contextStatus: ContextPreparationStatus,
 ): string {
   if (backendDocument?.status === 'uploading') return 'Backend upload in progress'
   if (backendDocument?.status === 'deleting') return 'Removing stored PDF'
   if (backendDocument?.status === 'unavailable') return 'Local backend unavailable'
   if (backendDocument?.status === 'failed') return 'PDF upload failed'
   if (passageSaveStatus === 'saving') return 'Saving Passage 1'
+  if (contextStatus === 'ready') return 'Passage 1 context is ready'
   if (passageSaveStatus === 'saved') return 'Passage 1 is saved'
   if (passageSaveStatus === 'failed') return 'Passage save failed'
   return 'PDF upload complete'
@@ -503,6 +507,7 @@ function backendNoteTitle(
 function backendNoteMessage(
   backendDocument: BackendDocumentState | undefined,
   passageSaveStatus: PassageSaveStatus,
+  contextStatus: ContextPreparationStatus,
 ): string {
   if (backendDocument?.status === 'uploading') {
     return 'Uploading to the loopback-only local backend while the browser displays its local copy.'
@@ -516,13 +521,16 @@ function backendNoteMessage(
   if (backendDocument?.status === 'failed') {
     return backendDocument.error ?? 'The backend rejected this PDF.'
   }
+  if (contextStatus === 'ready') {
+    return 'The backend prepared this passage from visible PDF content and geometry only. Retrieval and model prediction are not connected yet.'
+  }
   if (passageSaveStatus === 'saved') {
-    return 'Passage 1 is saved. The visible-only extraction engine is installed; automatic processing, retrieval and model prediction are not connected in this screen yet.'
+    return 'Passage 1 is saved. Save a date printed on the PDF, then prepare its visible-only context below. Retrieval and model prediction are not connected yet.'
   }
   if (passageSaveStatus === 'failed') {
     return 'The rectangle remains visible locally, but it was not saved. Try marking the passage again.'
   }
-  return 'The PDF is stored temporarily by the local backend. You can save one passage now; automatic retrieval and model prediction are not connected yet.'
+  return 'The PDF is stored temporarily by the local backend. Save its visible date and one passage to prepare visible-only context. Retrieval and model prediction are not connected yet.'
 }
 
 function backendDocumentError(backendDocument: BackendDocumentState | undefined): string | null {

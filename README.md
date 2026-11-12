@@ -1,6 +1,6 @@
 # Redacted Document LLM
 
-The repository is being extended with a real, visible-only retrieval-assisted backend. PDF upload, stable manual passage persistence, and the visible-only extraction engine are implemented. Corpus retrieval and model prediction are still disconnected and remain visibly unavailable.
+The repository is being extended with a real, visible-only retrieval-assisted backend. PDF upload, stable manual passage persistence, and revision-bound visible-context preparation are connected to the website. Corpus retrieval and model prediction are still disconnected and remain visibly unavailable.
 
 ## Backend foundation
 
@@ -36,7 +36,7 @@ docker compose run --rm backend alembic upgrade head
 
 Then open `http://127.0.0.1:8000/v1/readiness`. HTTP readiness is independent from database, worker, corpus, and model readiness, so prediction readiness remains false until every real dependency is connected. Docker publishes the database, Redis, and API on `127.0.0.1` only.
 
-The upload screen now sends PDFs to the local backend for validation and temporary content-addressed persistence while rendering a local object URL immediately. Manually drawn rectangles are persisted with stable passage IDs. Replacing the document asks the backend to delete its stored copy. No uploaded-document prediction is simulated or generated.
+The upload screen now sends PDFs to the local backend for validation and temporary content-addressed persistence while rendering a local object URL immediately. Manually drawn rectangles are persisted with stable passage IDs. After a user copies a visibly printed document date into the sidebar, **Prepare visible context** runs real embedded-text/OCR extraction and mask discovery against the stored PDF. The backend persists the hidden-answer-free context for that exact passage revision and returns only a safe readiness summary to the browser. Passage corrections and document-date changes invalidate the stored context. Replacing the document asks the backend to delete its stored copy. No uploaded-document prediction is simulated or generated.
 
 ## Corpus preparation
 
@@ -125,15 +125,16 @@ To create a production bundle, run `npm run build`. The output is written to `di
 ## Demo flow
 
 1. Upload a PDF. The browser opens it immediately and the local backend validates and stores a temporary copy.
-2. Wait for **PDF upload complete**, then mark one rectangle. The normalized geometry is saved under a stable backend passage ID.
-3. Choose **View interactive sample** in the prediction sidebar to open the complete fictional three-page example.
-4. Hover or focus a blacked-out passage to preview it, click or press Enter/Space to pin it, or activate a prediction card to navigate back to its passage.
+2. In the sidebar, copy a date that is visibly printed on the PDF into **Document date shown on PDF**, then choose **Save visible date**.
+3. Choose **Mark a passage** and draw over one redacted area. Its normalized geometry is saved under a stable backend passage ID.
+4. Choose **Prepare visible context**. A passage-linked summary shows the visible date, geometry-derived length cue, estimated words, visible-word count, and confirmed-mask count. The full transcript is not exposed as prediction text or placed over the PDF.
+5. Hover or focus the marked passage to highlight it and bring its selected-passage state to the top of the sidebar. Choose **View interactive sample** only if you want to inspect the separate fictional prediction demonstration.
 
 ## Important limitations
 
-- The visible-only embedded-text/OCR/mask extraction engine is implemented and tested in the backend, but automatic extraction is not yet triggered from the website.
+- Visible-only context preparation is an explicit per-passage action. It fails closed when a visible date is missing, mask coverage is uncertain, OCR is unavailable, or nearby visible geometry cannot support a length cue.
 - Corpus retrieval and a real LLM are not connected to uploaded passages. Uploaded documents receive no prediction text.
-- The deterministic corpus and BM25 tooling is implemented, but the full real index has not been built and the required CIA/FRUS provenance maps are not yet populated.
+- The deterministic corpus and BM25 tooling and the CIA/FRUS exclusion provenance are implemented, but the full History Lab API capture and real index cannot be completed while the public archive API is unavailable. The incomplete Hugging Face export is not silently substituted.
 - Stored documents expire after 24 hours by configuration; replacement requests immediate deletion. Automated retention cleanup is a later hardening task.
 - The bundled Northstar memorandum and all of its passage predictions are fictional.
 - `Demo LLM` is used only by the fictional sample and is not an active model.
@@ -159,4 +160,4 @@ npm run typecheck
 npm run build
 ```
 
-The automated suite covers upload errors, object-URL cleanup, simulation cancellation, normalized drawing, grouped multi-line passage selection, sidebar ordering, replacement reset, and responsive prediction-to-document navigation.
+The automated suite covers upload errors, object-URL cleanup, simulation cancellation, normalized drawing, grouped multi-line passage selection, visible-date provenance, revision-bound context persistence and invalidation, safe response fields, sidebar ordering, replacement reset, and responsive prediction-to-document navigation.

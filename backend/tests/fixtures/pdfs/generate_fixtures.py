@@ -13,6 +13,7 @@ def generate_visible_layout() -> Path:
     for page_number in range(2):
         page = document.new_page(width=612, height=792)
         page.insert_text((205, 35), "VISIBLE BULLETIN HEADER", fontsize=11)
+        page.insert_text((72, 70), "DATE: 1945-05-08", fontsize=11)
         page.insert_text((72, 120), f"LEFT COLUMN PAGE {page_number + 1}", fontsize=12)
         page.insert_text(
             (340, 120), f"RIGHT COLUMN PAGE {page_number + 1}", fontsize=12

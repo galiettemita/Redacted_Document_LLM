@@ -6,6 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.exc import IntegrityError
 
 from redacted_backend.db.base import Database
 from redacted_backend.db.repositories.documents import DocumentRepository
@@ -132,6 +133,17 @@ def create_context_router(
                     "message": str(error),
                 },
             ) from error
+        except IntegrityError:
+            with ready_database.session_factory() as session:
+                current = PassageRepository(session).get(passage.id)
+                if current is not None:
+                    existing = VisibleExampleRepository(session).get_current(
+                        current.id,
+                        current.revision,
+                    )
+                    if existing is not None:
+                        return _summary(existing)
+            raise
 
     return router
 

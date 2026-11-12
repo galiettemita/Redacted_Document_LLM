@@ -114,7 +114,7 @@ describe('DocumentWorkspace', () => {
     render(<DocumentWorkspace document={uploadedDocument} backendDocument={readyBackendDocument} backendApi={apiWithCreate()} onReplace={vi.fn()} onViewSample={onViewSample} />)
 
     expect(screen.getByText(/The PDF is stored temporarily by the local backend/)).toBeInTheDocument()
-    expect(screen.getByText(/retrieval and model prediction are not connected yet/)).toBeInTheDocument()
+    expect(screen.getByText(/retrieval and model prediction are not connected yet/i)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'View interactive sample' }))
     expect(onViewSample).toHaveBeenCalledOnce()
   })
