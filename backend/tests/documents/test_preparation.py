@@ -121,6 +121,26 @@ def test_preparation_never_serializes_text_covered_by_a_confirmed_mask() -> None
     assert "answer" not in serialized.lower()
 
 
+def test_manual_passage_geometry_cannot_supply_visible_date_evidence() -> None:
+    date_target = passage(
+        str(TARGET_ID),
+        rects=[PassageRect(x=0.11, y=0.07, width=0.14, height=0.05)],
+    )
+
+    with pytest.raises(VisibleContextPreparationError) as error:
+        prepare_visible_context(
+            Path("stored.pdf"),
+            document_record(),
+            [date_target],
+            TARGET_ID,
+            _extractor=lambda _path: [visible_page()],
+            _renderer=lambda _path: [np.zeros((10, 10), dtype=np.uint8)],
+            _discoverer=lambda _image, _words, *, page_number: discovery(page_number),
+        )
+
+    assert error.value.code == "visible_date_not_found"
+
+
 @pytest.mark.parametrize(
     ("failure", "expected_code"),
     [

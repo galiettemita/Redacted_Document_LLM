@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from pathlib import Path
 from uuid import UUID
 
@@ -118,6 +119,12 @@ def test_browser_cannot_supply_document_date_metadata(
     )
 
     assert response.status_code == 404
+
+
+def test_public_api_schema_has_no_manual_date_provenance(tmp_path: Path) -> None:
+    schema = json.dumps(create_test_app(tmp_path).openapi())
+
+    assert "manual_visible_document" not in schema
 
 
 def test_delete_tombstones_the_record_and_removes_unreferenced_bytes(

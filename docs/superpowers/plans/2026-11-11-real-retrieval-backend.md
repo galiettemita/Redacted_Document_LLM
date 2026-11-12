@@ -261,7 +261,7 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - [x] **Step 5: Implement preparation persistence and migration; remove the manual metadata product route and update Task 11 to `0005_analysis_jobs.py`.**
 - [x] **Step 6: Write failing frontend tests proving there is no date input/request and one saved passage can directly prepare and display its automatically detected date.**
 - [x] **Step 7: Remove the manual date client/UI/styles and implement permanent processing copy and states.**
-- [ ] **Step 8: Run full backend/frontend/container/migration/browser verification with the real generated PDF; update docs/checklist, commit with `feat: detect visible document dates`, and push.**
+- [x] **Step 8: Run full backend/frontend/container/migration/browser verification with the real generated PDF; update docs/checklist, commit with `feat: detect visible document dates`, and push.**
 
 ### Task 6: Frozen corpus snapshot, exclusions, preflight, and deterministic chunks
 

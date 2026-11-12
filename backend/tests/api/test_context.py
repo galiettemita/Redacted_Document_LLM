@@ -11,13 +11,17 @@ from sqlalchemy import select
 import redacted_backend.api.context as context_api
 from redacted_backend.config import Settings
 from redacted_backend.db.base import Base
-from redacted_backend.db.models import VisibleExampleArtifact
+from redacted_backend.db.models import Document, VisibleExampleArtifact
 from redacted_backend.db.repositories.documents import DocumentRepository
 from redacted_backend.db.repositories.passages import PassageRepository
 from redacted_backend.documents.preparation import PreparedVisibleContext
 from redacted_backend.domain.documents import DateProvenance, VisibleDateEvidence
 from redacted_backend.domain.passages import PassageRect
-from redacted_backend.domain.visible_examples import LengthEstimate, PageWord, VisibleExample
+from redacted_backend.domain.visible_examples import (
+    LengthEstimate,
+    PageWord,
+    VisibleExample,
+)
 from redacted_backend.main import create_app
 
 
@@ -259,6 +263,31 @@ def test_conflicting_automatic_date_is_refused_without_overwriting_evidence(
         assert persisted is not None
         assert persisted.visible_date == date(1945, 5, 9)
         assert persisted.visible_date_evidence == _date_evidence(date(1945, 5, 9))
+
+
+def test_prepare_backfills_missing_evidence_for_a_matching_automatic_date(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app, document, passage = create_test_app_and_passage(tmp_path)
+    with app.state.database.session_factory() as session, session.begin():
+        stored = session.get(Document, str(document.id))
+        assert stored is not None
+        stored.visible_date = date(1945, 5, 8)
+        stored.date_provenance = DateProvenance.VISIBLE_TEXT.value
+        stored.visible_date_evidence = None
+
+    calls: list[int] = []
+    install_fake_preparation(monkeypatch, calls=calls)
+    response = asyncio.run(
+        request(app, "POST", f"/v1/passages/{passage.id}:prepare-context")
+    )
+
+    assert response.status_code == 200
+    with app.state.database.session_factory() as session:
+        persisted = DocumentRepository(session).get(document.id)
+        assert persisted is not None
+        assert persisted.visible_date_evidence == _date_evidence(date(1945, 5, 8))
 
 
 def test_deleted_passage_cannot_prepare_context(tmp_path: Path, monkeypatch) -> None:

@@ -57,7 +57,11 @@ class DocumentRepository:
         document_id: UUID | str,
         evidence: VisibleDateEvidence,
     ) -> DocumentRecord | None:
-        document = self._session.get(Document, str(document_id))
+        document = self._session.get(
+            Document,
+            str(document_id),
+            with_for_update=True,
+        )
         if document is None or document.status == DocumentStatus.DELETED.value:
             return None
         if document.visible_date is not None:
@@ -68,6 +72,9 @@ class DocumentRepository:
                 raise VisibleDateConflictError(
                     "Visible date evidence conflicts with the stored document date"
                 )
+            if document.visible_date_evidence is None:
+                document.visible_date_evidence = evidence.model_dump(mode="json")
+                self._session.flush()
             return _to_record(document)
         document.visible_date = evidence.value
         document.date_provenance = DateProvenance.VISIBLE_TEXT.value

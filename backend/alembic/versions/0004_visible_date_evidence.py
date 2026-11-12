@@ -5,10 +5,11 @@ Revises: 0003_visible_examples
 """
 
 from collections.abc import Sequence
+from uuid import uuid4
 
 import sqlalchemy as sa
-from alembic import op
 
+from alembic import op
 
 revision: str = "0004_visible_date_evidence"
 down_revision: str | None = "0003_visible_examples"
@@ -22,38 +23,60 @@ def upgrade() -> None:
         sa.Column("visible_date_evidence", sa.JSON(), nullable=True),
     )
     connection = op.get_bind()
-    manual_documents = sa.text(
-        "SELECT id FROM documents "
-        "WHERE date_provenance = 'manual_visible_document'"
+    affected_passages = connection.execute(
+        sa.text(
+            "SELECT id, revision FROM passages "
+            "WHERE document_id IN ("
+            "SELECT id FROM documents "
+            "WHERE date_provenance = 'manual_visible_document'"
+            ") AND status != 'deleted'"
+        )
+    ).mappings()
+    invalidation_table = sa.table(
+        "passage_invalidations",
+        sa.column("id", sa.String()),
+        sa.column("passage_id", sa.String()),
+        sa.column("from_revision", sa.Integer()),
+        sa.column("to_revision", sa.Integer()),
+        sa.column("reason", sa.String()),
     )
-    ids = [row[0] for row in connection.execute(manual_documents)]
-    if not ids:
-        return
-
-    parameters = {f"document_{index}": value for index, value in enumerate(ids)}
-    placeholders = ", ".join(f":document_{index}" for index in range(len(ids)))
+    invalidations = [
+        {
+            "id": str(uuid4()),
+            "passage_id": row["id"],
+            "from_revision": row["revision"],
+            "to_revision": row["revision"] + 1,
+            "reason": "manual_visible_date_removed",
+        }
+        for row in affected_passages
+    ]
+    if invalidations:
+        connection.execute(sa.insert(invalidation_table), invalidations)
     connection.execute(
         sa.text(
             "UPDATE visible_example_artifacts "
             "SET invalidated_at = CURRENT_TIMESTAMP "
-            f"WHERE document_id IN ({placeholders}) AND invalidated_at IS NULL"
-        ),
-        parameters,
+            "WHERE document_id IN ("
+            "SELECT id FROM documents "
+            "WHERE date_provenance = 'manual_visible_document'"
+            ") AND invalidated_at IS NULL"
+        )
     )
     connection.execute(
         sa.text(
             "UPDATE passages SET revision = revision + 1, status = 'marked', "
             "updated_at = CURRENT_TIMESTAMP "
-            f"WHERE document_id IN ({placeholders}) AND status != 'deleted'"
-        ),
-        parameters,
+            "WHERE document_id IN ("
+            "SELECT id FROM documents "
+            "WHERE date_provenance = 'manual_visible_document'"
+            ") AND status != 'deleted'"
+        )
     )
     connection.execute(
         sa.text(
             "UPDATE documents SET visible_date = NULL, date_provenance = NULL "
-            f"WHERE id IN ({placeholders})"
-        ),
-        parameters,
+            "WHERE date_provenance = 'manual_visible_document'"
+        )
     )
 
 

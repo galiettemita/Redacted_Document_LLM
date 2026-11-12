@@ -5,9 +5,15 @@ from datetime import date
 
 from redacted_backend.domain.documents import VisibleDateEvidence
 from redacted_backend.domain.passages import PassageRect
-from redacted_backend.domain.visible_examples import MaskDiscovery, PageWord, PageWords
+from redacted_backend.domain.visible_examples import (
+    MaskDiscovery,
+    PageWord,
+    PageWords,
+    WordSource,
+)
 
-_HEADER_BOTTOM = 0.35
+_HEADER_BOTTOM = 0.20
+_MIN_OCR_CONFIDENCE = 0.75
 _MONTHS = {
     "january": 1,
     "jan": 1,
@@ -35,13 +41,21 @@ _MONTHS = {
     "dec": 12,
 }
 _MONTH_PATTERN = "|".join(sorted(_MONTHS, key=len, reverse=True))
-_ISO_DATE = re.compile(r"(?<!\d)(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})(?!\d)")
+_DATE_PREFIX = r"(?:date\s*:\s*)?"
+_ISO_DATE = re.compile(
+    rf"{_DATE_PREFIX}(?P<year>\d{{4}})-(?P<month>\d{{2}})-(?P<day>\d{{2}})\.?",
+    re.IGNORECASE,
+)
 _MONTH_FIRST = re.compile(
-    rf"\b(?P<month>{_MONTH_PATTERN})\.?\s+(?P<day>\d{{1,2}})(?:st|nd|rd|th)?\s*,?\s+(?P<year>\d{{4}})\b",
+    rf"{_DATE_PREFIX}(?P<month>{_MONTH_PATTERN})\.?\s+"
+    rf"(?P<day>\d{{1,2}})(?:st|nd|rd|th)?\s*,?\s+"
+    rf"(?P<year>\d{{4}})\.?",
     re.IGNORECASE,
 )
 _DAY_FIRST = re.compile(
-    rf"\b(?P<day>\d{{1,2}})(?:st|nd|rd|th)?\s+(?P<month>{_MONTH_PATTERN})\.?\s*,?\s+(?P<year>\d{{4}})\b",
+    rf"{_DATE_PREFIX}(?P<day>\d{{1,2}})(?:st|nd|rd|th)?\s+"
+    rf"(?P<month>{_MONTH_PATTERN})\.?\s*,?\s+"
+    rf"(?P<year>\d{{4}})\.?",
     re.IGNORECASE,
 )
 
@@ -68,7 +82,11 @@ def detect_visible_document_date(
         (item for item in discoveries if item.page_number == first_page.page_number),
         None,
     )
-    masks = [] if discovery is None else [mask for mask in discovery.masks if mask.confirmed]
+    masks = (
+        []
+        if discovery is None
+        else [mask for mask in discovery.masks if mask.confirmed]
+    )
     header_words = [
         word
         for word in first_page.words
@@ -82,6 +100,11 @@ def detect_visible_document_date(
     matches: list[VisibleDateEvidence] = []
     for words in lines.values():
         ordered = sorted(words, key=lambda item: (item.x, item.y))
+        if any(
+            word.source == WordSource.OCR and word.confidence < _MIN_OCR_CONFIDENCE
+            for word in ordered
+        ):
+            continue
         line_text = " ".join(word.text for word in ordered)
         for parsed_date in _parse_dates(line_text):
             matches.append(
@@ -109,16 +132,18 @@ def detect_visible_document_date(
 
 def _parse_dates(text: str) -> list[date]:
     parsed: list[date] = []
-    for match in _ISO_DATE.finditer(text):
+    iso_match = _ISO_DATE.fullmatch(text.strip())
+    if iso_match is not None:
         _append_valid_date(
             parsed,
-            int(match.group("year")),
-            int(match.group("month")),
-            int(match.group("day")),
+            int(iso_match.group("year")),
+            int(iso_match.group("month")),
+            int(iso_match.group("day")),
         )
     for pattern in (_MONTH_FIRST, _DAY_FIRST):
-        for match in pattern.finditer(text):
-            month_name = match.group("month").lower().rstrip(".")
+        match = pattern.fullmatch(text.strip())
+        if match is not None:
+            month_name = match.group("month").lower()
             _append_valid_date(
                 parsed,
                 int(match.group("year")),

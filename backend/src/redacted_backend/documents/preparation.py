@@ -10,11 +10,11 @@ import pymupdf
 import pytesseract
 from PIL import Image
 
-from redacted_backend.documents.extract import extract_visible_words
 from redacted_backend.documents.dates import (
     VisibleDateDetectionError,
     detect_visible_document_date,
 )
+from redacted_backend.documents.extract import extract_visible_words
 from redacted_backend.documents.masks import discover_candidate_masks
 from redacted_backend.documents.visible_example import (
     VisibleExampleError,
@@ -23,6 +23,7 @@ from redacted_backend.documents.visible_example import (
 from redacted_backend.domain.documents import DocumentRecord, VisibleDateEvidence
 from redacted_backend.domain.passages import PassageRecord
 from redacted_backend.domain.visible_examples import (
+    MaskCandidate,
     MaskDiscovery,
     PageWords,
     VisibleDocument,
@@ -90,7 +91,10 @@ def prepare_visible_context(
         ) from error
 
     try:
-        date_evidence = detect_visible_document_date(pages, discoveries)
+        date_evidence = detect_visible_document_date(
+            pages,
+            _include_manual_passage_masks(discoveries, passages),
+        )
     except VisibleDateDetectionError as error:
         raise VisibleContextPreparationError(error.code, str(error)) from error
 
@@ -133,3 +137,33 @@ def render_page_images(pdf_path: Path) -> list[Image.Image]:
         return images
     finally:
         document.close()
+
+
+def _include_manual_passage_masks(
+    discoveries: list[MaskDiscovery],
+    passages: list[PassageRecord],
+) -> list[MaskDiscovery]:
+    manual_masks: dict[int, list[MaskCandidate]] = {}
+    for passage in passages:
+        for index, rect in enumerate(passage.rects):
+            manual_masks.setdefault(passage.page_number, []).append(
+                MaskCandidate(
+                    id=f"manual-date-mask:{passage.id}:{index}",
+                    page_number=passage.page_number,
+                    rect=rect,
+                    kind="manual",
+                    confidence=1.0,
+                    confirmed=True,
+                )
+            )
+    return [
+        discovery.model_copy(
+            update={
+                "masks": [
+                    *discovery.masks,
+                    *manual_masks.get(discovery.page_number, []),
+                ]
+            }
+        )
+        for discovery in discoveries
+    ]

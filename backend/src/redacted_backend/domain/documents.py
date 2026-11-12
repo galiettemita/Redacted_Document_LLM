@@ -21,7 +21,6 @@ class DocumentStatus(StrEnum):
 class DateProvenance(StrEnum):
     VISIBLE_TEXT = "visible_text"
     PDF_METADATA_CORROBORATED = "pdf_metadata_corroborated"
-    MANUAL_VISIBLE_DOCUMENT = "manual_visible_document"
 
 
 class VisibleDateEvidence(BaseModel):
