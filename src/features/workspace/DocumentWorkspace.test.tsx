@@ -74,6 +74,11 @@ const preparedContext: VisibleContextSummary = {
   visible_word_count: 37,
   confirmed_mask_count: 2,
   serialization_version: 'visible-transcript-v1',
+  context_query_status: 'ready',
+  context_query_term_count: 4,
+  context_query_sha256: '4e64699ee5403e5b9c960206e944cdfde3be184499c2552b508afdaf089746fb',
+  context_query_version: 'context-query-v1',
+  context_stopwords_version: 'visible-english-v1',
 }
 
 function apiWithCreate(
@@ -177,7 +182,11 @@ describe('DocumentWorkspace', () => {
     expect(screen.getByText('8 estimated words')).toBeInTheDocument()
     expect(screen.getByText('37 visible words')).toBeInTheDocument()
     expect(screen.getByText('2 confirmed masks')).toBeInTheDocument()
-    expect(screen.getAllByText(/Retrieval and model prediction are not connected yet/)).not.toHaveLength(0)
+    expect(screen.getByText('4 visible query terms')).toBeInTheDocument()
+    expect(screen.getByText('Context query ready')).toBeInTheDocument()
+    expect(screen.getAllByText(/Verified corpus search and model prediction are not connected yet/)).not.toHaveLength(0)
+    expect(screen.queryByText('visible before visible after')).not.toBeInTheDocument()
+    expect(screen.queryByText(/search results/i)).not.toBeInTheDocument()
     expect(container.querySelector('.pdf-page-shell')).toHaveTextContent('')
   })
 

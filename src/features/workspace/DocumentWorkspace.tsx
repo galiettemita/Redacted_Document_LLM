@@ -278,7 +278,7 @@ export function DocumentWorkspace({
               ? passageSaveStatus === 'saving'
                 ? 'Saving this passage to the backend…'
                 : contextStatus === 'ready'
-                  ? 'Visible-only context is ready. Retrieval and model prediction are not connected yet.'
+                  ? 'Context query is ready. Verified corpus search and model prediction are not connected yet.'
                   : 'No prediction has been requested. Retrieval and model prediction are not connected yet.'
               : undefined}
           >
@@ -288,8 +288,8 @@ export function DocumentWorkspace({
                 <p>{backendNoteMessage(backendDocument, passageSaveStatus, contextStatus)}</p>
                 <div className="visible-context-controls">
                   <p>
-                    Preparing reads the visible first-page header and stops if its date is
-                    missing, covered, or ambiguous.
+                    Preparing reads only visible PDF content, detects its visible date, and
+                    builds the passage-linked query that retrieval will use.
                   </p>
                   <button
                     className="prepare-context-button"
@@ -310,8 +310,10 @@ export function DocumentWorkspace({
                         <span>{contextSummary.estimated_words} estimated words</span>
                         <span>{contextSummary.visible_word_count} visible words</span>
                         <span>{contextSummary.confirmed_mask_count} confirmed masks</span>
+                        <span>{contextSummary.context_query_term_count} visible query terms</span>
                       </p>
-                      <p>Retrieval and model prediction are not connected yet.</p>
+                      <p><strong>Context query ready</strong></p>
+                      <p>Verified corpus search and model prediction are not connected yet.</p>
                     </section>
                   ) : null}
                 </div>
@@ -429,7 +431,7 @@ function backendNoteMessage(
     return backendDocument.error ?? 'The backend rejected this PDF.'
   }
   if (contextStatus === 'ready') {
-    return 'The backend prepared this passage from visible PDF content and geometry only. Retrieval and model prediction are not connected yet.'
+    return 'The backend prepared this passage and its search query from visible PDF content and geometry only. Verified corpus search and model prediction are not connected yet.'
   }
   if (passageSaveStatus === 'saved') {
     return 'Passage 1 is saved. Prepare its visible-only context below; the backend will detect the date from the PDF. Retrieval and model prediction are not connected yet.'

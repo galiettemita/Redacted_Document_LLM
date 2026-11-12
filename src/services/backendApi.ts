@@ -73,6 +73,11 @@ export interface VisibleContextSummary {
   visible_word_count: number
   confirmed_mask_count: number
   serialization_version: 'visible-transcript-v1'
+  context_query_status: 'ready'
+  context_query_term_count: number
+  context_query_sha256: string
+  context_query_version: 'context-query-v1'
+  context_stopwords_version: string
 }
 
 export interface PassageMutation {

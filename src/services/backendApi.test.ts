@@ -46,6 +46,11 @@ const visibleContext: VisibleContextSummary = {
   visible_word_count: 37,
   confirmed_mask_count: 2,
   serialization_version: 'visible-transcript-v1',
+  context_query_status: 'ready',
+  context_query_term_count: 4,
+  context_query_sha256: '4e64699ee5403e5b9c960206e944cdfde3be184499c2552b508afdaf089746fb',
+  context_query_version: 'context-query-v1',
+  context_stopwords_version: 'visible-english-v1',
 }
 
 function jsonResponse(body: unknown, status = 200) {
