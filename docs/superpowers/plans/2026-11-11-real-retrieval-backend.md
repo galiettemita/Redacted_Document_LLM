@@ -344,10 +344,10 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - Extends `POST /v1/passages/{passage_id}:prepare-context` with a safe query-ready summary. It performs no corpus search and returns no evidence while the Task 6A coverage gate and matching BM25 index are unavailable.
 - The website displays the passage-linked query-ready checkpoint in the existing sidebar and continues to state that corpus retrieval and model prediction are disconnected. No query or prediction text appears over the PDF.
 
-- [ ] **Step 1: Write failing tests proving structural markers never become search terms, query text/hash/count/version persist for the exact passage revision, same-revision retries reuse/backfill it, stopword-only context fails closed, and no BM25 transport is called.**
-- [ ] **Step 2: Run focused tests and confirm the persistence/API contract is missing.**
-- [ ] **Step 3: Implement deterministic query preparation, revision-bound persistence, migration `0005_context_queries.py`, and safe summary fields; update Task 11 to `0006_analysis_jobs.py`.**
-- [ ] **Step 4: Write failing frontend tests for the query-ready summary and absence of search-result or PDF-overlay text, then implement the existing-design sidebar copy.**
+- [x] **Step 1: Write failing tests proving structural markers never become search terms, query text/hash/count/version persist for the exact passage revision, same-revision retries reuse/backfill it, stopword-only context fails closed, and no BM25 transport is called.**
+- [x] **Step 2: Run focused tests and confirm the persistence/API contract is missing.**
+- [x] **Step 3: Implement deterministic query preparation, revision-bound persistence, migration `0005_context_queries.py`, and safe summary fields; update Task 11 to `0006_analysis_jobs.py`.**
+- [x] **Step 4: Write failing frontend tests for the query-ready summary and absence of search-result or PDF-overlay text, then implement the existing-design sidebar copy.**
 - [ ] **Step 5: Run full backend/frontend/migration/container/browser verification with the real generated PDF; confirm zero retrieval/model calls, update docs/checklist, commit with `feat: persist visible context queries`, and push.**
 
 ### Task 8: Pinned BGE embeddings and exact-rescored dense retrieval

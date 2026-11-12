@@ -63,4 +63,11 @@
     - [ ] Capture the full public archive when the History Lab API is healthy and pass every source invariant.
   - [ ] Task 7: Add BM25 indexing and visible context-query retrieval.
     - [x] Implement and test the pinned OpenSearch index, exact chunk checksum verification, deterministic top-300 search, provenance manifests, and readiness checks.
+    - [x] Task 7A: Persist the permanent visible-only context query and connect its safe readiness checkpoint to the website.
+      - [x] Remove `[[TARGET]]` and `[REDACTED]` before query tokenization and fail closed when no visible search terms remain.
+      - [x] Persist query text, SHA-256, term count, query version, and stop-word version with the exact visible-example passage revision.
+      - [x] Reuse or safely backfill deterministic legacy artifacts and refuse partial or mismatched metadata instead of overwriting it.
+      - [x] Return only query-ready metadata to the browser and keep query, evidence, and prediction text off the PDF.
+      - [x] Verify the migration, container OCR, real PDF upload/passage/context API flow, cleanup, frontend tests, TypeScript, and production build with no retrieval or model call.
+      - [ ] Repeat the real click-through with browser automation when its connector is available; the connector was unavailable for this increment, so no visual run is claimed.
     - [ ] Complete the real exclusion maps, build the locked corpus/index, and record one visible-only context query.
