@@ -254,9 +254,9 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - `DocumentRepository.set_detected_visible_date(...)` persists `visible_text` provenance and evidence without changing passage revision; conflicting later extraction fails closed.
 - The website exposes no date input or date-mutation request. **Prepare visible context** becomes available after a real passage is saved and displays the detected date only after successful processing.
 
-- [ ] **Step 1: Write failing pure tests for ISO, month-name day-first/day-last, OCR words, repeated identical dates, ambiguous multiple dates, missing dates, body-only dates, and dates hidden by confirmed masks.**
-- [ ] **Step 2: Run focused date tests and confirm the detector is missing.**
-- [ ] **Step 3: Implement deterministic visible-header date detection and evidence without adding a model or third-party date service.**
+- [x] **Step 1: Write failing pure tests for ISO, month-name day-first/day-last, OCR words, repeated identical dates, ambiguous multiple dates, missing dates, body-only dates, and dates hidden by confirmed masks.**
+- [x] **Step 2: Run focused date tests and confirm the detector is missing.**
+- [x] **Step 3: Implement deterministic visible-header date detection and evidence without adding a model or third-party date service.**
 - [ ] **Step 4: Write failing preparation/API tests proving automatic persistence, evidence provenance, same-revision reuse, conflict refusal, and removal of the manual metadata dependency.**
 - [ ] **Step 5: Implement preparation persistence and migration; remove the manual metadata product route and update Task 11 to `0005_analysis_jobs.py`.**
 - [ ] **Step 6: Write failing frontend tests proving there is no date input/request and one saved passage can directly prepare and display its automatically detected date.**

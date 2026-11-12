@@ -7,6 +7,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from redacted_backend.domain.visible_examples import PageWord
+
 
 class DocumentStatus(StrEnum):
     UPLOADED = "uploaded"
@@ -20,6 +22,18 @@ class DateProvenance(StrEnum):
     VISIBLE_TEXT = "visible_text"
     PDF_METADATA_CORROBORATED = "pdf_metadata_corroborated"
     MANUAL_VISIBLE_DOCUMENT = "manual_visible_document"
+
+
+class VisibleDateEvidence(BaseModel):
+    """The visible PDF line that deterministically established the document date."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    value: date
+    page_number: int = Field(ge=1)
+    line_text: str = Field(min_length=1)
+    words: list[PageWord] = Field(min_length=1)
+    parser_version: Literal["visible-date-v1"] = "visible-date-v1"
 
 
 class DocumentRecord(BaseModel):
