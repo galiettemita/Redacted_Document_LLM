@@ -34,6 +34,6 @@
 - [x] Verify the existing frontend baseline (35 tests and TypeScript checks pass).
 - [x] Identify the exact-method assets that are present and the corpus/code details that are still missing.
 - [x] Draft and independently review the real-backend design.
-- [ ] Approve the real-backend architecture and written design.
-- [ ] Write the task-by-task implementation plan.
+- [x] Approve the real-backend architecture and written design.
+- [x] Write the task-by-task implementation plan.
 - [ ] Connect and verify one real backend feature at a time.
