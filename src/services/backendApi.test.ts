@@ -3,6 +3,7 @@ import {
   createBackendApi,
   type BackendDocumentRecord,
   type BackendPassageRecord,
+  type VisibleContextSummary,
 } from './backendApi'
 
 const documentRecord: BackendDocumentRecord = {
@@ -32,6 +33,18 @@ const passageRecord: BackendPassageRecord = {
   split_from: null,
   created_at: '2026-11-11T12:01:00Z',
   updated_at: '2026-11-11T12:01:00Z',
+}
+
+const visibleContext: VisibleContextSummary = {
+  passage_id: passageRecord.id,
+  passage_revision: 1,
+  status: 'context_ready',
+  document_date: '1945-05-08',
+  length_cue: 'part of a sentence',
+  estimated_words: 8,
+  visible_word_count: 37,
+  confirmed_mask_count: 2,
+  serialization_version: 'visible-transcript-v1',
 }
 
 function jsonResponse(body: unknown, status = 200) {
@@ -88,6 +101,48 @@ describe('BackendApi', () => {
       body: JSON.stringify({ page_number: 1, rects: [rect] }),
       signal: undefined,
     })
+  })
+
+  it('saves explicit visible-date provenance and prepares the exact passage', async () => {
+    const datedDocument = {
+      ...documentRecord,
+      visible_date: '1945-05-08',
+      date_provenance: 'manual_visible_document' as const,
+    }
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(datedDocument))
+      .mockResolvedValueOnce(jsonResponse(visibleContext))
+    const api = createBackendApi(fetchMock)
+    const controller = new AbortController()
+
+    await expect(api.updateDocumentMetadata(
+      documentRecord.id,
+      '1945-05-08',
+      controller.signal,
+    )).resolves.toEqual(datedDocument)
+    await expect(api.prepareVisibleContext(
+      passageRecord.id,
+      controller.signal,
+    )).resolves.toEqual(visibleContext)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      `/v1/documents/${documentRecord.id}/metadata`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          visible_date: '1945-05-08',
+          date_provenance: 'manual_visible_document',
+        }),
+        signal: controller.signal,
+      },
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `/v1/passages/${passageRecord.id}:prepare-context`,
+      { method: 'POST', signal: controller.signal },
+    )
   })
 
   it('maps backend details into a typed error without hiding the status or code', async () => {

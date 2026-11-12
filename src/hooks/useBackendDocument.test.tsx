@@ -21,8 +21,10 @@ function apiWith(overrides: Partial<BackendApi> = {}): BackendApi {
     getReadiness: vi.fn(),
     uploadDocument: vi.fn().mockResolvedValue(record),
     deleteDocument: vi.fn().mockResolvedValue(undefined),
+    updateDocumentMetadata: vi.fn(),
     createPassage: vi.fn(),
     updatePassage: vi.fn(),
+    prepareVisibleContext: vi.fn(),
     ...overrides,
   }
 }

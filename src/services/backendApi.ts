@@ -43,6 +43,18 @@ export interface BackendPassageRecord {
   updated_at: string
 }
 
+export interface VisibleContextSummary {
+  passage_id: string
+  passage_revision: number
+  status: 'context_ready'
+  document_date: string
+  length_cue: 'a few words' | 'part of a sentence' | 'about a sentence' | 'a paragraph'
+  estimated_words: number
+  visible_word_count: number
+  confirmed_mask_count: number
+  serialization_version: 'visible-transcript-v1'
+}
+
 export interface PassageMutation {
   label?: string
   page: number
@@ -76,6 +88,11 @@ export interface BackendApi {
   getReadiness(signal?: AbortSignal): Promise<BackendReadiness>
   uploadDocument(file: File, signal?: AbortSignal): Promise<BackendDocumentRecord>
   deleteDocument(documentId: string, signal?: AbortSignal): Promise<void>
+  updateDocumentMetadata(
+    documentId: string,
+    visibleDate: string,
+    signal?: AbortSignal,
+  ): Promise<BackendDocumentRecord>
   createPassage(
     documentId: string,
     passage: PassageMutation & { label: string },
@@ -86,6 +103,10 @@ export interface BackendApi {
     passage: PassageMutation,
     options?: Pick<PassageRequestOptions, 'signal'>,
   ): Promise<BackendPassageRecord>
+  prepareVisibleContext(
+    passageId: string,
+    signal?: AbortSignal,
+  ): Promise<VisibleContextSummary>
 }
 
 export function createBackendApi(fetchImplementation?: typeof fetch): BackendApi {
@@ -112,6 +133,22 @@ export function createBackendApi(fetchImplementation?: typeof fetch): BackendApi
         fetchRequest,
         `/v1/documents/${encodeURIComponent(documentId)}`,
         { method: 'DELETE', signal },
+      )
+    },
+
+    updateDocumentMetadata(documentId, visibleDate, signal) {
+      return requestJson<BackendDocumentRecord>(
+        fetchRequest,
+        `/v1/documents/${encodeURIComponent(documentId)}/metadata`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            visible_date: visibleDate,
+            date_provenance: 'manual_visible_document',
+          }),
+          signal,
+        },
       )
     },
 
@@ -148,6 +185,14 @@ export function createBackendApi(fetchImplementation?: typeof fetch): BackendApi
           }),
           signal: options.signal,
         },
+      )
+    },
+
+    prepareVisibleContext(passageId, signal) {
+      return requestJson<VisibleContextSummary>(
+        fetchRequest,
+        `/v1/passages/${encodeURIComponent(passageId)}:prepare-context`,
+        { method: 'POST', signal },
       )
     },
   }

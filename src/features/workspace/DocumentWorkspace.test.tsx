@@ -1,13 +1,17 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { SAMPLE_DOCUMENT } from '../../data/sampleDocument'
-import type { BackendApi, BackendPassageRecord } from '../../services/backendApi'
+import type {
+  BackendApi,
+  BackendPassageRecord,
+  VisibleContextSummary,
+} from '../../services/backendApi'
 import type { BackendDocumentState } from '../../hooks/useBackendDocument'
 import type { DocumentDescriptor } from '../../types'
 import { DocumentWorkspace } from './DocumentWorkspace'
 
 vi.mock('../viewer/PdfViewer', () => ({
   PdfViewer: ({ markingEnabled, onMarkPassage }: { markingEnabled?: boolean; onMarkPassage?: (page: number, rect: { x: number; y: number; width: number; height: number }) => void }) => (
-    <div aria-label="Local PDF renderer">
+    <div className="pdf-page-shell" aria-label="Local PDF renderer">
       {markingEnabled ? (
         <button type="button" onClick={() => onMarkPassage?.(1, { x: 0.2, y: 0.3, width: 0.4, height: 0.08 })}>
           Complete marked rectangle
@@ -59,13 +63,35 @@ const savedPassage: BackendPassageRecord = {
   updated_at: '2026-11-11T12:01:00Z',
 }
 
-function apiWithCreate(createPassage = vi.fn().mockResolvedValue(savedPassage)): BackendApi {
+const preparedContext: VisibleContextSummary = {
+  passage_id: savedPassage.id,
+  passage_revision: 2,
+  status: 'context_ready',
+  document_date: '1945-05-08',
+  length_cue: 'part of a sentence',
+  estimated_words: 8,
+  visible_word_count: 37,
+  confirmed_mask_count: 2,
+  serialization_version: 'visible-transcript-v1',
+}
+
+function apiWithCreate(
+  createPassage = vi.fn().mockResolvedValue(savedPassage),
+  overrides: Partial<BackendApi> = {},
+): BackendApi {
   return {
     getReadiness: vi.fn(),
     uploadDocument: vi.fn(),
     deleteDocument: vi.fn(),
     createPassage,
     updatePassage: vi.fn().mockResolvedValue({ ...savedPassage, revision: 2 }),
+    updateDocumentMetadata: vi.fn().mockResolvedValue({
+      ...readyBackendDocument.record,
+      visible_date: '1945-05-08',
+      date_provenance: 'manual_visible_document',
+    }),
+    prepareVisibleContext: vi.fn().mockResolvedValue(preparedContext),
+    ...overrides,
   }
 }
 
@@ -114,6 +140,75 @@ describe('DocumentWorkspace', () => {
     expect(screen.queryByText(/sample prediction/i)).not.toBeInTheDocument()
     expect(screen.queryByText('Simulated prediction')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'View interactive sample' })).toBeInTheDocument()
+  })
+
+  it('saves the visible date and shows the real passage-linked context checkpoint', async () => {
+    vi.useRealTimers()
+    const updateDocumentMetadata = vi.fn().mockResolvedValue({
+      ...readyBackendDocument.record,
+      visible_date: '1945-05-08',
+      date_provenance: 'manual_visible_document',
+    })
+    const prepareVisibleContext = vi.fn().mockResolvedValue(preparedContext)
+    const api = apiWithCreate(undefined, {
+      updateDocumentMetadata,
+      prepareVisibleContext,
+    })
+    const { container } = render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={api}
+        onReplace={vi.fn()}
+        onViewSample={vi.fn()}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('Document date shown on PDF'), {
+      target: { value: '1945-05-08' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save visible date' }))
+    await waitFor(() => expect(updateDocumentMetadata).toHaveBeenCalledWith(
+      uploadedDocument.backendDocumentId,
+      '1945-05-08',
+      expect.any(AbortSignal),
+    ))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark a passage' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Complete marked rectangle' }))
+    await screen.findByRole('heading', { name: 'Passage 1 is saved' })
+
+    const prepareButton = screen.getByRole('button', { name: 'Prepare visible context' })
+    await waitFor(() => expect(prepareButton).toBeEnabled())
+    fireEvent.click(prepareButton)
+
+    expect(await screen.findByRole('heading', {
+      name: 'Visible-only context ready',
+    })).toBeInTheDocument()
+    expect(prepareVisibleContext).toHaveBeenCalledWith(
+      savedPassage.id,
+      expect.any(AbortSignal),
+    )
+    expect(screen.getByText('part of a sentence')).toBeInTheDocument()
+    expect(screen.getByText('8 estimated words')).toBeInTheDocument()
+    expect(screen.getByText('37 visible words')).toBeInTheDocument()
+    expect(screen.getByText('2 confirmed masks')).toBeInTheDocument()
+    expect(screen.getAllByText(/Retrieval and model prediction are not connected yet/)).not.toHaveLength(0)
+    expect(container.querySelector('.pdf-page-shell')).toHaveTextContent('')
+  })
+
+  it('keeps context preparation disabled until both date and passage are saved', () => {
+    render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={apiWithCreate()}
+        onReplace={vi.fn()}
+        onViewSample={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Prepare visible context' })).toBeDisabled()
   })
 
   it('does not allow a passage mutation before the backend upload is ready', () => {
