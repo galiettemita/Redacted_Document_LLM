@@ -5,6 +5,7 @@ import { usePredictionSimulation } from '../../hooks/usePredictionSimulation'
 import {
   BackendApiError,
   backendApi as defaultBackendApi,
+  type AnalysisJobRecord,
   type BackendApi,
   type BackendPassageRecord,
   type VisibleContextSummary,
@@ -26,6 +27,7 @@ interface DocumentWorkspaceProps {
 
 type PassageSaveStatus = 'idle' | 'saving' | 'saved' | 'failed'
 type ContextPreparationStatus = 'idle' | 'preparing' | 'ready' | 'failed'
+type AnalysisRequestStatus = 'idle' | 'submitting' | 'received' | 'failed'
 
 export function DocumentWorkspace({
   document,
@@ -40,9 +42,14 @@ export function DocumentWorkspace({
   const [contextStatus, setContextStatus] = useState<ContextPreparationStatus>('idle')
   const [contextSummary, setContextSummary] = useState<VisibleContextSummary | null>(null)
   const [contextError, setContextError] = useState<string | null>(null)
+  const [analysisStatus, setAnalysisStatus] = useState<AnalysisRequestStatus>('idle')
+  const [analysisJob, setAnalysisJob] = useState<AnalysisJobRecord | null>(null)
+  const [analysisError, setAnalysisError] = useState<string | null>(null)
   const passageTargets = useRef(new Map<string, HTMLElement>())
   const passageRequest = useRef<AbortController | null>(null)
   const contextRequest = useRef<AbortController | null>(null)
+  const analysisRequest = useRef<AbortController | null>(null)
+  const analysisIdempotencyKey = useRef<string | null>(null)
   const sampleService = useMemo(() => createMockPredictionService({
     predictionsByDocument: { [document.id]: document.mode === 'sample' ? SAMPLE_PREDICTIONS : [] },
     delayMs: 650,
@@ -56,15 +63,22 @@ export function DocumentWorkspace({
     setContextStatus('idle')
     setContextSummary(null)
     setContextError(null)
+    setAnalysisStatus('idle')
+    setAnalysisJob(null)
+    setAnalysisError(null)
     passageRequest.current?.abort()
     passageRequest.current = null
     contextRequest.current?.abort()
     contextRequest.current = null
+    analysisRequest.current?.abort()
+    analysisRequest.current = null
+    analysisIdempotencyKey.current = null
   }, [document.id])
 
   useEffect(() => () => {
     passageRequest.current?.abort()
     contextRequest.current?.abort()
+    analysisRequest.current?.abort()
   }, [])
 
   useEffect(() => {
@@ -87,7 +101,9 @@ export function DocumentWorkspace({
   const predictions = document.mode === 'sample' ? simulation.predictions : []
   const phase = document.mode === 'sample'
     ? simulation.phase
-    : 'idle' as const
+    : analysisJob?.status === 'queued' || analysisJob?.status === 'running'
+      ? 'predicting' as const
+      : 'idle' as const
   const activePassageId = getEffectivePassageId(state.hoveredId, state.pinnedId)
   const backendReady = document.mode === 'uploaded'
     && backendDocument?.status === 'ready'
@@ -101,6 +117,11 @@ export function DocumentWorkspace({
     || !stablePassageId
     || passageSaveStatus !== 'saved'
     || contextStatus === 'preparing'
+  const analysisUnavailable = !backendReady
+    || !stablePassageId
+    || contextStatus !== 'ready'
+    || !contextSummary
+    || analysisStatus === 'submitting'
 
   async function handleMarkPassage(page: number, rect: PassageRect) {
     if (!backendReady || !document.backendDocumentId) return
@@ -122,6 +143,12 @@ export function DocumentWorkspace({
     setContextStatus('idle')
     setContextSummary(null)
     setContextError(null)
+    analysisRequest.current?.abort()
+    analysisRequest.current = null
+    analysisIdempotencyKey.current = null
+    setAnalysisStatus('idle')
+    setAnalysisJob(null)
+    setAnalysisError(null)
 
     try {
       let saved: BackendPassageRecord
@@ -161,6 +188,12 @@ export function DocumentWorkspace({
     setContextStatus('preparing')
     setContextSummary(null)
     setContextError(null)
+    analysisRequest.current?.abort()
+    analysisRequest.current = null
+    analysisIdempotencyKey.current = null
+    setAnalysisStatus('idle')
+    setAnalysisJob(null)
+    setAnalysisError(null)
 
     try {
       const prepared = await backendApi.prepareVisibleContext(
@@ -178,6 +211,38 @@ export function DocumentWorkspace({
       setContextError(errorMessage(error, 'Visible context could not be prepared.'))
     } finally {
       if (contextRequest.current === controller) contextRequest.current = null
+    }
+  }
+
+  async function handlePredictPassage() {
+    if (analysisUnavailable || !stablePassageId || !contextSummary) return
+    analysisRequest.current?.abort()
+    const controller = new AbortController()
+    analysisRequest.current = controller
+    const idempotencyKey = analysisIdempotencyKey.current ?? createIdempotencyKey()
+    analysisIdempotencyKey.current = idempotencyKey
+    setAnalysisStatus('submitting')
+    setAnalysisJob(null)
+    setAnalysisError(null)
+
+    try {
+      const job = await backendApi.schedulePassageAnalysis(
+        stablePassageId,
+        contextSummary.passage_revision,
+        { signal: controller.signal, idempotencyKey },
+      )
+      if (job.passage_id !== stablePassageId) {
+        throw new Error('The backend returned analysis for a different passage.')
+      }
+      setAnalysisJob(job)
+      setAnalysisStatus('received')
+      analysisIdempotencyKey.current = null
+    } catch (error) {
+      if (isAbortError(error)) return
+      setAnalysisStatus('failed')
+      setAnalysisError(errorMessage(error, 'Prediction readiness could not be checked.'))
+    } finally {
+      if (analysisRequest.current === controller) analysisRequest.current = null
     }
   }
 
@@ -270,6 +335,7 @@ export function DocumentWorkspace({
               ? simulation.error
               : passageError
                 ?? contextError
+                ?? analysisError
                 ?? backendDocumentError(backendDocument)}
             activePassageId={activePassageId}
             onSelectPassage={handleSelectPassage}
@@ -278,8 +344,10 @@ export function DocumentWorkspace({
               ? passageSaveStatus === 'saving'
                 ? 'Saving this passage to the backend…'
                 : contextStatus === 'ready'
-                  ? 'Context query is ready. Verified corpus search and model prediction are not connected yet.'
-                  : 'No prediction has been requested. Retrieval and model prediction are not connected yet.'
+                  ? analysisJob?.status === 'blocked'
+                    ? 'Prediction readiness was checked. The required real services are listed below.'
+                    : 'Context query is ready. Use Predict passage to check every real dependency.'
+                  : 'No prediction has been requested. Save and prepare a visible-only passage first.'
               : undefined}
           >
             {document.mode === 'uploaded' ? (
@@ -313,7 +381,31 @@ export function DocumentWorkspace({
                         <span>{contextSummary.context_query_term_count} visible query terms</span>
                       </p>
                       <p><strong>Context query ready</strong></p>
-                      <p>Verified corpus search and model prediction are not connected yet.</p>
+                      <p>The next action checks the real corpus, worker, and model gates.</p>
+                      <button
+                        className="prepare-context-button"
+                        type="button"
+                        disabled={analysisUnavailable}
+                        onClick={() => void handlePredictPassage()}
+                      >
+                        {analysisStatus === 'submitting'
+                          ? 'Checking prediction readiness…'
+                          : 'Predict passage'}
+                      </button>
+                      {analysisJob?.status === 'blocked' ? (
+                        <section className="analysis-readiness" aria-live="polite">
+                          <h4>Prediction is not ready</h4>
+                          <p>No retrieval or model call was made.</p>
+                          <ul>
+                            {analysisJob.blockers.map((blocker) => (
+                              <li key={blocker.component}>
+                                <strong>{capitalize(blocker.component)}:</strong>{' '}
+                                {blocker.detail}
+                              </li>
+                            ))}
+                          </ul>
+                        </section>
+                      ) : null}
                     </section>
                   ) : null}
                 </div>
@@ -359,6 +451,10 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof BackendApiError || error instanceof Error
     ? error.message
     : fallback
+}
+
+function capitalize(value: string): string {
+  return value ? `${value[0].toUpperCase()}${value.slice(1)}` : value
 }
 
 function markingToolbarTitle(
@@ -431,15 +527,15 @@ function backendNoteMessage(
     return backendDocument.error ?? 'The backend rejected this PDF.'
   }
   if (contextStatus === 'ready') {
-    return 'The backend prepared this passage and its search query from visible PDF content and geometry only. Verified corpus search and model prediction are not connected yet.'
+    return 'The backend prepared this passage and its search query from visible PDF content and geometry only. Use Predict passage to check the real execution gates.'
   }
   if (passageSaveStatus === 'saved') {
-    return 'Passage 1 is saved. Prepare its visible-only context below; the backend will detect the date from the PDF. Retrieval and model prediction are not connected yet.'
+    return 'Passage 1 is saved. Prepare its visible-only context below; the backend will detect the date from the PDF.'
   }
   if (passageSaveStatus === 'failed') {
     return 'The rectangle remains visible locally, but it was not saved. Try marking the passage again.'
   }
-  return 'The PDF is stored temporarily by the local backend. Save one passage to prepare visible-only context and detect its visible date. Retrieval and model prediction are not connected yet.'
+  return 'The PDF is stored temporarily by the local backend. Save one passage to prepare visible-only context and detect its visible date.'
 }
 
 function backendDocumentError(backendDocument: BackendDocumentState | undefined): string | null {

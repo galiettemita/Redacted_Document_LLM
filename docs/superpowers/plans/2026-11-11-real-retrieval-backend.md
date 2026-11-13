@@ -392,7 +392,7 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - [x] **Step 4: Run focused tests; expect missing fusion service.**
 - [ ] **Step 5: Implement the pure retrieval service and immutable trace persistence. Raw BM25/cosine scores may be stored but never compared across methods.**
 - [x] **Step 6: Run focused and full backend tests; expect PASS.**
-- [ ] **Step 7: Update the checklist, commit with `feat: fuse realistic retrieval evidence`, and push.**
+- [x] **Step 7: Update the checklist, commit with `feat: fuse realistic retrieval evidence`, and push.**
 
 ### Task 10: Frozen prompts and OpenAI model gateway
 
@@ -415,11 +415,18 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - [x] **Step 4: Run focused tests; expect missing model modules.**
 - [x] **Step 5: Implement prompt loading/rendering, target-model token counting, the Responses API gateway, and persistence boundary without making a real API call.**
 - [x] **Step 6: Run focused and full backend tests; expect PASS.**
-- [ ] **Step 7: Update the checklist, commit with `feat: add frozen realistic model prompts`, and push.**
+- [x] **Step 7: Update the checklist, commit with `feat: add frozen realistic model prompts`, and push.**
 
 **Execution gate after Task 10:** Show the exact one-passage token estimate and maximum cost, then ask the user for model access and explicit approval before any real query/prediction request.
 
 ### Task 11: Idempotent analysis jobs, SSE, and the first real linked prediction
+
+**Permanent readiness slice completed before paid execution:**
+
+- [x] Persist revision-bound jobs and ordered events in `0006_analysis_jobs.py`.
+- [x] Add exact-revision/idempotent scheduling, durable blocker records, resumable SSE, passage-change cancellation, and an honest website **Predict passage** action.
+- [x] Verify the live loopback path through upload, passage persistence, visible-only context/query preparation, blocked job creation, event delivery, idempotent replay, and cleanup without retrieval or model calls.
+- [ ] Connect Dramatiq execution, retrieval trace persistence, prediction events, and the real sidebar result; these remain the Task 11 execution slice below.
 
 **Files:**
 - Create: `backend/src/redacted_backend/jobs/messages.py`, `orchestrator.py`, `tasks.py`, `events.py`

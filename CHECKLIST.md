@@ -93,3 +93,19 @@
     - [x] Count the exact provider request before generation and reject an oversized prompt without truncating evidence.
     - [x] Preserve passage ID, trace/prompt/request hashes, provider IDs, usage, cost, pricing version, and idempotent result reuse.
     - [ ] Obtain an exact real-passage token count and ask for explicit spending approval only after complete evidence exists.
+  - [ ] Task 11: Run revision-bound analysis jobs and stream the first real linked prediction.
+    - [x] Task 11A: Connect the permanent, no-spend prediction-readiness slice to the website.
+      - [x] Persist revision-bound analysis jobs and ordered document events in migration `0006_analysis_jobs`.
+      - [x] Require an exact prepared passage revision and an idempotency key before scheduling.
+      - [x] Reuse the same key after an uncertain browser response without preventing a later intentional recheck.
+      - [x] Return a durable blocked job with exact corpus, model-approval, and worker blockers; make no retrieval or model call.
+      - [x] Cancel queued/running work when its passage changes and append a terminal ordered event.
+      - [x] Expose resumable SSE from `Last-Event-ID` with terminal close and active-job heartbeats.
+      - [x] Add **Predict passage** after visible context and keep all prediction text off the PDF.
+      - [x] Verify fresh/downgrade/re-upgrade migrations, real Postgres, live upload-to-job API flow, idempotent replay, cleanup, backend/frontend suites, typecheck, production build, and healthy loopback services.
+      - [x] Keep the locked BGE/FAISS stack in a dedicated retrieval dependency group instead of bloating the web API image.
+      - [x] Probe the configured database in readiness so a working Postgres service no longer reports a placeholder failure.
+      - [ ] Repeat the click-through visually when the in-app browser connector is available; the live demo and automated UI path are ready, but no visual run is claimed.
+    - [ ] Connect the worker to the four-list retrieval service and persist its immutable trace transactionally.
+    - [ ] Connect the SSE prediction event to the existing passage-linked sidebar cards and hover ordering.
+    - [ ] After complete corpus evidence exists, show exact token cost and obtain explicit approval before the first paid model call.

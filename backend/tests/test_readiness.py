@@ -46,6 +46,46 @@ def test_readiness_never_equates_http_health_with_prediction_readiness() -> None
     }
 
 
+def test_database_readiness_probes_the_configured_database(tmp_path: Path) -> None:
+    settings = Settings(
+        database_url=f"sqlite:///{tmp_path / 'readiness.db'}",
+        document_storage_root=tmp_path / "documents",
+    )
+
+    async def request_readiness():
+        transport = ASGITransport(app=create_app(settings))
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.get("/v1/readiness")
+
+    body = asyncio.run(request_readiness()).json()
+
+    assert body["database"] == {"ready": True, "detail": "ready"}
+    assert body["prediction_ready"] is False
+
+
+def test_model_readiness_requires_access_and_explicit_paid_call_approval() -> None:
+    async def read(settings: Settings):
+        transport = ASGITransport(app=create_app(settings))
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            return (await client.get("/v1/readiness")).json()
+
+    unapproved = asyncio.run(
+        read(Settings(openai_api_key="secret", allow_paid_model_calls=False))
+    )
+    approved = asyncio.run(
+        read(Settings(openai_api_key="secret", allow_paid_model_calls=True))
+    )
+
+    assert unapproved["model"] == {
+        "ready": False,
+        "detail": "configured; paid calls not approved",
+    }
+    assert approved["model"] == {
+        "ready": True,
+        "detail": "configured and paid calls approved",
+    }
+
+
 def test_corpus_readiness_requires_matching_corpus_and_bm25_manifests(
     tmp_path: Path,
 ) -> None:

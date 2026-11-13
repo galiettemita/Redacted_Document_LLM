@@ -955,10 +955,8 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
-    { name = "faiss-cpu" },
     { name = "fastapi" },
     { name = "httpx" },
-    { name = "huggingface-hub" },
     { name = "numpy" },
     { name = "opencv-python-headless" },
     { name = "pillow" },
@@ -968,23 +966,28 @@ dependencies = [
     { name = "pytesseract" },
     { name = "python-multipart" },
     { name = "pyyaml" },
-    { name = "sentence-transformers" },
     { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "faiss-cpu" },
+    { name = "huggingface-hub" },
     { name = "pytest" },
+    { name = "sentence-transformers" },
+]
+retrieval = [
+    { name = "faiss-cpu" },
+    { name = "huggingface-hub" },
+    { name = "sentence-transformers" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.15,<2" },
-    { name = "faiss-cpu", specifier = ">=1.10,<2" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "httpx", specifier = ">=0.28,<1" },
-    { name = "huggingface-hub", specifier = ">=0.30,<2" },
     { name = "numpy", specifier = ">=2,<3" },
     { name = "opencv-python-headless", specifier = ">=4.11,<5" },
     { name = "pillow", specifier = ">=11,<13" },
@@ -994,13 +997,22 @@ requires-dist = [
     { name = "pytesseract", specifier = ">=0.3.13,<1" },
     { name = "python-multipart", specifier = ">=0.0.20,<1" },
     { name = "pyyaml", specifier = ">=6,<7" },
-    { name = "sentence-transformers", specifier = ">=5.1,<6" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34,<1" },
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.3,<10" }]
+dev = [
+    { name = "faiss-cpu", specifier = ">=1.10,<2" },
+    { name = "huggingface-hub", specifier = ">=0.30,<2" },
+    { name = "pytest", specifier = ">=8.3,<10" },
+    { name = "sentence-transformers", specifier = ">=5.1,<6" },
+]
+retrieval = [
+    { name = "faiss-cpu", specifier = ">=1.10,<2" },
+    { name = "huggingface-hub", specifier = ">=0.30,<2" },
+    { name = "sentence-transformers", specifier = ">=5.1,<6" },
+]
 
 [[package]]
 name = "regex"

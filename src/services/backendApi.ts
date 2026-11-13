@@ -80,6 +80,25 @@ export interface VisibleContextSummary {
   context_stopwords_version: string
 }
 
+export interface AnalysisBlocker {
+  component: string
+  detail: string
+}
+
+export interface AnalysisJobRecord {
+  id: string
+  passage_id: string
+  document_id: string
+  passage_revision: number
+  status: 'blocked' | 'queued' | 'running' | 'complete' | 'failed' | 'cancelled'
+  stage: 'readiness' | 'query' | 'retrieval' | 'prediction' | 'complete'
+  blockers: AnalysisBlocker[]
+  error_code: string | null
+  error_detail: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface PassageMutation {
   label?: string
   page: number
@@ -127,6 +146,12 @@ export interface BackendApi {
     passageId: string,
     signal?: AbortSignal,
   ): Promise<VisibleContextSummary>
+  schedulePassageAnalysis(
+    passageId: string,
+    expectedRevision: number,
+    options: Required<Pick<PassageRequestOptions, 'idempotencyKey'>>
+      & Pick<PassageRequestOptions, 'signal'>,
+  ): Promise<AnalysisJobRecord>
 }
 
 export function createBackendApi(fetchImplementation?: typeof fetch): BackendApi {
@@ -197,6 +222,22 @@ export function createBackendApi(fetchImplementation?: typeof fetch): BackendApi
         fetchRequest,
         `/v1/passages/${encodeURIComponent(passageId)}:prepare-context`,
         { method: 'POST', signal },
+      )
+    },
+
+    schedulePassageAnalysis(passageId, expectedRevision, options) {
+      return requestJson<AnalysisJobRecord>(
+        fetchRequest,
+        `/v1/passages/${encodeURIComponent(passageId)}/analysis`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': options.idempotencyKey,
+          },
+          body: JSON.stringify({ expected_revision: expectedRevision }),
+          signal: options.signal,
+        },
       )
     },
   }

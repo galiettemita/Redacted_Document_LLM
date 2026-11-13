@@ -13,6 +13,7 @@ from redacted_backend.db.models import (
     PassageInvalidation,
     VisibleExampleArtifact,
 )
+from redacted_backend.db.repositories.analysis import AnalysisJobRepository
 from redacted_backend.domain.documents import DocumentStatus
 from redacted_backend.domain.passages import (
     PassageRecord,
@@ -262,6 +263,10 @@ class PassageRepository:
     def _invalidate(
         self, model: Passage, reason: str, *, deleted: bool = False
     ) -> None:
+        AnalysisJobRepository(self._session).cancel_active_for_passage(
+            model.id,
+            reason="passage_revision_changed",
+        )
         previous_revision = model.revision
         model.revision += 1
         model.status = (

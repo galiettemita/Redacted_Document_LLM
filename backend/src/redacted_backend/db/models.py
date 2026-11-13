@@ -186,3 +186,86 @@ class IdempotencyRecord(Base):
         nullable=False,
         server_default=func.now(),
     )
+
+
+class AnalysisJob(Base):
+    __tablename__ = "analysis_jobs"
+    __table_args__ = (
+        UniqueConstraint(
+            "passage_id",
+            "idempotency_key",
+            name="uq_analysis_job_passage_idempotency",
+        ),
+        Index("ix_analysis_jobs_document_status", "document_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    passage_id: Mapped[str] = mapped_column(
+        ForeignKey("passages.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    passage_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    stage: Mapped[str] = mapped_column(String(32), nullable=False)
+    blockers: Mapped[list[dict[str, str]]] = mapped_column(JSON, nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    query_payload: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    retrieval_trace: Mapped[dict[str, object] | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
+    prediction_payload: Mapped[dict[str, object] | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class AnalysisEvent(Base):
+    __tablename__ = "analysis_events"
+    __table_args__ = (
+        UniqueConstraint("job_id", "sequence", name="uq_analysis_event_job_sequence"),
+        Index("ix_analysis_events_document_id_id", "document_id", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[str] = mapped_column(
+        ForeignKey("analysis_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    passage_id: Mapped[str] = mapped_column(
+        ForeignKey("passages.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )

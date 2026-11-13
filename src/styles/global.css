@@ -584,6 +584,34 @@ input:focus-visible {
   font-size: 0.7rem;
 }
 
+.analysis-readiness {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #e5c78c;
+  border-radius: 8px;
+  background: #fff9ed;
+}
+
+.analysis-readiness h4 {
+  color: #744f0d;
+}
+
+.analysis-readiness p,
+.visible-context-summary .analysis-readiness p {
+  display: block;
+  margin: 0 0 7px;
+  color: #6b531f;
+  font-size: 0.7rem;
+}
+
+.analysis-readiness ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #5f4b22;
+  font-size: 0.69rem;
+  line-height: 1.45;
+}
+
 .text-button {
   padding: 7px 10px;
   color: var(--blue-dark);

@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { SAMPLE_DOCUMENT } from '../../data/sampleDocument'
 import type {
+  AnalysisJobRecord,
   BackendApi,
   BackendPassageRecord,
   VisibleContextSummary,
@@ -81,6 +82,24 @@ const preparedContext: VisibleContextSummary = {
   context_stopwords_version: 'visible-english-v1',
 }
 
+const blockedAnalysis: AnalysisJobRecord = {
+  id: '33333333-3333-4333-8333-333333333333',
+  passage_id: savedPassage.id,
+  document_id: uploadedDocument.backendDocumentId!,
+  passage_revision: preparedContext.passage_revision,
+  status: 'blocked',
+  stage: 'readiness',
+  blockers: [
+    { component: 'corpus', detail: 'corpus exclusion coverage is incomplete' },
+    { component: 'model', detail: 'model access is not configured' },
+    { component: 'worker', detail: 'analysis worker execution is not connected' },
+  ],
+  error_code: null,
+  error_detail: null,
+  created_at: '2026-11-13T12:00:00Z',
+  updated_at: '2026-11-13T12:00:00Z',
+}
+
 function apiWithCreate(
   createPassage = vi.fn().mockResolvedValue(savedPassage),
   overrides: Partial<BackendApi> = {},
@@ -92,6 +111,7 @@ function apiWithCreate(
     createPassage,
     updatePassage: vi.fn().mockResolvedValue({ ...savedPassage, revision: 2 }),
     prepareVisibleContext: vi.fn().mockResolvedValue(preparedContext),
+    schedulePassageAnalysis: vi.fn().mockResolvedValue(blockedAnalysis),
     ...overrides,
   }
 }
@@ -115,7 +135,7 @@ describe('DocumentWorkspace', () => {
     render(<DocumentWorkspace document={uploadedDocument} backendDocument={readyBackendDocument} backendApi={apiWithCreate()} onReplace={vi.fn()} onViewSample={onViewSample} />)
 
     expect(screen.getByText(/The PDF is stored temporarily by the local backend/)).toBeInTheDocument()
-    expect(screen.getByText(/retrieval and model prediction are not connected yet/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Prepare visible context' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'View interactive sample' }))
     expect(onViewSample).toHaveBeenCalledOnce()
   })
@@ -184,7 +204,7 @@ describe('DocumentWorkspace', () => {
     expect(screen.getByText('2 confirmed masks')).toBeInTheDocument()
     expect(screen.getByText('4 visible query terms')).toBeInTheDocument()
     expect(screen.getByText('Context query ready')).toBeInTheDocument()
-    expect(screen.getAllByText(/Verified corpus search and model prediction are not connected yet/)).not.toHaveLength(0)
+    expect(screen.getByText(/The next action checks the real corpus, worker, and model gates/)).toBeInTheDocument()
     expect(screen.queryByText('visible before visible after')).not.toBeInTheDocument()
     expect(screen.queryByText(/search results/i)).not.toBeInTheDocument()
     expect(container.querySelector('.pdf-page-shell')).toHaveTextContent('')
@@ -202,6 +222,75 @@ describe('DocumentWorkspace', () => {
     )
 
     expect(screen.getByRole('button', { name: 'Prepare visible context' })).toBeDisabled()
+  })
+
+  it('creates a durable analysis check and shows real blockers without PDF prediction text', async () => {
+    vi.useRealTimers()
+    const schedulePassageAnalysis = vi.fn().mockResolvedValue(blockedAnalysis)
+    const api = apiWithCreate(undefined, { schedulePassageAnalysis })
+    const { container } = render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={api}
+        onReplace={vi.fn()}
+        onViewSample={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark a passage' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Complete marked rectangle' }))
+    await screen.findByRole('heading', { name: 'Passage 1 is saved' })
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare visible context' }))
+    await screen.findByRole('heading', { name: 'Visible-only context ready' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Predict passage' }))
+
+    expect(await screen.findByRole('heading', {
+      name: 'Prediction is not ready',
+    })).toBeInTheDocument()
+    expect(schedulePassageAnalysis).toHaveBeenCalledWith(
+      savedPassage.id,
+      preparedContext.passage_revision,
+      expect.objectContaining({ idempotencyKey: expect.any(String) }),
+    )
+    expect(screen.getByText(/corpus exclusion coverage is incomplete/)).toBeInTheDocument()
+    expect(screen.getByText(/model access is not configured/)).toBeInTheDocument()
+    expect(screen.getByText(/analysis worker execution is not connected/)).toBeInTheDocument()
+    expect(container.querySelector('.pdf-page-shell')).toHaveTextContent('')
+    expect(screen.queryByText('Predicted hidden passage')).not.toBeInTheDocument()
+  })
+
+  it('reuses the analysis idempotency key when an uncertain request is retried', async () => {
+    vi.useRealTimers()
+    const schedulePassageAnalysis = vi.fn()
+      .mockRejectedValueOnce(new Error('The connection closed before a response arrived.'))
+      .mockResolvedValueOnce(blockedAnalysis)
+    const api = apiWithCreate(undefined, { schedulePassageAnalysis })
+    render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={api}
+        onReplace={vi.fn()}
+        onViewSample={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark a passage' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Complete marked rectangle' }))
+    await screen.findByRole('heading', { name: 'Passage 1 is saved' })
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare visible context' }))
+    await screen.findByRole('heading', { name: 'Visible-only context ready' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Predict passage' }))
+    expect(await screen.findByText('The connection closed before a response arrived.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Predict passage' }))
+    await screen.findByRole('heading', { name: 'Prediction is not ready' })
+
+    const firstOptions = schedulePassageAnalysis.mock.calls[0][2]
+    const retryOptions = schedulePassageAnalysis.mock.calls[1][2]
+    expect(retryOptions.idempotencyKey).toBe(firstOptions.idempotencyKey)
   })
 
   it('does not allow a passage mutation before the backend upload is ready', () => {

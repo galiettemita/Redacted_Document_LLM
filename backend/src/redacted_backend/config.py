@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     dense_manifest_path: Path | None = None
     opensearch_url: str | None = None
     openai_api_key: SecretStr | None = None
+    allow_paid_model_calls: bool = False
     document_storage_root: Path = Path("/var/lib/redacted/documents")
     document_retention_hours: int = 24
     pdf_max_file_bytes: int = 100 * 1024 * 1024

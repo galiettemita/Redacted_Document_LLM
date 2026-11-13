@@ -1,8 +1,11 @@
 from fastapi import APIRouter
 from pydantic import ValidationError
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from redacted_backend.config import Settings
 from redacted_backend.corpus.manifest import CorpusManifest
+from redacted_backend.db.base import Database
 from redacted_backend.domain.readiness import (
     ComponentReadiness,
     ReadinessResponse,
@@ -12,19 +15,15 @@ from redacted_backend.retrieval.types import Bm25IndexManifest, DenseIndexManife
 from redacted_backend.scientific_config import ScientificConfig
 
 
-def create_readiness_router(settings: Settings) -> APIRouter:
+def create_readiness_router(
+    settings: Settings,
+    database: Database | None,
+) -> APIRouter:
     router = APIRouter()
 
     @router.get("/readiness", response_model=ReadinessResponse)
     def readiness() -> ReadinessResponse:
-        database = ComponentReadiness(
-            ready=False,
-            detail=(
-                "not configured"
-                if settings.database_url is None
-                else "probe not connected"
-            ),
-        )
+        database_readiness = resolve_database_readiness(database)
         worker = ComponentReadiness(
             ready=False,
             detail=(
@@ -33,19 +32,25 @@ def create_readiness_router(settings: Settings) -> APIRouter:
                 else "heartbeat not connected"
             ),
         )
-        corpus = _corpus_readiness(settings)
+        corpus = resolve_corpus_readiness(settings)
         model = ComponentReadiness(
-            ready=settings.openai_api_key is not None,
+            ready=(
+                settings.openai_api_key is not None
+                and settings.allow_paid_model_calls
+            ),
             detail=(
-                "configured"
+                "configured and paid calls approved"
+                if settings.openai_api_key is not None
+                and settings.allow_paid_model_calls
+                else "configured; paid calls not approved"
                 if settings.openai_api_key is not None
                 else "not configured"
             ),
         )
-        components = (database, worker, corpus, model)
+        components = (database_readiness, worker, corpus, model)
         return ReadinessResponse(
             http=ComponentReadiness(ready=True, detail="ready"),
-            database=database,
+            database=database_readiness,
             worker=worker,
             corpus=corpus,
             model=model,
@@ -55,7 +60,18 @@ def create_readiness_router(settings: Settings) -> APIRouter:
     return router
 
 
-def _corpus_readiness(settings: Settings) -> ComponentReadiness:
+def resolve_database_readiness(database: Database | None) -> ComponentReadiness:
+    if database is None:
+        return ComponentReadiness(ready=False, detail="not configured")
+    try:
+        with database.engine.connect() as connection:
+            connection.execute(text("SELECT 1")).scalar_one()
+    except SQLAlchemyError:
+        return ComponentReadiness(ready=False, detail="probe failed")
+    return ComponentReadiness(ready=True, detail="ready")
+
+
+def resolve_corpus_readiness(settings: Settings) -> ComponentReadiness:
     if (
         settings.corpus_manifest_path is None
         or settings.bm25_manifest_path is None

@@ -1,6 +1,7 @@
 import {
   BackendApiError,
   createBackendApi,
+  type AnalysisJobRecord,
   type BackendDocumentRecord,
   type BackendPassageRecord,
   type VisibleContextSummary,
@@ -51,6 +52,22 @@ const visibleContext: VisibleContextSummary = {
   context_query_sha256: '4e64699ee5403e5b9c960206e944cdfde3be184499c2552b508afdaf089746fb',
   context_query_version: 'context-query-v1',
   context_stopwords_version: 'visible-english-v1',
+}
+
+const blockedAnalysis: AnalysisJobRecord = {
+  id: '33333333-3333-4333-8333-333333333333',
+  passage_id: passageRecord.id,
+  document_id: documentRecord.id,
+  passage_revision: 1,
+  status: 'blocked',
+  stage: 'readiness',
+  blockers: [
+    { component: 'corpus', detail: 'corpus exclusion coverage is incomplete' },
+  ],
+  error_code: null,
+  error_detail: null,
+  created_at: '2026-11-13T12:00:00Z',
+  updated_at: '2026-11-13T12:00:00Z',
 }
 
 function jsonResponse(body: unknown, status = 200) {
@@ -123,6 +140,31 @@ describe('BackendApi', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       `/v1/passages/${passageRecord.id}:prepare-context`,
       { method: 'POST', signal: controller.signal },
+    )
+  })
+
+  it('schedules the exact prepared passage revision with an idempotency key', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(blockedAnalysis, 202))
+    const api = createBackendApi(fetchMock)
+    const controller = new AbortController()
+
+    await expect(api.schedulePassageAnalysis(
+      passageRecord.id,
+      1,
+      { signal: controller.signal, idempotencyKey: 'analysis-1' },
+    )).resolves.toEqual(blockedAnalysis)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/v1/passages/${passageRecord.id}/analysis`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'analysis-1',
+        },
+        body: JSON.stringify({ expected_revision: 1 }),
+        signal: controller.signal,
+      },
     )
   })
 
