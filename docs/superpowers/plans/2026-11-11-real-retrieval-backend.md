@@ -386,12 +386,12 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - Produces: `serialize_prompt_documents(documents, chunks_per_document=2) -> str` with the spec's exact markers.
 - Produces: `SelfDocumentMatcher.match(upload, corpus_candidates) -> ExclusionDecision` and fail-closed ambiguity.
 
-- [ ] **Step 1: Write failing tests proving exactly four 300-item calls, document RRF from each list's best chunk, chunk-level RRF selection of two excerpts, duplicate filename/opening merge, stable ties, top-100 limit, and `no_evidence_retrieved` when fusion is empty.**
-- [ ] **Step 2: Add failing self-exclusion tests for known aliases, same-release near duplicate, multiple ambiguous releases, and a clearly unrelated document.**
+- [x] **Step 1: Write failing tests proving exactly four 300-item calls, document RRF from each list's best chunk, chunk-level RRF selection of two excerpts, duplicate filename/opening merge, stable ties, top-100 limit, and `no_evidence_retrieved` when fusion is empty.**
+- [x] **Step 2: Add failing self-exclusion tests for known aliases, same-release near duplicate, multiple ambiguous releases, and a clearly unrelated document.**
 - [ ] **Step 3: Add a failing serialization/token-budget test asserting the exact `[DOCUMENT n]`/`[EXCERPT n]` format and `prompt_too_large` without truncation.**
-- [ ] **Step 4: Run focused tests; expect missing fusion service.**
+- [x] **Step 4: Run focused tests; expect missing fusion service.**
 - [ ] **Step 5: Implement the pure retrieval service and immutable trace persistence. Raw BM25/cosine scores may be stored but never compared across methods.**
-- [ ] **Step 6: Run focused and full backend tests; expect PASS.**
+- [x] **Step 6: Run focused and full backend tests; expect PASS.**
 - [ ] **Step 7: Update the checklist, commit with `feat: fuse realistic retrieval evidence`, and push.**
 
 ### Task 10: Frozen prompts and OpenAI model gateway

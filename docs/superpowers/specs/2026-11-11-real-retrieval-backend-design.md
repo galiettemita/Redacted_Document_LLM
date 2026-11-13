@@ -242,6 +242,8 @@ Reciprocal-rank fusion uses the standard missing-paper-detail choice `k=60`. For
 
 Self-document exclusion happens before fusion. Known archive identifiers are primary. When an arbitrary upload lacks identifiers, a normalized 8-word-shingle fingerprint checks for a near-duplicate corpus document. The deterministic matcher excludes every corpus document above the frozen self-match threshold. If several candidates straddle the threshold or appear to be different releases of the same document, retrieval fails with `self_document_identity_unresolved`; no person may resolve it by choosing search results after seeing them. A user may correct archive identifiers as pre-retrieval document metadata, and the correction is recorded before any search runs.
 
+Appendix C/F does not disclose a self-document similarity threshold. The first implementation therefore freezes and exposes this missing-method choice in the scientific manifest: 8-word-shingle Jaccard `>=0.80` is a clear match, while candidates at `>=0.70` participate in the ambiguity gate. Multiple differently named clear matches, multiple borderline matches, or a clear-plus-borderline set fail closed. These values are versioned engineering choices, not attributed to Andrew's paper, and may not change without a new matcher version and rebuilt traces.
+
 Chunk selection avoids comparing raw BM25 and cosine scores. For each chunk inside a fused document, sum `1 / (60 + rank)` over the four lists where that same chunk appears, then select the top two by this chunk-level reciprocal-rank score with chunk ID as the stable tie-breaker.
 
 The `{documents}` prompt value has a frozen minimal serialization:

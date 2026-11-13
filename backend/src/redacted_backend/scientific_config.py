@@ -59,6 +59,17 @@ class ScientificConfig(BaseModel):
     rrf_k: int = 60
     top_documents: int = 100
     chunks_per_document: int = 2
+    document_merge_version: str = "filename-opening120-v1"
+    archive_copy_suffixes: tuple[str, ...] = (
+        "archive copy",
+        "copy",
+        "final",
+        "revised",
+    )
+    self_match_version: str = "visible-shingle-self-match-v1"
+    self_match_shingle_words: int = 8
+    self_match_threshold: float = 0.80
+    self_match_ambiguity_floor: float = 0.70
     pdf_render_dpi: int = 144
     visible_transcript_version: str = "visible-transcript-v1"
     mask_detection_version: str = "mask-discovery-v1"

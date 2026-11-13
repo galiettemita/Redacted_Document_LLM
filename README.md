@@ -121,6 +121,8 @@ uv run corpus build-dense \
 
 The sparse index uses the standard Unicode tokenizer, a versioned lowercase stop-word list, no stemming, and frozen BM25 parameters `k1=1.2` and `b=0.75`. The dense index uses the immutable `BAAI/bge-base-en-v1.5` revision recorded in the scientific manifest, normalized 768-dimensional embeddings, float16 exact re-scoring, and FAISS HNSW candidates with `M=32`, `efConstruction=200`, and `efSearch=512`. Both searches are capped at the paper's exact top 300 and record query, corpus, and index provenance. Dense build and readiness fail unless measured `recall@300` is at least `0.98`. Do not treat the service as corpus-ready unless `/v1/readiness` verifies matching corpus, BM25, and dense manifests.
 
+The prediction input path now has the paper's four-list shape: visible context and model-produced own query are each sent independently to BM25 and dense retrieval; self-document candidates are removed before document-level reciprocal-rank fusion; and the top 100 documents retain at most two chunk-level RRF excerpts. The immutable trace boundary preserves all four raw ranked lists and provenance without comparing BM25 scores to cosine scores. It is not yet exposed as a prediction because the complete source is unavailable, traces are not yet attached to durable analysis jobs, and no paid model call has been approved.
+
 ## Run locally
 
 1. Install Node.js 24 or a current compatible Node.js release.

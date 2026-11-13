@@ -78,3 +78,10 @@
     - [x] Require matching corpus, BM25, and dense manifests before corpus readiness can pass.
     - [x] Verify a real local BGE encode and FAISS save/load/search smoke test without a paid call.
     - [ ] Build the full-corpus dense artifact and real visible-query recall sample after the official complete source is available.
+  - [ ] Task 9: Reproduce four-list realistic retrieval and evidence fusion.
+    - [x] Request context and own-query top-300 lists independently from BM25 and dense retrieval.
+    - [x] Exclude a matching uploaded document before fusion and fail closed for ambiguous releases.
+    - [x] Fuse documents by best per-list chunk rank with `k=60`, stable ties, top 100, and two chunk-level RRF excerpts.
+    - [x] Serialize only the frozen `[DOCUMENT n]` and `[EXCERPT n]` evidence format.
+    - [x] Preserve raw ranks, scores, query/index/corpus hashes, exclusions, and fused evidence in an immutable trace boundary.
+    - [ ] Persist the trace transactionally with the analysis job after Task 11 storage is added.
