@@ -17,6 +17,15 @@ export interface Prediction {
   page: number
   model: string
   text: string
+  provenance?: 'simulated' | 'model'
+  usage?: {
+    inputTokens: number
+    outputTokens: number
+    totalTokens: number
+    reasoningTokens: number
+    estimatedCostUsd: number
+    pricingVersion: string
+  }
 }
 
 export type DocumentMode = 'sample' | 'uploaded'

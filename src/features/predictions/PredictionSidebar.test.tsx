@@ -64,4 +64,34 @@ describe('PredictionSidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss selected passage' }))
     expect(onDismissSelection).toHaveBeenCalledOnce()
   })
+
+  it('labels provider output as a model prediction and never as simulated', () => {
+    render(
+      <PredictionSidebar
+        passages={SAMPLE_PASSAGES}
+        predictions={[{
+          ...SAMPLE_PREDICTIONS[0],
+          model: 'GPT-6 Astra',
+          provenance: 'model',
+          usage: {
+            inputTokens: 2_000,
+            outputTokens: 120,
+            totalTokens: 2_120,
+            reasoningTokens: 30,
+            estimatedCostUsd: 0.026,
+            pricingVersion: '2026-11-13',
+          },
+        }]}
+        phase="complete"
+        error={null}
+        activePassageId="passage-1"
+        onSelectPassage={vi.fn()}
+        onDismissSelection={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('Model prediction')).toBeInTheDocument()
+    expect(screen.getByText('2,120 tokens · $0.0260 estimated')).toBeInTheDocument()
+    expect(screen.queryByText('Simulated prediction')).not.toBeInTheDocument()
+  })
 })

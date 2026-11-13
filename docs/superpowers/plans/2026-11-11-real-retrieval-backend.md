@@ -426,7 +426,7 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - [x] Persist revision-bound jobs and ordered events in `0006_analysis_jobs.py`.
 - [x] Add exact-revision/idempotent scheduling, durable blocker records, resumable SSE, passage-change cancellation, and an honest website **Predict passage** action.
 - [x] Verify the live loopback path through upload, passage persistence, visible-only context/query preparation, blocked job creation, event delivery, idempotent replay, and cleanup without retrieval or model calls.
-- [ ] Connect Dramatiq execution, retrieval trace persistence, prediction events, and the real sidebar result; these remain the Task 11 execution slice below.
+- [x] Connect Dramatiq execution, retrieval trace persistence, prediction events, and the real sidebar result; live paid execution remains gated below.
 
 **Files:**
 - Create: `backend/src/redacted_backend/jobs/messages.py`, `orchestrator.py`, `tasks.py`, `events.py`
@@ -444,12 +444,12 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - Produces: `GET /v1/documents/{id}/events` SSE events `passage.status`, `passage.prediction`, `passage.error`, and heartbeat.
 - Produces: `createHttpPredictionService(api: BackendApi) -> PredictionService` preserving `AbortSignal` cancellation.
 
-- [ ] **Step 1: Write failing backend tests for stage checkpoints, same-key deduplication, worker retry after retrieval, revision mismatch cancellation, deletion cancellation, ordered events, and SSE reconnect from `Last-Event-ID`.**
-- [ ] **Step 2: Write failing frontend tests asserting a real event becomes a `Prediction` with the same passage ID, hover moves it to `Selected passage`, it disappears from the ordinary list while selected, and no prediction text renders inside `.pdf-page-shell`.**
-- [ ] **Step 3: Run focused backend/frontend tests; expect missing orchestration and HTTP service.**
-- [ ] **Step 4: Implement Dramatiq orchestration, transactionally persisted stage/idempotency state, Redis event stream, SSE adapter, and frontend service injection.**
+- [x] **Step 1: Write failing backend tests for stage checkpoints, same-key deduplication, worker retry after retrieval, revision mismatch cancellation, deletion cancellation, ordered events, and SSE reconnect from `Last-Event-ID`.**
+- [x] **Step 2: Write failing frontend tests asserting a real event becomes a `Prediction` with the same passage ID, hover moves it to `Selected passage`, it disappears from the ordinary list while selected, and no prediction text renders inside `.pdf-page-shell`.**
+- [x] **Step 3: Run focused backend/frontend tests; expect missing orchestration and HTTP service.**
+- [x] **Step 4: Implement Dramatiq orchestration, transactionally persisted stage/idempotency state, Redis-backed dispatch, durable ordered database events, the SSE adapter, and frontend service injection.**
 - [ ] **Step 5: After the paid-call gate is approved, run exactly one manually marked passage through query generation and prediction; record request IDs, prompt/config hashes, retrieval trace ID, usage, and cost.**
-- [ ] **Step 6: Run all backend/frontend tests, typecheck, build, and browser QA for the first real passage; expect PASS and no simulated copy on that path.**
+- [ ] **Step 6: Run all backend/frontend tests, typecheck, build, and browser QA for the first real passage; automated and live no-spend API gates pass, while paid first-passage browser QA awaits Step 5 and an available in-app browser connector.**
 - [ ] **Step 7: Update the checklist, commit with `feat: stream real passage predictions`, and push.**
 
 ### Task 12: Automatic detection, correction, and whole-document processing

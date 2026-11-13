@@ -82,6 +82,147 @@ class AnalysisJobRepository:
         model = self._session.get(AnalysisJob, str(job_id))
         return _job_record(model) if model is not None else None
 
+    def start(self, job_id: UUID | str) -> AnalysisJobRecord | None:
+        model = self._session.get(AnalysisJob, str(job_id), with_for_update=True)
+        if model is None:
+            return None
+        if model.status == AnalysisStatus.QUEUED.value:
+            model.status = AnalysisStatus.RUNNING.value
+            model.updated_at = datetime.now(UTC)
+            self._append_status_event(model)
+        self._session.flush()
+        return _job_record(model)
+
+    def save_query(
+        self,
+        job_id: UUID | str,
+        payload: dict[str, object],
+    ) -> AnalysisJobRecord:
+        model = self._required_for_update(job_id)
+        self._save_immutable_payload(model, "query_payload", payload)
+        if model.stage == AnalysisStage.QUERY.value:
+            model.stage = AnalysisStage.RETRIEVAL.value
+            model.status = AnalysisStatus.RUNNING.value
+            model.updated_at = datetime.now(UTC)
+            self._append_status_event(model)
+        self._session.flush()
+        return _job_record(model)
+
+    def save_retrieval_trace(
+        self,
+        job_id: UUID | str,
+        payload: dict[str, object],
+    ) -> AnalysisJobRecord:
+        model = self._required_for_update(job_id)
+        self._save_immutable_payload(model, "retrieval_trace", payload)
+        if model.stage == AnalysisStage.RETRIEVAL.value:
+            model.stage = AnalysisStage.PREDICTION.value
+            model.status = AnalysisStatus.RUNNING.value
+            model.updated_at = datetime.now(UTC)
+            self._append_status_event(model)
+        self._session.flush()
+        return _job_record(model)
+
+    def complete(
+        self,
+        job_id: UUID | str,
+        payload: dict[str, object],
+        *,
+        page_number: int,
+        model_name: str,
+    ) -> AnalysisJobRecord:
+        model = self._required_for_update(job_id)
+        self._save_immutable_payload(model, "prediction_payload", payload)
+        if model.status == AnalysisStatus.COMPLETE.value:
+            return _job_record(model)
+        now = datetime.now(UTC)
+        self._append_event(
+            model,
+            "passage.prediction",
+            {
+                "job_id": model.id,
+                "passage_id": model.passage_id,
+                "document_id": model.document_id,
+                "passage_revision": model.passage_revision,
+                "page_number": page_number,
+                "model": model_name,
+                "prediction": payload["prediction"],
+                "provider_response_id": payload["provider_response_id"],
+                "provider_request_id": payload.get("provider_request_id"),
+                "prompt_sha256": payload["prompt_sha256"],
+                "request_sha256": payload["request_sha256"],
+                "retrieval_trace_sha256": payload["retrieval_trace_sha256"],
+                "usage": payload["usage"],
+                "estimated_cost_usd": payload["estimated_cost_usd"],
+                "pricing_version": payload["pricing_version"],
+            },
+        )
+        model.status = AnalysisStatus.COMPLETE.value
+        model.stage = AnalysisStage.COMPLETE.value
+        model.updated_at = now
+        self._append_status_event(model)
+        self._session.flush()
+        return _job_record(model)
+
+    def cancel(
+        self,
+        job_id: UUID | str,
+        *,
+        code: str,
+        detail: str,
+    ) -> AnalysisJobRecord | None:
+        model = self._session.get(AnalysisJob, str(job_id), with_for_update=True)
+        if model is None:
+            return None
+        if model.status in {
+            AnalysisStatus.COMPLETE.value,
+            AnalysisStatus.FAILED.value,
+            AnalysisStatus.CANCELLED.value,
+        }:
+            return _job_record(model)
+        model.status = AnalysisStatus.CANCELLED.value
+        model.error_code = code
+        model.error_detail = detail
+        model.updated_at = datetime.now(UTC)
+        self._append_status_event(model)
+        self._session.flush()
+        return _job_record(model)
+
+    def fail(
+        self,
+        job_id: UUID | str,
+        *,
+        code: str,
+        detail: str,
+    ) -> AnalysisJobRecord | None:
+        model = self._session.get(AnalysisJob, str(job_id), with_for_update=True)
+        if model is None:
+            return None
+        if model.status in {
+            AnalysisStatus.COMPLETE.value,
+            AnalysisStatus.CANCELLED.value,
+        }:
+            return _job_record(model)
+        model.status = AnalysisStatus.FAILED.value
+        model.error_code = code
+        model.error_detail = detail
+        model.updated_at = datetime.now(UTC)
+        self._append_event(
+            model,
+            "passage.error",
+            {
+                "job_id": model.id,
+                "passage_id": model.passage_id,
+                "document_id": model.document_id,
+                "passage_revision": model.passage_revision,
+                "code": code,
+                "detail": detail,
+            },
+        )
+        self._append_status_event(model)
+        self._session.flush()
+        return _job_record(model)
+
     def events_after(
         self,
         document_id: UUID | str,
@@ -181,6 +322,35 @@ class AnalysisJobRepository:
         )
         self._session.flush()
 
+    def _required_for_update(self, job_id: UUID | str) -> AnalysisJob:
+        model = self._session.get(AnalysisJob, str(job_id), with_for_update=True)
+        if model is None:
+            raise LookupError("analysis job not found")
+        if model.status in {
+            AnalysisStatus.BLOCKED.value,
+            AnalysisStatus.FAILED.value,
+            AnalysisStatus.CANCELLED.value,
+        }:
+            raise AnalysisConflictError(
+                f"analysis job cannot advance from {model.status}"
+            )
+        return model
+
+    def _save_immutable_payload(
+        self,
+        model: AnalysisJob,
+        attribute: str,
+        payload: dict[str, object],
+    ) -> None:
+        existing = getattr(model, attribute)
+        if existing is not None and existing != payload:
+            raise AnalysisConflictError(f"{attribute} is immutable once persisted")
+        if existing is None:
+            setattr(model, attribute, payload)
+
+    def _append_status_event(self, model: AnalysisJob) -> None:
+        self._append_event(model, "passage.status", _status_payload(model))
+
 
 def _request_hash(passage_id: UUID, revision: int) -> str:
     canonical = json.dumps(
@@ -218,6 +388,22 @@ def _event_record(model: AnalysisEvent) -> AnalysisEventRecord:
         payload=model.payload,
         created_at=_as_utc(model.created_at),
     )
+
+
+def _status_payload(model: AnalysisJob) -> dict[str, object]:
+    return {
+        "job_id": model.id,
+        "passage_id": model.passage_id,
+        "document_id": model.document_id,
+        "passage_revision": model.passage_revision,
+        "status": model.status,
+        "stage": model.stage,
+        "blockers": model.blockers,
+        "error_code": model.error_code,
+        "error_detail": model.error_detail,
+        "created_at": _as_utc(model.created_at).isoformat(),
+        "updated_at": _as_utc(model.updated_at).isoformat(),
+    }
 
 
 def _as_utc(value: datetime) -> datetime:

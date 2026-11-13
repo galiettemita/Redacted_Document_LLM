@@ -46,7 +46,10 @@ services:
       REDACTED_CORPUS_MANIFEST_PATH: /artifacts/corpus/manifest.json
       REDACTED_BM25_MANIFEST_PATH: /artifacts/corpus/bm25-manifest.json
       REDACTED_DENSE_MANIFEST_PATH: /artifacts/corpus/dense-manifest.json
+      REDACTED_DENSE_ARTIFACT_DIRECTORY: /artifacts/corpus/dense
       REDACTED_OPENSEARCH_URL: http://opensearch:9200
+      REDACTED_OPENAI_API_KEY: ${REDACTED_OPENAI_API_KEY:-}
+      REDACTED_ALLOW_PAID_MODEL_CALLS: ${REDACTED_ALLOW_PAID_MODEL_CALLS:-false}
     healthcheck:
       test:
         - CMD
@@ -61,7 +64,34 @@ services:
       - "127.0.0.1:8000:8000"
     volumes:
       - backend-data:/var/lib/redacted
-      - corpus-artifacts:/artifacts
+      - ${REDACTED_CORPUS_ROOT:-./var/corpus}:/artifacts/corpus:ro
+
+  worker:
+    profiles: ["retrieval"]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+    environment:
+      REDACTED_ENVIRONMENT: development
+      REDACTED_DATABASE_URL: postgresql://redacted:redacted-local@postgres:5432/redacted
+      REDACTED_REDIS_URL: redis://redis:6379/0
+      REDACTED_CORPUS_MANIFEST_PATH: /artifacts/corpus/manifest.json
+      REDACTED_BM25_MANIFEST_PATH: /artifacts/corpus/bm25-manifest.json
+      REDACTED_DENSE_MANIFEST_PATH: /artifacts/corpus/dense-manifest.json
+      REDACTED_DENSE_ARTIFACT_DIRECTORY: /artifacts/corpus/dense
+      REDACTED_OPENSEARCH_URL: http://opensearch:9200
+      REDACTED_OPENAI_API_KEY: ${REDACTED_OPENAI_API_KEY:-}
+      REDACTED_ALLOW_PAID_MODEL_CALLS: ${REDACTED_ALLOW_PAID_MODEL_CALLS:-false}
+    init: true
+    volumes:
+      - ${REDACTED_CORPUS_ROOT:-./var/corpus}:/artifacts/corpus:ro
 
   opensearch:
     image: opensearchproject/opensearch:3.9.0
@@ -91,6 +121,5 @@ services:
 
 volumes:
   backend-data:
-  corpus-artifacts:
   postgres-data:
   redis-data:

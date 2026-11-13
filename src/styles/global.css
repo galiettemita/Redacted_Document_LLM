@@ -567,6 +567,11 @@ input:focus-visible {
   line-height: 1.5;
 }
 
+.uploaded-document-note > .primary-button {
+  width: 100%;
+  margin: 2px 0 8px;
+}
+
 .visible-context-controls {
   margin: 15px 0;
   padding: 14px 0;
@@ -816,6 +821,14 @@ input:focus-visible {
   display: block;
   margin: 10px 0 0;
   font-weight: 650;
+}
+
+.prediction-usage {
+  display: block;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .prediction-text {

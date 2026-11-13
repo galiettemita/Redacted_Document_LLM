@@ -5,6 +5,7 @@ description = "Visible-only retrieval-assisted backend for Redacted Document LLM
 requires-python = ">=3.12,<3.14"
 dependencies = [
   "alembic>=1.15,<2",
+  "dramatiq[redis]>=1.18,<3",
   "fastapi>=0.115,<1",
   "httpx>=0.28,<1",
   "numpy>=2,<3",
@@ -32,6 +33,7 @@ retrieval = [
   "faiss-cpu>=1.10,<2",
   "huggingface-hub>=0.30,<2",
   "sentence-transformers>=5.1,<6",
+  "torch>=2.2,<3",
 ]
 
 [build-system]
@@ -53,3 +55,13 @@ filterwarnings = [
 
 [tool.uv]
 package = true
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cpu", marker = "sys_platform == 'linux'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

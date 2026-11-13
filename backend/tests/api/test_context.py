@@ -47,13 +47,14 @@ async def request(app, method: str, path: str, **kwargs):
         return await client.request(method, path, **kwargs)
 
 
-def create_test_app_and_passage(tmp_path: Path):
+def create_test_app_and_passage(tmp_path: Path, **app_kwargs):
     app = create_app(
         Settings(
             database_url=f"sqlite+pysqlite:///{tmp_path / 'context.sqlite3'}",
             document_storage_root=tmp_path / "stored-documents",
             opensearch_url="http://127.0.0.1:1",
-        )
+        ),
+        **app_kwargs,
     )
     Base.metadata.create_all(app.state.database.engine)
     with app.state.database.session_factory() as session, session.begin():

@@ -1,5 +1,10 @@
+from collections.abc import Callable
+from typing import Protocol
+
 from fastapi import APIRouter
 from pydantic import ValidationError
+from redis import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -15,6 +20,10 @@ from redacted_backend.retrieval.types import Bm25IndexManifest, DenseIndexManife
 from redacted_backend.scientific_config import ScientificConfig
 
 
+class HeartbeatClient(Protocol):
+    def get(self, key: str) -> bytes | None: ...
+
+
 def create_readiness_router(
     settings: Settings,
     database: Database | None,
@@ -24,19 +33,11 @@ def create_readiness_router(
     @router.get("/readiness", response_model=ReadinessResponse)
     def readiness() -> ReadinessResponse:
         database_readiness = resolve_database_readiness(database)
-        worker = ComponentReadiness(
-            ready=False,
-            detail=(
-                "not configured"
-                if settings.redis_url is None
-                else "heartbeat not connected"
-            ),
-        )
+        worker = resolve_worker_readiness(settings)
         corpus = resolve_corpus_readiness(settings)
         model = ComponentReadiness(
             ready=(
-                settings.openai_api_key is not None
-                and settings.allow_paid_model_calls
+                settings.openai_api_key is not None and settings.allow_paid_model_calls
             ),
             detail=(
                 "configured and paid calls approved"
@@ -58,6 +59,26 @@ def create_readiness_router(
         )
 
     return router
+
+
+def resolve_worker_readiness(
+    settings: Settings,
+    *,
+    client_factory: Callable[[str], HeartbeatClient] | None = None,
+) -> ComponentReadiness:
+    if settings.redis_url is None:
+        return ComponentReadiness(ready=False, detail="not configured")
+    factory = client_factory or (lambda url: Redis.from_url(url))
+    try:
+        value = factory(settings.redis_url).get(settings.worker_heartbeat_key)
+    except (RedisError, OSError, ValueError):
+        return ComponentReadiness(ready=False, detail="heartbeat probe failed")
+    if value != b"ready":
+        return ComponentReadiness(
+            ready=False,
+            detail="heartbeat missing or expired",
+        )
+    return ComponentReadiness(ready=True, detail="heartbeat current")
 
 
 def resolve_database_readiness(database: Database | None) -> ComponentReadiness:

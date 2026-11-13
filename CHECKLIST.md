@@ -84,7 +84,7 @@
     - [x] Fuse documents by best per-list chunk rank with `k=60`, stable ties, top 100, and two chunk-level RRF excerpts.
     - [x] Serialize only the frozen `[DOCUMENT n]` and `[EXCERPT n]` evidence format.
     - [x] Preserve raw ranks, scores, query/index/corpus hashes, exclusions, and fused evidence in an immutable trace boundary.
-    - [ ] Persist the trace transactionally with the analysis job after Task 11 storage is added.
+    - [x] Persist the immutable four-list trace transactionally with its revision-bound analysis job.
   - [ ] Task 10: Freeze Andrew's prompts and add the real model boundary without making a paid call.
     - [x] Freeze and hash the Appendix F own-query and single-prediction-with-documents prompts.
     - [x] Render prompts only from the visible example, geometry-derived cue, and retrieved evidence.
@@ -106,8 +106,13 @@
       - [x] Keep the locked BGE/FAISS stack in a dedicated retrieval dependency group instead of bloating the web API image.
       - [x] Probe the configured database in readiness so a working Postgres service no longer reports a placeholder failure.
       - [ ] Repeat the click-through visually when the in-app browser connector is available; the live demo and automated UI path are ready, but no visual run is claimed.
-    - [ ] Connect the worker to the four-list retrieval service and persist its immutable trace transactionally.
-    - [ ] Connect the SSE prediction event to the existing passage-linked sidebar cards and hover ordering.
+    - [x] Connect the production Dramatiq worker to own-query generation, four-list retrieval, and immutable trace persistence.
+    - [x] Add a live Redis worker heartbeat, fail-closed readiness probe, bounded retry policy, and PostgreSQL duplicate-execution lock.
+    - [x] Persist query and prediction provider results at the job boundary so retries resume from the last durable stage.
+    - [x] Connect replayable SSE prediction events to real passage-linked sidebar cards and filter out events from older runs.
+    - [x] Add **Predict passage/all passages** to the uploaded-document frontend and label provider output **Model prediction**.
+    - [x] Show the recorded total-token usage and estimated call cost on each real prediction card.
+    - [x] Verify the rebuilt loopback API through real upload, two-passage detection, all-context preparation, blocked scheduling, ordered SSE, and cleanup without a paid call.
     - [ ] After complete corpus evidence exists, show exact token cost and obtain explicit approval before the first paid model call.
   - [x] Task 12A: Correct automatic multi-line mask geometry and passage-length estimation.
     - [x] Split connected stepped black regions into exact line-level rectangles so visible words remain visible.

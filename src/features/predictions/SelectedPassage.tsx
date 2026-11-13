@@ -33,7 +33,16 @@ export function SelectedPassage({
             <>
               <p className="prediction-model">{prediction.model}</p>
               <p className="prediction-text">{prediction.text}</p>
-              <p className="simulated-label">Simulated prediction</p>
+              {prediction.usage ? (
+                <p className="prediction-usage">
+                  {prediction.usage.totalTokens.toLocaleString()} tokens
+                  {' · '}
+                  ${prediction.usage.estimatedCostUsd.toFixed(4)} estimated
+                </p>
+              ) : null}
+              <p className="simulated-label">
+                {prediction.provenance === 'model' ? 'Model prediction' : 'Simulated prediction'}
+              </p>
             </>
           ) : (
             <p className="selected-empty">{missingPredictionMessage}</p>

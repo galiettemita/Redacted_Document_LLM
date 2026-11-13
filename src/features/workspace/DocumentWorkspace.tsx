@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { SAMPLE_PASSAGES, SAMPLE_PREDICTIONS } from '../../data/sampleDocument'
 import type { BackendDocumentState } from '../../hooks/useBackendDocument'
 import { usePredictionSimulation } from '../../hooks/usePredictionSimulation'
+import { usePredictionStream } from '../../hooks/usePredictionStream'
 import {
   BackendApiError,
   backendApi as defaultBackendApi,
@@ -10,7 +11,9 @@ import {
   type PassageDetectionResult,
   type VisibleContextSummary,
 } from '../../services/backendApi'
+import { createHttpPredictionService } from '../../services/httpPredictionService'
 import { createMockPredictionService } from '../../services/mockPredictionService'
+import type { PredictionService } from '../../services/predictionService'
 import type { DocumentDescriptor, Passage, PassageRect } from '../../types'
 import { PredictionSidebar } from '../predictions/PredictionSidebar'
 import { PdfViewer } from '../viewer/PdfViewer'
@@ -23,12 +26,14 @@ interface DocumentWorkspaceProps {
   onViewSample: () => void
   backendDocument?: BackendDocumentState
   backendApi?: BackendApi
+  predictionService?: PredictionService
 }
 
 type PassageSaveStatus = 'idle' | 'saving' | 'saved' | 'failed'
 type PassageDetectionStatus = 'idle' | 'detecting' | 'ready' | 'failed'
 type ContextPreparationStatus = 'idle' | 'preparing' | 'ready' | 'failed'
 type PassageRemovalStatus = 'idle' | 'confirming' | 'deleting'
+type AnalysisScheduleStatus = 'idle' | 'scheduling' | 'running' | 'blocked'
 
 interface DetectionTask {
   documentId: string
@@ -41,6 +46,7 @@ export function DocumentWorkspace({
   onViewSample,
   backendDocument,
   backendApi = defaultBackendApi,
+  predictionService,
 }: DocumentWorkspaceProps) {
   const [state, dispatch] = useReducer(workspaceReducer, initialWorkspaceState)
   const [passageSaveStatus, setPassageSaveStatus] = useState<PassageSaveStatus>('idle')
@@ -53,17 +59,33 @@ export function DocumentWorkspace({
   const [contextError, setContextError] = useState<string | null>(null)
   const [passageRemovalStatus, setPassageRemovalStatus] = useState<PassageRemovalStatus>('idle')
   const [passageRemovalId, setPassageRemovalId] = useState<string | null>(null)
+  const [analysisScheduleStatus, setAnalysisScheduleStatus] = useState<AnalysisScheduleStatus>('idle')
+  const [analysisError, setAnalysisError] = useState<string | null>(null)
+  const [predictionRunKey, setPredictionRunKey] = useState(0)
+  const [predictionJobIds, setPredictionJobIds] = useState<string[]>([])
   const passageTargets = useRef(new Map<string, HTMLElement>())
   const passageRemovalTrigger = useRef<HTMLButtonElement | null>(null)
   const detectionTask = useRef<DetectionTask | null>(null)
   const passageRequest = useRef<AbortController | null>(null)
   const contextRequest = useRef<AbortController | null>(null)
   const passageRemovalRequest = useRef<AbortController | null>(null)
+  const analysisRequest = useRef<AbortController | null>(null)
+  const analysisRunId = useRef<string | null>(null)
   const sampleService = useMemo(() => createMockPredictionService({
     predictionsByDocument: { [document.id]: document.mode === 'sample' ? SAMPLE_PREDICTIONS : [] },
     delayMs: 650,
   }), [document.id, document.mode])
   const simulation = usePredictionSimulation(document.mode === 'sample' ? document : null, sampleService)
+  const uploadedPredictionService = useMemo(
+    () => predictionService ?? createHttpPredictionService(),
+    [predictionService],
+  )
+  const modelStream = usePredictionStream(
+    document.mode === 'uploaded' && predictionRunKey > 0 ? document : null,
+    uploadedPredictionService,
+    predictionRunKey,
+    predictionJobIds,
+  )
 
   useEffect(() => {
     dispatch({ type: 'reset' })
@@ -77,18 +99,26 @@ export function DocumentWorkspace({
     setContextError(null)
     setPassageRemovalStatus('idle')
     setPassageRemovalId(null)
+    setAnalysisScheduleStatus('idle')
+    setAnalysisError(null)
+    setPredictionRunKey(0)
+    setPredictionJobIds([])
     passageRequest.current?.abort()
     passageRequest.current = null
     contextRequest.current?.abort()
     contextRequest.current = null
     passageRemovalRequest.current?.abort()
     passageRemovalRequest.current = null
+    analysisRequest.current?.abort()
+    analysisRequest.current = null
+    analysisRunId.current = null
   }, [document.id])
 
   useEffect(() => () => {
     passageRequest.current?.abort()
     contextRequest.current?.abort()
     passageRemovalRequest.current?.abort()
+    analysisRequest.current?.abort()
   }, [])
 
   useEffect(() => {
@@ -107,10 +137,10 @@ export function DocumentWorkspace({
   }, [state.page, state.pinnedId])
 
   const passages = document.mode === 'sample' ? SAMPLE_PASSAGES : state.passages
-  const predictions = document.mode === 'sample' ? simulation.predictions : []
+  const predictions = document.mode === 'sample' ? simulation.predictions : modelStream.predictions
   const phase = document.mode === 'sample'
     ? simulation.phase
-    : 'idle' as const
+    : modelStream.phase
   const activePassageId = getEffectivePassageId(state.hoveredId, state.pinnedId)
   const backendReady = document.mode === 'uploaded'
     && backendDocument?.status === 'ready'
@@ -137,6 +167,13 @@ export function DocumentWorkspace({
     documentId: string,
     expectedPassageIds?: string[],
   ) => {
+    analysisRequest.current?.abort()
+    analysisRequest.current = null
+    analysisRunId.current = null
+    setAnalysisScheduleStatus('idle')
+    setAnalysisError(null)
+    setPredictionRunKey(0)
+    setPredictionJobIds([])
     contextRequest.current?.abort()
     const controller = new AbortController()
     contextRequest.current = controller
@@ -179,6 +216,15 @@ export function DocumentWorkspace({
       if (contextRequest.current === controller) contextRequest.current = null
     }
   }, [backendApi])
+
+  useEffect(() => {
+    if (analysisScheduleStatus !== 'running') return
+    if (modelStream.phase === 'complete' || modelStream.phase === 'empty') {
+      setAnalysisScheduleStatus('idle')
+    } else if (modelStream.phase === 'failed') {
+      setAnalysisScheduleStatus('idle')
+    }
+  }, [analysisScheduleStatus, modelStream.phase])
 
   useEffect(() => {
     if (!backendReady || !document.backendDocumentId) return
@@ -350,6 +396,59 @@ export function DocumentWorkspace({
     }
   }
 
+  async function handlePredictAllPassages() {
+    if (
+      !backendReady
+      || contextStatus !== 'ready'
+      || !document.backendDocumentId
+    ) return
+    const targets = state.passages.flatMap((passage) => {
+      if (passage.id.startsWith('pending-')) return []
+      const summary = contextSummaries[passage.id]
+      return summary ? [{ passage, summary }] : []
+    })
+    if (targets.length !== state.passages.length || targets.length === 0) {
+      setAnalysisError('Every live passage needs a matching prepared revision before prediction.')
+      return
+    }
+    analysisRequest.current?.abort()
+    const controller = new AbortController()
+    analysisRequest.current = controller
+    setAnalysisScheduleStatus('scheduling')
+    setAnalysisError(null)
+    const runId = analysisRunId.current ?? createIdempotencyKey()
+    analysisRunId.current = runId
+    try {
+      const jobs = await Promise.all(targets.map(({ passage, summary }) => (
+        backendApi.schedulePassageAnalysis(
+          passage.id,
+          summary.passage_revision,
+          {
+            idempotencyKey: `${runId}:${passage.id}`,
+            signal: controller.signal,
+          },
+        )
+      )))
+      const blockers = jobs.flatMap((job) => job.blockers)
+      if (blockers.length > 0) {
+        analysisRunId.current = null
+        setAnalysisScheduleStatus('blocked')
+        setAnalysisError(formatAnalysisBlockers(blockers))
+        return
+      }
+      setAnalysisScheduleStatus('running')
+      setPredictionJobIds(jobs.map((job) => job.id))
+      setPredictionRunKey((current) => current + 1)
+      analysisRunId.current = null
+    } catch (error) {
+      if (isAbortError(error)) return
+      setAnalysisScheduleStatus('idle')
+      setAnalysisError(errorMessage(error, 'Predictions could not be started.'))
+    } finally {
+      if (analysisRequest.current === controller) analysisRequest.current = null
+    }
+  }
+
   function handleSelectPassage(passageId: string) {
     const passage = passages.find((item) => item.id === passageId)
     if (!passage) return
@@ -506,7 +605,9 @@ export function DocumentWorkspace({
             phase={phase}
             error={document.mode === 'sample'
               ? simulation.error
-              : passageError
+              : analysisError
+                ?? modelStream.error
+                ?? passageError
                 ?? detectionError
                 ?? contextError
                 ?? backendDocumentError(backendDocument)}
@@ -523,7 +624,9 @@ export function DocumentWorkspace({
                     : contextStatus === 'preparing'
                       ? 'Preparing visible-only context automatically for every passage…'
                       : contextStatus === 'ready'
-                        ? 'Visible-only context and a search query are ready for this passage. Retrieval and prediction are not connected yet.'
+                        ? analysisScheduleStatus === 'running'
+                          ? 'The real retrieval and model job is running for this passage.'
+                          : 'Visible-only context and a search query are ready for this passage.'
                         : passages.length
                           ? 'Automatic visible-only context preparation has not finished.'
                           : 'No hidden passages are available for prediction.'
@@ -568,12 +671,32 @@ export function DocumentWorkspace({
                       </p>
                       <p><strong>Context query ready</strong></p>
                       <p>
-                        Retrieval, worker, and approved model are not connected yet. No
-                        retrieval or model call was made.
+                        The production prediction path uses four-list retrieval and GPT-6
+                        Astra only after every readiness gate passes.
                       </p>
                     </section>
                   ) : null}
                 </div>
+                {contextStatus === 'ready' && passages.length > 0 ? (
+                  <button
+                    className="primary-button"
+                    type="button"
+                    disabled={
+                      deletionInProgress
+                      || analysisScheduleStatus === 'scheduling'
+                      || analysisScheduleStatus === 'running'
+                    }
+                    onClick={() => void handlePredictAllPassages()}
+                  >
+                    {analysisScheduleStatus === 'scheduling'
+                      ? 'Starting predictions…'
+                      : analysisScheduleStatus === 'running'
+                        ? 'Predictions running…'
+                        : predictions.length > 0
+                          ? 'Run predictions again'
+                          : `Predict ${passages.length === 1 ? 'passage' : 'all passages'}`}
+                  </button>
+                ) : null}
                 <button
                   className="text-button"
                   type="button"
@@ -748,4 +871,14 @@ function nextPassageLabel(passages: Passage[]): string {
     return match ? [Number(match[1])] : []
   })
   return `Passage ${Math.max(0, ...numbers) + 1}`
+}
+
+function formatAnalysisBlockers(
+  blockers: Array<{ component: string; detail: string }>,
+): string {
+  const unique = new Map<string, string>()
+  for (const blocker of blockers) unique.set(blocker.component, blocker.detail)
+  return `Prediction is blocked: ${[...unique.entries()]
+    .map(([component, detail]) => `${component} — ${detail}`)
+    .join('; ')}.`
 }

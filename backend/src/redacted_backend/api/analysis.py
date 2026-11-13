@@ -9,7 +9,10 @@ from fastapi import APIRouter, Header, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from redacted_backend.api.readiness import resolve_corpus_readiness
+from redacted_backend.api.readiness import (
+    resolve_corpus_readiness,
+    resolve_worker_readiness,
+)
 from redacted_backend.config import Settings
 from redacted_backend.db.base import Database
 from redacted_backend.db.repositories.analysis import (
@@ -20,6 +23,7 @@ from redacted_backend.db.repositories.passages import PassageRepository
 from redacted_backend.db.repositories.visible_examples import VisibleExampleRepository
 from redacted_backend.domain.analysis import AnalysisBlocker, AnalysisJobRecord
 from redacted_backend.domain.passages import PassageStatus
+from redacted_backend.jobs.queue import AnalysisDispatcher
 
 
 class ScheduleAnalysisRequest(BaseModel):
@@ -28,7 +32,11 @@ class ScheduleAnalysisRequest(BaseModel):
     expected_revision: int = Field(ge=1)
 
 
-def create_analysis_router(settings: Settings, database: Database | None) -> APIRouter:
+def create_analysis_router(
+    settings: Settings,
+    database: Database | None,
+    dispatcher: AnalysisDispatcher | None = None,
+) -> APIRouter:
     router = APIRouter()
 
     @router.post(
@@ -39,7 +47,9 @@ def create_analysis_router(settings: Settings, database: Database | None) -> API
     def schedule_analysis(
         passage_id: UUID,
         body: ScheduleAnalysisRequest,
-        idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=512),
+        idempotency_key: str = Header(
+            alias="Idempotency-Key", min_length=1, max_length=512
+        ),
     ) -> AnalysisJobRecord:
         ready_database = _require_database(database)
         if not idempotency_key.isascii():
@@ -72,13 +82,33 @@ def create_analysis_router(settings: Settings, database: Database | None) -> API
                             "message": "Prepare visible-only context before analysis",
                         },
                     )
-                return AnalysisJobRepository(session).schedule(
+                job = AnalysisJobRepository(session).schedule(
                     passage_id=passage.id,
                     document_id=passage.document_id,
                     passage_revision=passage.revision,
                     idempotency_key=idempotency_key,
                     blockers=_analysis_blockers(settings),
                 )
+            if job.status == "queued":
+                if dispatcher is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail={
+                            "code": "worker_dispatch_unavailable",
+                            "message": "Analysis worker dispatch is unavailable",
+                        },
+                    )
+                try:
+                    dispatcher.dispatch(job.id)
+                except Exception as error:
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail={
+                            "code": "worker_dispatch_failed",
+                            "message": "Analysis worker dispatch failed; retry with the same idempotency key",
+                        },
+                    ) from error
+            return job
         except AnalysisConflictError as error:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -135,12 +165,9 @@ def _analysis_blockers(settings: Settings) -> list[AnalysisBlocker]:
                 detail="paid model calls are not approved",
             )
         )
-    blockers.append(
-        AnalysisBlocker(
-            component="worker",
-            detail="analysis worker execution is not connected",
-        )
-    )
+    worker = resolve_worker_readiness(settings)
+    if not worker.ready:
+        blockers.append(AnalysisBlocker(component="worker", detail=worker.detail))
     return blockers
 
 

@@ -5,5 +5,6 @@ export interface PredictionService {
     document: DocumentDescriptor,
     signal: AbortSignal,
     onPrediction: (prediction: Prediction) => void,
+    options?: { jobIds?: readonly string[] },
   ): Promise<void>
 }

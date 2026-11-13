@@ -4,6 +4,7 @@ from pathlib import Path
 
 from httpx import ASGITransport, AsyncClient
 
+from redacted_backend.api.readiness import resolve_worker_readiness
 from redacted_backend.config import Settings
 from redacted_backend.corpus.manifest import CorpusManifest
 from redacted_backend.domain.readiness import verify_corpus_readiness
@@ -63,6 +64,32 @@ def test_database_readiness_probes_the_configured_database(tmp_path: Path) -> No
     assert body["prediction_ready"] is False
 
 
+def test_worker_readiness_requires_a_live_expiring_heartbeat() -> None:
+    class FakeRedis:
+        def __init__(self, value: bytes | None) -> None:
+            self.value = value
+
+        def get(self, _key: str) -> bytes | None:
+            return self.value
+
+    settings = Settings(redis_url="redis://worker.test/0")
+
+    ready = resolve_worker_readiness(
+        settings,
+        client_factory=lambda _url: FakeRedis(b"ready"),
+    )
+    stale = resolve_worker_readiness(
+        settings,
+        client_factory=lambda _url: FakeRedis(None),
+    )
+
+    assert ready.model_dump() == {"ready": True, "detail": "heartbeat current"}
+    assert stale.model_dump() == {
+        "ready": False,
+        "detail": "heartbeat missing or expired",
+    }
+
+
 def test_model_readiness_requires_access_and_explicit_paid_call_approval() -> None:
     async def read(settings: Settings):
         transport = ASGITransport(app=create_app(settings))
@@ -84,6 +111,9 @@ def test_model_readiness_requires_access_and_explicit_paid_call_approval() -> No
         "ready": True,
         "detail": "configured and paid calls approved",
     }
+
+    empty = asyncio.run(read(Settings(openai_api_key="", allow_paid_model_calls=True)))
+    assert empty["model"] == {"ready": False, "detail": "not configured"}
 
 
 def test_corpus_readiness_requires_matching_corpus_and_bm25_manifests(

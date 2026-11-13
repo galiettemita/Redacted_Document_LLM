@@ -2,12 +2,14 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { StrictMode } from 'react'
 import { SAMPLE_DOCUMENT } from '../../data/sampleDocument'
 import type {
+  AnalysisJobRecord,
   BackendApi,
   BackendPassageRecord,
   DocumentVisibleContextsSummary,
   PassageDetectionResult,
   VisibleContextSummary,
 } from '../../services/backendApi'
+import type { PredictionService } from '../../services/predictionService'
 import type { BackendDocumentState } from '../../hooks/useBackendDocument'
 import type { DocumentDescriptor } from '../../types'
 import { DocumentWorkspace } from './DocumentWorkspace'
@@ -125,6 +127,27 @@ const preparedDocumentContexts: DocumentVisibleContextsSummary = {
       passage_id: detectedSecondPassage.id,
     },
   ],
+}
+
+function analysisJob(
+  passageId: string,
+  status: AnalysisJobRecord['status'] = 'queued',
+): AnalysisJobRecord {
+  return {
+    id: `job-${passageId}`,
+    passage_id: passageId,
+    document_id: uploadedDocument.backendDocumentId!,
+    passage_revision: 1,
+    status,
+    stage: status === 'blocked' ? 'readiness' : 'query',
+    blockers: status === 'blocked'
+      ? [{ component: 'corpus', detail: 'complete corpus indexes are not available' }]
+      : [],
+    error_code: null,
+    error_detail: null,
+    created_at: '2026-11-13T12:00:00Z',
+    updated_at: '2026-11-13T12:00:00Z',
+  }
 }
 
 function contextsFor(
@@ -501,7 +524,7 @@ describe('DocumentWorkspace', () => {
     expect(screen.queryByRole('button', { name: 'Prepare visible context' })).not.toBeInTheDocument()
   })
 
-  it('does not start retrieval or a model call without the real service connection', async () => {
+  it('does not start retrieval or a model call until the user requests it', async () => {
     vi.useRealTimers()
     const schedulePassageAnalysis = vi.fn()
     const api = apiWithCreate(undefined, {
@@ -522,9 +545,136 @@ describe('DocumentWorkspace', () => {
       name: '2 passages ready for retrieval',
     })).toBeInTheDocument()
     expect(schedulePassageAnalysis).not.toHaveBeenCalled()
-    expect(screen.queryByRole('button', { name: 'Predict passage' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Predict all passages' })).toBeInTheDocument()
     expect(container.querySelector('.pdf-page-shell')).toHaveTextContent('')
     expect(screen.queryByText('Predicted hidden passage')).not.toBeInTheDocument()
+  })
+
+  it('schedules every prepared revision and renders streamed model output', async () => {
+    vi.useRealTimers()
+    const schedulePassageAnalysis = vi.fn(async (passageId: string) => (
+      analysisJob(passageId)
+    ))
+    const api = apiWithCreate(undefined, {
+      detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
+      schedulePassageAnalysis,
+    })
+    const predictionService: PredictionService = {
+      async stream(_document, _signal, onPrediction) {
+        onPrediction({
+          passageId: savedPassage.id,
+          page: 1,
+          model: 'GPT-6 Astra',
+          text: 'Recovered archival sentence.',
+          provenance: 'model',
+        })
+      },
+    }
+    const { container } = render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={api}
+        predictionService={predictionService}
+        onReplace={vi.fn()}
+        onViewSample={vi.fn()}
+      />,
+    )
+    await screen.findByRole('heading', { name: '2 passages ready for retrieval' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Predict all passages' }))
+
+    await waitFor(() => expect(schedulePassageAnalysis).toHaveBeenCalledTimes(2))
+    expect(schedulePassageAnalysis).toHaveBeenNthCalledWith(
+      1,
+      savedPassage.id,
+      preparedContext.passage_revision,
+      expect.objectContaining({
+        idempotencyKey: expect.stringContaining(savedPassage.id),
+        signal: expect.any(AbortSignal),
+      }),
+    )
+    expect(await screen.findByText('Recovered archival sentence.')).toBeInTheDocument()
+    expect(screen.getByText('Model prediction')).toBeInTheDocument()
+    expect(screen.queryByText('Simulated prediction')).not.toBeInTheDocument()
+    expect(container.querySelector('.pdf-page-shell')).not.toHaveTextContent(
+      'Recovered archival sentence.',
+    )
+  })
+
+  it('shows durable readiness blockers without opening a fake prediction stream', async () => {
+    vi.useRealTimers()
+    const schedulePassageAnalysis = vi.fn(async (passageId: string) => (
+      analysisJob(passageId, 'blocked')
+    ))
+    const predictionService: PredictionService = { stream: vi.fn() }
+    const api = apiWithCreate(undefined, {
+      detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
+      schedulePassageAnalysis,
+    })
+    render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={api}
+        predictionService={predictionService}
+        onReplace={vi.fn()}
+        onViewSample={vi.fn()}
+      />,
+    )
+    await screen.findByRole('heading', { name: '2 passages ready for retrieval' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Predict all passages' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'corpus — complete corpus indexes are not available',
+    )
+    expect(predictionService.stream).not.toHaveBeenCalled()
+  })
+
+  it('reuses all idempotency keys after an uncertain partial scheduling response', async () => {
+    vi.useRealTimers()
+    let requestCount = 0
+    const schedulePassageAnalysis = vi.fn(async (
+      ...args: Parameters<BackendApi['schedulePassageAnalysis']>
+    ) => {
+      const [passageId] = args
+      requestCount += 1
+      if (requestCount === 2) throw new Error('The response was interrupted.')
+      return analysisJob(passageId)
+    })
+    const api = apiWithCreate(undefined, {
+      detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
+      schedulePassageAnalysis,
+    })
+    const predictionService: PredictionService = {
+      async stream() {},
+    }
+    render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={api}
+        predictionService={predictionService}
+        onReplace={vi.fn()}
+        onViewSample={vi.fn()}
+      />,
+    )
+    await screen.findByRole('heading', { name: '2 passages ready for retrieval' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Predict all passages' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('The response was interrupted.')
+    const firstKeys = schedulePassageAnalysis.mock.calls.slice(0, 2).map(
+      (call) => call[2].idempotencyKey,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Predict all passages' }))
+
+    await waitFor(() => expect(schedulePassageAnalysis).toHaveBeenCalledTimes(4))
+    const retriedKeys = schedulePassageAnalysis.mock.calls.slice(2, 4).map(
+      (call) => call[2].idempotencyKey,
+    )
+    expect(retriedKeys).toEqual(firstKeys)
   })
 
   it('fails closed when automatic preparation returns the wrong passage set', async () => {
