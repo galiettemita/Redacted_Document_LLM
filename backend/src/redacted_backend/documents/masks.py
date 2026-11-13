@@ -140,31 +140,93 @@ def _white_gap_candidates(
         by_line.setdefault((word.block_id, word.line_id), []).append(word)
 
     candidates: list[MaskCandidate] = []
+    seen: set[tuple[float, float, float, float]] = set()
     for line_words in by_line.values():
-        ordered = sorted(line_words, key=lambda word: word.x)
-        for left, right in pairwise(ordered):
-            gap_start = left.x + left.width
-            gap_width = right.x - gap_start
-            if gap_width < gap_threshold:
-                continue
-            y = min(left.y, right.y)
-            bottom = max(left.y + left.height, right.y + right.height)
-            candidates.append(
-                MaskCandidate(
-                    id=(
-                        f"auto-white-{page_number}-"
-                        f"{starting_index + len(candidates) + 1}"
-                    ),
-                    page_number=page_number,
-                    rect=PassageRect(
-                        x=gap_start,
-                        y=y,
-                        width=gap_width,
-                        height=bottom - y,
-                    ),
-                    kind="white",
-                    confidence=0.8,
-                    confirmed=True,
-                )
-            )
+        _append_white_gaps(
+            candidates,
+            seen,
+            line_words,
+            page_number=page_number,
+            starting_index=starting_index,
+            gap_threshold=gap_threshold,
+            cross_block=False,
+        )
+    for line_words in _visual_lines(words):
+        _append_white_gaps(
+            candidates,
+            seen,
+            line_words,
+            page_number=page_number,
+            starting_index=starting_index,
+            gap_threshold=gap_threshold,
+            cross_block=True,
+        )
     return candidates
+
+
+def _append_white_gaps(
+    candidates: list[MaskCandidate],
+    seen: set[tuple[float, float, float, float]],
+    line_words: list[PageWord],
+    *,
+    page_number: int,
+    starting_index: int,
+    gap_threshold: float,
+    cross_block: bool,
+) -> None:
+    ordered = sorted(line_words, key=lambda word: word.x)
+    for left, right in pairwise(ordered):
+        if cross_block and (left.block_id, left.line_id) == (
+            right.block_id,
+            right.line_id,
+        ):
+            continue
+        gap_start = left.x + left.width
+        gap_width = right.x - gap_start
+        if gap_width < gap_threshold or (cross_block and gap_width > 0.20):
+            continue
+        y = min(left.y, right.y)
+        bottom = max(left.y + left.height, right.y + right.height)
+        key = tuple(round(value, 6) for value in (gap_start, y, gap_width, bottom - y))
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(
+            MaskCandidate(
+                id=(f"auto-white-{page_number}-{starting_index + len(candidates) + 1}"),
+                page_number=page_number,
+                rect=PassageRect(
+                    x=gap_start,
+                    y=y,
+                    width=gap_width,
+                    height=bottom - y,
+                ),
+                kind="white",
+                confidence=0.8,
+                confirmed=True,
+            )
+        )
+
+
+def _visual_lines(words: list[PageWord]) -> list[list[PageWord]]:
+    lines: list[list[PageWord]] = []
+    for word in sorted(words, key=lambda item: (item.y, item.x)):
+        center = word.y + word.height / 2
+        matching = next(
+            (
+                line
+                for line in lines
+                if abs(
+                    center
+                    - statistics.median(item.y + item.height / 2 for item in line)
+                )
+                <= 0.6
+                * max(word.height, statistics.median(item.height for item in line))
+            ),
+            None,
+        )
+        if matching is None:
+            lines.append([word])
+        else:
+            matching.append(word)
+    return lines

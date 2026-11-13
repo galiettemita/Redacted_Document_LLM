@@ -63,6 +63,16 @@ export interface BackendPassageRecord {
   updated_at: string
 }
 
+export interface PassageDetectionResult {
+  document_id: string
+  status: 'detection_ready'
+  pages_scanned: number
+  coverage_confident: boolean
+  uncertain_pages: number[]
+  warnings: string[]
+  passages: BackendPassageRecord[]
+}
+
 export interface VisibleContextSummary {
   passage_id: string
   passage_revision: number
@@ -142,6 +152,10 @@ export interface BackendApi {
     passage: PassageMutation,
     options?: Pick<PassageRequestOptions, 'signal'>,
   ): Promise<BackendPassageRecord>
+  detectDocumentPassages(
+    documentId: string,
+    signal?: AbortSignal,
+  ): Promise<PassageDetectionResult>
   prepareVisibleContext(
     passageId: string,
     signal?: AbortSignal,
@@ -214,6 +228,14 @@ export function createBackendApi(fetchImplementation?: typeof fetch): BackendApi
           }),
           signal: options.signal,
         },
+      )
+    },
+
+    detectDocumentPassages(documentId, signal) {
+      return requestJson<PassageDetectionResult>(
+        fetchRequest,
+        `/v1/documents/${encodeURIComponent(documentId)}/passages:detect`,
+        { method: 'POST', signal },
       )
     },
 

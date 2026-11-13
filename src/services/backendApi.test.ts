@@ -4,6 +4,7 @@ import {
   type AnalysisJobRecord,
   type BackendDocumentRecord,
   type BackendPassageRecord,
+  type PassageDetectionResult,
   type VisibleContextSummary,
 } from './backendApi'
 
@@ -70,6 +71,16 @@ const blockedAnalysis: AnalysisJobRecord = {
   updated_at: '2026-11-13T12:00:00Z',
 }
 
+const detectionResult: PassageDetectionResult = {
+  document_id: documentRecord.id,
+  status: 'detection_ready',
+  pages_scanned: 2,
+  coverage_confident: true,
+  uncertain_pages: [],
+  warnings: [],
+  passages: [passageRecord],
+}
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -124,6 +135,22 @@ describe('BackendApi', () => {
       body: JSON.stringify({ page_number: 1, rects: [rect] }),
       signal: undefined,
     })
+  })
+
+  it('starts all-page passage detection for the exact persisted document', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(detectionResult))
+    const api = createBackendApi(fetchMock)
+    const controller = new AbortController()
+
+    await expect(api.detectDocumentPassages(
+      documentRecord.id,
+      controller.signal,
+    )).resolves.toEqual(detectionResult)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/v1/documents/${documentRecord.id}/passages:detect`,
+      { method: 'POST', signal: controller.signal },
+    )
   })
 
   it('prepares the exact passage without sending document date metadata', async () => {

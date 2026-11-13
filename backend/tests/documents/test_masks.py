@@ -70,6 +70,26 @@ def test_discovers_a_white_covered_span_between_words_on_one_line() -> None:
     assert white_masks[0].rect.x + white_masks[0].rect.width <= 0.65
 
 
+def test_discovers_a_white_span_across_aligned_pdf_text_blocks() -> None:
+    image = np.full((1000, 1000, 3), 255, dtype=np.uint8)
+    words = [
+        word("white", x=0.1, y=0.4, width=0.06, block_id=1, line_id=1),
+        word("before", x=0.17, y=0.4, width=0.08, block_id=1, line_id=1),
+        word("after", x=0.42, y=0.4, width=0.06, block_id=2, line_id=1),
+        word("left", x=0.1, y=0.2, width=0.05, block_id=3, line_id=1),
+        word("right", x=0.65, y=0.2, width=0.06, block_id=4, line_id=1),
+        word("left-column", x=0.1, y=0.3, width=0.2, block_id=5, line_id=1),
+        word("right-column", x=0.53, y=0.3, width=0.2, block_id=6, line_id=1),
+    ]
+
+    result = discover_candidate_masks(image, words, page_number=1)
+
+    white_masks = [candidate for candidate in result.masks if candidate.kind == "white"]
+    assert len(white_masks) == 1
+    assert white_masks[0].rect.x == 0.25
+    assert white_masks[0].rect.x + white_masks[0].rect.width == 0.42
+
+
 def test_white_pixels_over_an_embedded_word_are_treated_as_a_mask() -> None:
     image = np.full((1000, 1000, 3), 255, dtype=np.uint8)
     image[205:215, 105:175] = 0

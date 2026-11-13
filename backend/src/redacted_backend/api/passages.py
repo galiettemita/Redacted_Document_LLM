@@ -2,18 +2,26 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from redacted_backend.db.base import Database
+from redacted_backend.db.repositories.documents import DocumentRepository
 from redacted_backend.db.repositories.passages import (
     PassageConflictError,
     PassageNotFoundError,
     PassagePageOutOfRangeError,
     PassageRepository,
 )
+from redacted_backend.documents.detection import (
+    DetectionResult,
+    PassageDetectionError,
+    detect_passages,
+)
+from redacted_backend.domain.documents import DocumentStatus
 from redacted_backend.domain.passages import (
     PassageMergeResult,
     PassageRecord,
@@ -21,6 +29,7 @@ from redacted_backend.domain.passages import (
     PassageSource,
     PassageSplitResult,
 )
+from redacted_backend.storage.local import LocalDocumentStore
 
 
 class CreatePassageRequest(BaseModel):
@@ -75,8 +84,60 @@ class SplitPassageRequest(BaseModel):
     parts: list[SplitPart] = Field(min_length=2, max_length=50)
 
 
-def create_passages_router(database: Database | None) -> APIRouter:
+class PassageDetectionResponse(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    document_id: UUID
+    status: Literal["detection_ready"] = "detection_ready"
+    pages_scanned: int = Field(ge=1)
+    coverage_confident: bool
+    uncertain_pages: list[int]
+    warnings: list[str]
+    passages: list[PassageRecord]
+
+
+def create_passages_router(
+    database: Database | None,
+    document_store: LocalDocumentStore | None,
+) -> APIRouter:
     router = APIRouter()
+
+    @router.post(
+        "/documents/{document_id}/passages:detect",
+        response_model=PassageDetectionResponse,
+    )
+    def detect_document_passages(document_id: UUID) -> PassageDetectionResponse:
+        ready_database, ready_store = _require_services(database, document_store)
+        with ready_database.session_factory() as session:
+            document = DocumentRepository(session).get(document_id)
+        if document is None or document.status == DocumentStatus.DELETED:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        try:
+            result = detect_passages(ready_store.resolve(document.storage_key))
+        except PassageDetectionError as error:
+            response_status = (
+                status.HTTP_503_SERVICE_UNAVAILABLE
+                if error.code == "ocr_unavailable"
+                else status.HTTP_422_UNPROCESSABLE_CONTENT
+            )
+            raise HTTPException(
+                status_code=response_status,
+                detail={"code": error.code, "message": str(error)},
+            ) from error
+        _require_confident_detection(result)
+        with ready_database.session_factory() as session, session.begin():
+            passages = PassageRepository(session).reconcile_detected(
+                document_id,
+                result.passages,
+            )
+        return PassageDetectionResponse(
+            document_id=document_id,
+            pages_scanned=result.pages_scanned,
+            coverage_confident=result.coverage_confident,
+            uncertain_pages=result.uncertain_pages,
+            warnings=result.warnings,
+            passages=passages,
+        )
 
     @router.post(
         "/documents/{document_id}/passages",
@@ -208,6 +269,32 @@ def _require_database(database: Database | None) -> Database:
             detail={"code": "database_not_configured"},
         )
     return database
+
+
+def _require_services(
+    database: Database | None,
+    document_store: LocalDocumentStore | None,
+) -> tuple[Database, LocalDocumentStore]:
+    if database is None or document_store is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "backend_not_configured"},
+        )
+    return database, document_store
+
+
+def _require_confident_detection(result: DetectionResult) -> None:
+    if result.coverage_confident:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail={
+            "code": "mask_coverage_uncertain",
+            "message": "Automatic detection could not confirm every page",
+            "uncertain_pages": result.uncertain_pages,
+            "warnings": result.warnings,
+        },
+    )
 
 
 def _request_hash(request: BaseModel) -> str:

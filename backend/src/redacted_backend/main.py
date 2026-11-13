@@ -33,7 +33,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         create_documents_router(resolved_settings, database, document_store),
         prefix="/v1",
     )
-    app.include_router(create_passages_router(database), prefix="/v1")
+    app.include_router(
+        create_passages_router(database, document_store),
+        prefix="/v1",
+    )
     app.include_router(
         create_context_router(database, document_store),
         prefix="/v1",

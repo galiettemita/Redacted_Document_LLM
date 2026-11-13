@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
@@ -122,19 +122,19 @@ def prepare_visible_context(
 
 
 def render_page_images(pdf_path: Path) -> list[Image.Image]:
+    return list(iter_page_images(pdf_path))
+
+
+def iter_page_images(pdf_path: Path) -> Iterator[Image.Image]:
     document = pymupdf.open(pdf_path)
     try:
-        images: list[Image.Image] = []
         for page in document:
             pixmap = page.get_pixmap(matrix=pymupdf.Matrix(2, 2), alpha=False)
-            images.append(
-                Image.frombytes(
-                    "RGB",
-                    (pixmap.width, pixmap.height),
-                    pixmap.samples,
-                )
+            yield Image.frombytes(
+                "RGB",
+                (pixmap.width, pixmap.height),
+                pixmap.samples,
             )
-        return images
     finally:
         document.close()
 

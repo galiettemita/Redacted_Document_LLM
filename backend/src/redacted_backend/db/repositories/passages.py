@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from sqlalchemy import select, update
@@ -21,6 +22,9 @@ from redacted_backend.domain.passages import (
     PassageSource,
     PassageStatus,
 )
+
+if TYPE_CHECKING:
+    from redacted_backend.documents.detection import DetectedPassage
 
 
 class PassageNotFoundError(LookupError):
@@ -85,7 +89,67 @@ class PassageRepository:
             )
             .order_by(Passage.page_number, Passage.created_at, Passage.id)
         ).all()
-        return [_to_record(model) for model in models]
+        return [_to_record(model) for model in sorted(models, key=_document_order_key)]
+
+    def reconcile_detected(
+        self,
+        document_id: UUID | str,
+        detected: list[DetectedPassage],
+    ) -> list[PassageRecord]:
+        document = self._session.get(Document, str(document_id))
+        if document is None or document.status == DocumentStatus.DELETED.value:
+            raise PassageNotFoundError("document not found")
+        live = self._session.scalars(
+            select(Passage).where(
+                Passage.document_id == str(document_id),
+                Passage.status != PassageStatus.DELETED.value,
+            )
+        ).all()
+        manual = [model for model in live if model.source == PassageSource.MANUAL.value]
+        existing_detected = {
+            _geometry_key(model.page_number, model.rects): model
+            for model in live
+            if model.source == PassageSource.DETECTED.value
+        }
+        retained_ids: set[str] = set()
+        for candidate in detected:
+            if any(
+                model.page_number == candidate.page_number
+                and _rect_sets_overlap(model.rects, candidate.rects)
+                for model in manual
+            ):
+                continue
+            key = _geometry_key(candidate.page_number, candidate.rects)
+            existing = existing_detected.get(key)
+            if existing is not None:
+                retained_ids.add(existing.id)
+                continue
+            created = self.create(
+                document_id=document_id,
+                label="Detected passage",
+                page_number=candidate.page_number,
+                rects=candidate.rects,
+                source=PassageSource.DETECTED,
+            )
+            retained_ids.add(str(created.id))
+
+        for model in existing_detected.values():
+            if model.id not in retained_ids:
+                self._invalidate(model, "detection_removed", deleted=True)
+
+        self._session.flush()
+        current = self._session.scalars(
+            select(Passage).where(
+                Passage.document_id == str(document_id),
+                Passage.status != PassageStatus.DELETED.value,
+            )
+        ).all()
+        ordered = sorted(current, key=_document_order_key)
+        for index, model in enumerate(ordered, start=1):
+            if model.source == PassageSource.DETECTED.value:
+                model.label = f"Passage {index}"
+        self._session.flush()
+        return [_to_record(model) for model in ordered]
 
     def mark_context_ready(
         self,
@@ -163,6 +227,10 @@ class PassageRepository:
             model.page_number = page_number
         if rects is not None:
             model.rects = [rect.model_dump(mode="json") for rect in rects]
+        if model.source == PassageSource.DETECTED.value and (
+            page_number is not None or rects is not None
+        ):
+            model.source = PassageSource.MANUAL.value
         self._invalidate(model, "passage_corrected")
         self._session.flush()
         return _to_record(model)
@@ -314,3 +382,45 @@ def _to_record(model: Passage) -> PassageRecord:
         created_at=model.created_at,
         updated_at=model.updated_at,
     )
+
+
+def _geometry_key(
+    page_number: int,
+    rects: list[dict[str, float]] | list[PassageRect],
+) -> tuple[int, tuple[tuple[float, float, float, float], ...]]:
+    values = [
+        (
+            round(rect.x if isinstance(rect, PassageRect) else rect["x"], 6),
+            round(rect.y if isinstance(rect, PassageRect) else rect["y"], 6),
+            round(rect.width if isinstance(rect, PassageRect) else rect["width"], 6),
+            round(rect.height if isinstance(rect, PassageRect) else rect["height"], 6),
+        )
+        for rect in rects
+    ]
+    return page_number, tuple(sorted(values, key=lambda item: (item[1], item[0])))
+
+
+def _rect_sets_overlap(
+    persisted: list[dict[str, float]],
+    detected: list[PassageRect],
+) -> bool:
+    return any(
+        _substantial_overlap(
+            PassageRect.model_validate(persisted_rect),
+            detected_rect,
+        )
+        for persisted_rect in persisted
+        for detected_rect in detected
+    )
+
+
+def _substantial_overlap(first: PassageRect, second: PassageRect) -> bool:
+    left = max(first.x, second.x)
+    top = max(first.y, second.y)
+    right = min(first.x + first.width, second.x + second.width)
+    bottom = min(first.y + first.height, second.y + second.height)
+    if right <= left or bottom <= top:
+        return False
+    intersection = (right - left) * (bottom - top)
+    smaller = min(first.width * first.height, second.width * second.height)
+    return intersection / smaller >= 0.5

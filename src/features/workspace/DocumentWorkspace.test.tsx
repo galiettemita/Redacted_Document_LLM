@@ -4,6 +4,7 @@ import type {
   AnalysisJobRecord,
   BackendApi,
   BackendPassageRecord,
+  PassageDetectionResult,
   VisibleContextSummary,
 } from '../../services/backendApi'
 import type { BackendDocumentState } from '../../hooks/useBackendDocument'
@@ -11,8 +12,11 @@ import type { DocumentDescriptor } from '../../types'
 import { DocumentWorkspace } from './DocumentWorkspace'
 
 vi.mock('../viewer/PdfViewer', () => ({
-  PdfViewer: ({ markingEnabled, onMarkPassage }: { markingEnabled?: boolean; onMarkPassage?: (page: number, rect: { x: number; y: number; width: number; height: number }) => void }) => (
+  PdfViewer: ({ markingEnabled, onMarkPassage, passages = [] }: { markingEnabled?: boolean; onMarkPassage?: (page: number, rect: { x: number; y: number; width: number; height: number }) => void; passages?: Array<{ id: string; label: string }> }) => (
     <div className="pdf-page-shell" aria-label="Local PDF renderer">
+      {passages.map((passage) => (
+        <button key={passage.id} type="button" data-passage-id={passage.id} aria-label={`${passage.label} redaction`} />
+      ))}
       {markingEnabled ? (
         <button type="button" onClick={() => onMarkPassage?.(1, { x: 0.2, y: 0.3, width: 0.4, height: 0.08 })}>
           Complete marked rectangle
@@ -100,6 +104,33 @@ const blockedAnalysis: AnalysisJobRecord = {
   updated_at: '2026-11-13T12:00:00Z',
 }
 
+const emptyDetection: PassageDetectionResult = {
+  document_id: uploadedDocument.backendDocumentId!,
+  status: 'detection_ready',
+  pages_scanned: 2,
+  coverage_confident: true,
+  uncertain_pages: [],
+  warnings: [],
+  passages: [],
+}
+
+const detectedSecondPassage: BackendPassageRecord = {
+  ...savedPassage,
+  id: '44444444-4444-4444-8444-444444444444',
+  label: 'Passage 2',
+  page_number: 2,
+  rects: [{ x: 0.1, y: 0.4, width: 0.2, height: 0.03 }],
+  source: 'detected',
+}
+
+const detectedPassages: PassageDetectionResult = {
+  ...emptyDetection,
+  passages: [
+    { ...savedPassage, source: 'detected' },
+    detectedSecondPassage,
+  ],
+}
+
 function apiWithCreate(
   createPassage = vi.fn().mockResolvedValue(savedPassage),
   overrides: Partial<BackendApi> = {},
@@ -110,6 +141,7 @@ function apiWithCreate(
     deleteDocument: vi.fn(),
     createPassage,
     updatePassage: vi.fn().mockResolvedValue({ ...savedPassage, revision: 2 }),
+    detectDocumentPassages: vi.fn().mockResolvedValue(emptyDetection),
     prepareVisibleContext: vi.fn().mockResolvedValue(preparedContext),
     schedulePassageAnalysis: vi.fn().mockResolvedValue(blockedAnalysis),
     ...overrides,
@@ -140,12 +172,40 @@ describe('DocumentWorkspace', () => {
     expect(onViewSample).toHaveBeenCalledOnce()
   })
 
+  it('automatically detects and displays every passage without manual highlighting', async () => {
+    vi.useRealTimers()
+    const detectDocumentPassages = vi.fn().mockResolvedValue(detectedPassages)
+    const api = apiWithCreate(undefined, { detectDocumentPassages })
+    const { container } = render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={api}
+        onReplace={vi.fn()}
+        onViewSample={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByRole('heading', {
+      name: '2 passages detected',
+    })).toBeInTheDocument()
+    expect(detectDocumentPassages).toHaveBeenCalledWith(
+      uploadedDocument.backendDocumentId,
+      expect.any(AbortSignal),
+    )
+    expect(container.querySelectorAll('[data-passage-id]')).toHaveLength(2)
+    expect(screen.getByText(/all 2 pages were scanned automatically/i)).toBeInTheDocument()
+    expect(screen.queryByText('Predicted hidden passage')).not.toBeInTheDocument()
+  })
+
   it('persists one drawn rectangle without inventing prediction text', async () => {
     vi.useRealTimers()
     const createPassage = vi.fn().mockResolvedValue(savedPassage)
     render(<DocumentWorkspace document={uploadedDocument} backendDocument={readyBackendDocument} backendApi={apiWithCreate(createPassage)} onReplace={vi.fn()} onViewSample={vi.fn()} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Mark a passage' }))
+    const markButton = screen.getByRole('button', { name: 'Mark a passage' })
+    await waitFor(() => expect(markButton).toBeEnabled())
+    fireEvent.click(markButton)
     fireEvent.click(screen.getByRole('button', { name: 'Complete marked rectangle' }))
 
     await waitFor(() => expect(createPassage).toHaveBeenCalledWith(
@@ -157,7 +217,7 @@ describe('DocumentWorkspace', () => {
       },
       expect.objectContaining({ idempotencyKey: expect.any(String) }),
     ))
-    expect(await screen.findByRole('heading', { name: 'Passage 1 is saved' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Selected passage is saved' })).toBeInTheDocument()
     expect(screen.queryByText(/sample prediction/i)).not.toBeInTheDocument()
     expect(screen.queryByText('Simulated prediction')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'View interactive sample' })).toBeInTheDocument()
@@ -182,9 +242,11 @@ describe('DocumentWorkspace', () => {
     expect(screen.queryByLabelText('Document date shown on PDF')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Save visible date' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Mark a passage' }))
+    const markButton = screen.getByRole('button', { name: 'Mark a passage' })
+    await waitFor(() => expect(markButton).toBeEnabled())
+    fireEvent.click(markButton)
     fireEvent.click(screen.getByRole('button', { name: 'Complete marked rectangle' }))
-    await screen.findByRole('heading', { name: 'Passage 1 is saved' })
+    await screen.findByRole('heading', { name: 'Selected passage is saved' })
 
     const prepareButton = screen.getByRole('button', { name: 'Prepare visible context' })
     await waitFor(() => expect(prepareButton).toBeEnabled())
@@ -238,9 +300,11 @@ describe('DocumentWorkspace', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Mark a passage' }))
+    const markButton = screen.getByRole('button', { name: 'Mark a passage' })
+    await waitFor(() => expect(markButton).toBeEnabled())
+    fireEvent.click(markButton)
     fireEvent.click(screen.getByRole('button', { name: 'Complete marked rectangle' }))
-    await screen.findByRole('heading', { name: 'Passage 1 is saved' })
+    await screen.findByRole('heading', { name: 'Selected passage is saved' })
     fireEvent.click(screen.getByRole('button', { name: 'Prepare visible context' }))
     await screen.findByRole('heading', { name: 'Visible-only context ready' })
 
@@ -277,9 +341,11 @@ describe('DocumentWorkspace', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Mark a passage' }))
+    const markButton = screen.getByRole('button', { name: 'Mark a passage' })
+    await waitFor(() => expect(markButton).toBeEnabled())
+    fireEvent.click(markButton)
     fireEvent.click(screen.getByRole('button', { name: 'Complete marked rectangle' }))
-    await screen.findByRole('heading', { name: 'Passage 1 is saved' })
+    await screen.findByRole('heading', { name: 'Selected passage is saved' })
     fireEvent.click(screen.getByRole('button', { name: 'Prepare visible context' }))
     await screen.findByRole('heading', { name: 'Visible-only context ready' })
 

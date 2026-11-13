@@ -6,7 +6,7 @@ export interface WorkspaceState {
   pinnedId: string | null
   activeView: 'document' | 'predictions'
   markingEnabled: boolean
-  markedPassage: Passage | null
+  passages: Passage[]
 }
 
 export const initialWorkspaceState: WorkspaceState = {
@@ -15,7 +15,7 @@ export const initialWorkspaceState: WorkspaceState = {
   pinnedId: null,
   activeView: 'document',
   markingEnabled: false,
-  markedPassage: null,
+  passages: [],
 }
 
 type WorkspaceAction =
@@ -26,7 +26,9 @@ type WorkspaceAction =
   | { type: 'dismiss' }
   | { type: 'set-view'; view: WorkspaceState['activeView'] }
   | { type: 'start-marking' }
-  | { type: 'mark-passage'; passage: Passage }
+  | { type: 'set-passages'; passages: Passage[] }
+  | { type: 'upsert-passage'; passage: Passage }
+  | { type: 'replace-passage'; previousId: string; passage: Passage }
   | { type: 'select-passage'; passageId: string; page: number }
 
 export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction): WorkspaceState {
@@ -44,12 +46,35 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
     case 'set-view':
       return { ...state, activeView: action.view }
     case 'start-marking':
-      return { ...state, activeView: 'document', markingEnabled: true, hoveredId: null, pinnedId: null }
-    case 'mark-passage':
+      return { ...state, activeView: 'document', markingEnabled: true, hoveredId: null }
+    case 'set-passages':
+      return {
+        ...state,
+        passages: action.passages,
+        markingEnabled: false,
+        pinnedId: action.passages.some((passage) => passage.id === state.pinnedId)
+          ? state.pinnedId
+          : action.passages[0]?.id ?? null,
+      }
+    case 'upsert-passage':
       return {
         ...state,
         page: action.passage.page,
-        markedPassage: action.passage,
+        passages: state.passages.some((passage) => passage.id === action.passage.id)
+          ? state.passages.map((passage) => (
+              passage.id === action.passage.id ? action.passage : passage
+            ))
+          : [...state.passages, action.passage],
+        markingEnabled: false,
+        pinnedId: action.passage.id,
+      }
+    case 'replace-passage':
+      return {
+        ...state,
+        page: action.passage.page,
+        passages: state.passages.map((passage) => (
+          passage.id === action.previousId ? action.passage : passage
+        )),
         markingEnabled: false,
         pinnedId: action.passage.id,
       }
