@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import multiprocessing
 from collections.abc import Callable
 from pathlib import Path
@@ -15,6 +16,7 @@ class PdfLimits(BaseModel):
     max_file_bytes: int = Field(default=100 * 1024 * 1024, ge=1)
     max_pages: int = Field(default=500, ge=1)
     max_decompressed_bytes: int = Field(default=512 * 1024 * 1024, ge=1)
+    max_rendered_page_pixels: int = Field(default=25_000_000, ge=1)
     parser_timeout_seconds: float = Field(default=10.0, gt=0)
 
 
@@ -40,7 +42,7 @@ class _InspectionError(Exception):
         self.message = message
 
 
-Inspector = Callable[[Path, int], dict[str, Any]]
+Inspector = Callable[[Path, int, int], dict[str, Any]]
 
 
 def validate_pdf(
@@ -64,6 +66,7 @@ def validate_pdf(
     result = _inspect_with_timeout(
         path,
         limits.max_decompressed_bytes,
+        limits.max_rendered_page_pixels,
         limits.parser_timeout_seconds,
         _inspector or _inspect_pdf,
     )
@@ -85,6 +88,7 @@ def validate_pdf(
 def _inspect_with_timeout(
     path: Path,
     max_decompressed_bytes: int,
+    max_rendered_page_pixels: int,
     timeout_seconds: float,
     inspector: Inspector,
 ) -> dict[str, Any]:
@@ -92,7 +96,13 @@ def _inspect_with_timeout(
     parent_connection, child_connection = context.Pipe(duplex=False)
     process = context.Process(
         target=_inspection_process,
-        args=(child_connection, path, max_decompressed_bytes, inspector),
+        args=(
+            child_connection,
+            path,
+            max_decompressed_bytes,
+            max_rendered_page_pixels,
+            inspector,
+        ),
         daemon=True,
     )
     process.start()
@@ -120,10 +130,20 @@ def _inspection_process(
     connection,
     path: Path,
     max_decompressed_bytes: int,
+    max_rendered_page_pixels: int,
     inspector: Inspector,
 ) -> None:
     try:
-        connection.send(("ok", inspector(path, max_decompressed_bytes)))
+        connection.send(
+            (
+                "ok",
+                inspector(
+                    path,
+                    max_decompressed_bytes,
+                    max_rendered_page_pixels,
+                ),
+            )
+        )
     except _InspectionError as error:
         connection.send(("error", {"code": error.code, "message": error.message}))
     # This child process is the isolation boundary for an untrusted parser. Any
@@ -139,7 +159,11 @@ def _inspection_process(
         connection.close()
 
 
-def _inspect_pdf(path: Path, max_decompressed_bytes: int) -> dict[str, int]:
+def _inspect_pdf(
+    path: Path,
+    max_decompressed_bytes: int,
+    max_rendered_page_pixels: int,
+) -> dict[str, int]:
     try:
         document = pymupdf.open(path)
     except Exception as error:
@@ -149,6 +173,14 @@ def _inspect_pdf(path: Path, max_decompressed_bytes: int) -> dict[str, int]:
     try:
         if document.needs_pass:
             raise _InspectionError("encrypted_pdf", "Encrypted PDFs are not accepted")
+        for page in document:
+            rendered_width = math.ceil(page.rect.width * 2)
+            rendered_height = math.ceil(page.rect.height * 2)
+            if rendered_width * rendered_height > max_rendered_page_pixels:
+                raise _InspectionError(
+                    "page_render_limit",
+                    "A PDF page exceeds the safe rendering size",
+                )
         decompressed_bytes = 0
         for xref in range(1, document.xref_length()):
             if not document.xref_is_stream(xref):

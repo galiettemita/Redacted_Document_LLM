@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
+from threading import Lock
 from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from sqlalchemy.orm import Session
 
 from redacted_backend.db.base import Database
 from redacted_backend.db.repositories.documents import DocumentRepository
@@ -101,6 +105,7 @@ def create_passages_router(
     document_store: LocalDocumentStore | None,
 ) -> APIRouter:
     router = APIRouter()
+    detection_locks = _KeyedLock()
 
     @router.post(
         "/documents/{document_id}/passages:detect",
@@ -108,28 +113,34 @@ def create_passages_router(
     )
     def detect_document_passages(document_id: UUID) -> PassageDetectionResponse:
         ready_database, ready_store = _require_services(database, document_store)
-        with ready_database.session_factory() as session:
-            document = DocumentRepository(session).get(document_id)
-        if document is None or document.status == DocumentStatus.DELETED:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-        try:
-            result = detect_passages(ready_store.resolve(document.storage_key))
-        except PassageDetectionError as error:
-            response_status = (
-                status.HTTP_503_SERVICE_UNAVAILABLE
-                if error.code == "ocr_unavailable"
-                else status.HTTP_422_UNPROCESSABLE_CONTENT
-            )
-            raise HTTPException(
-                status_code=response_status,
-                detail={"code": error.code, "message": str(error)},
-            ) from error
-        _require_confident_detection(result)
-        with ready_database.session_factory() as session, session.begin():
-            passages = PassageRepository(session).reconcile_detected(
-                document_id,
-                result.passages,
-            )
+        with detection_locks.hold(str(document_id)):
+            try:
+                with ready_database.session_factory() as session, session.begin():
+                    _lock_sqlite_detection_transaction(ready_database, session)
+                    document = DocumentRepository(session).get_for_update(document_id)
+                    if document is None or document.status == DocumentStatus.DELETED:
+                        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+                    try:
+                        result = detect_passages(
+                            ready_store.resolve(document.storage_key)
+                        )
+                    except PassageDetectionError as error:
+                        response_status = (
+                            status.HTTP_503_SERVICE_UNAVAILABLE
+                            if error.code == "ocr_unavailable"
+                            else status.HTTP_422_UNPROCESSABLE_CONTENT
+                        )
+                        raise HTTPException(
+                            status_code=response_status,
+                            detail={"code": error.code, "message": str(error)},
+                        ) from error
+                    _require_confident_detection(result)
+                    passages = PassageRepository(session).reconcile_detected(
+                        document_id,
+                        result.passages,
+                    )
+            except PassageNotFoundError as error:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) from error
         return PassageDetectionResponse(
             document_id=document_id,
             pages_scanned=result.pages_scanned,
@@ -295,6 +306,37 @@ def _require_confident_detection(result: DetectionResult) -> None:
             "warnings": result.warnings,
         },
     )
+
+
+def _lock_sqlite_detection_transaction(
+    database: Database,
+    session: Session,
+) -> None:
+    if database.engine.dialect.name == "sqlite":
+        session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+
+
+class _KeyedLock:
+    def __init__(self) -> None:
+        self._guard = Lock()
+        self._entries: dict[str, tuple[Lock, int]] = {}
+
+    @contextmanager
+    def hold(self, key: str) -> Iterator[None]:
+        with self._guard:
+            lock, users = self._entries.get(key, (Lock(), 0))
+            self._entries[key] = (lock, users + 1)
+        lock.acquire()
+        try:
+            yield
+        finally:
+            lock.release()
+            with self._guard:
+                current_lock, current_users = self._entries[key]
+                if current_users == 1:
+                    del self._entries[key]
+                else:
+                    self._entries[key] = (current_lock, current_users - 1)
 
 
 def _request_hash(request: BaseModel) -> str:

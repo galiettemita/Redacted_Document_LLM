@@ -160,5 +160,6 @@ def _pdf_limits(settings: Settings) -> PdfLimits:
         max_file_bytes=settings.pdf_max_file_bytes,
         max_pages=settings.pdf_max_pages,
         max_decompressed_bytes=settings.pdf_max_decompressed_bytes,
+        max_rendered_page_pixels=settings.pdf_max_rendered_page_pixels,
         parser_timeout_seconds=settings.pdf_parser_timeout_seconds,
     )

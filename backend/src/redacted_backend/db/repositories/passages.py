@@ -96,21 +96,44 @@ class PassageRepository:
         document_id: UUID | str,
         detected: list[DetectedPassage],
     ) -> list[PassageRecord]:
-        document = self._session.get(Document, str(document_id))
+        document = self._session.scalar(
+            select(Document).where(Document.id == str(document_id)).with_for_update()
+        )
         if document is None or document.status == DocumentStatus.DELETED.value:
             raise PassageNotFoundError("document not found")
-        live = self._session.scalars(
+        all_models = self._session.scalars(
             select(Passage).where(
                 Passage.document_id == str(document_id),
-                Passage.status != PassageStatus.DELETED.value,
             )
         ).all()
-        manual = [model for model in live if model.source == PassageSource.MANUAL.value]
-        existing_detected = {
-            _geometry_key(model.page_number, model.rects): model
-            for model in live
-            if model.source == PassageSource.DETECTED.value
-        }
+        manual = [
+            model for model in all_models if model.source == PassageSource.MANUAL.value
+        ]
+        live_detected = sorted(
+            (
+                model
+                for model in all_models
+                if model.source == PassageSource.DETECTED.value
+                and model.status != PassageStatus.DELETED.value
+            ),
+            key=lambda model: (
+                _passage_label_number(model.label) is None,
+                model.created_at,
+                model.id,
+            ),
+        )
+        existing_detected: dict[
+            tuple[int, tuple[tuple[float, float, float, float], ...]],
+            Passage,
+        ] = {}
+        for model in live_detected:
+            key = _geometry_key(model.page_number, model.rects)
+            if key in existing_detected:
+                self._invalidate(model, "duplicate_detection", deleted=True)
+                continue
+            existing_detected[key] = model
+
+        next_label_number = _next_passage_label_number(all_models)
         retained_ids: set[str] = set()
         for candidate in detected:
             if any(
@@ -126,11 +149,12 @@ class PassageRepository:
                 continue
             created = self.create(
                 document_id=document_id,
-                label="Detected passage",
+                label=f"Passage {next_label_number}",
                 page_number=candidate.page_number,
                 rects=candidate.rects,
                 source=PassageSource.DETECTED,
             )
+            next_label_number += 1
             retained_ids.add(str(created.id))
 
         for model in existing_detected.values():
@@ -145,10 +169,6 @@ class PassageRepository:
             )
         ).all()
         ordered = sorted(current, key=_document_order_key)
-        for index, model in enumerate(ordered, start=1):
-            if model.source == PassageSource.DETECTED.value:
-                model.label = f"Passage {index}"
-        self._session.flush()
         return [_to_record(model) for model in ordered]
 
     def mark_context_ready(
@@ -237,6 +257,8 @@ class PassageRepository:
 
     def mark_deleted(self, passage_id: UUID | str) -> PassageRecord:
         model = self._get_live(passage_id)
+        if model.source == PassageSource.DETECTED.value:
+            model.source = PassageSource.MANUAL.value
         self._invalidate(model, "passage_deleted", deleted=True)
         self._session.flush()
         return _to_record(model)
@@ -249,6 +271,8 @@ class PassageRepository:
             raise PassageConflictError("passages on different pages cannot be merged")
         ordered = sorted(models, key=_document_order_key)
         survivor = ordered[0]
+        for model in ordered:
+            model.source = PassageSource.MANUAL.value
         survivor.rects = sorted(
             [rect for model in ordered for rect in model.rects],
             key=lambda rect: (rect["y"], rect["x"]),
@@ -274,6 +298,7 @@ class PassageRepository:
         if document is None:
             raise PassageNotFoundError("document not found")
         self._validate_page(document, first_page)
+        original.source = PassageSource.MANUAL.value
         original.label = first_label
         original.page_number = first_page
         original.rects = [rect.model_dump(mode="json") for rect in first_rects]
@@ -286,7 +311,7 @@ class PassageRepository:
                     label=label,
                     page_number=page_number,
                     rects=rects,
-                    source=PassageSource(original.source),
+                    source=PassageSource.MANUAL,
                     split_from=original.id,
                 )
             )
@@ -424,3 +449,17 @@ def _substantial_overlap(first: PassageRect, second: PassageRect) -> bool:
     intersection = (right - left) * (bottom - top)
     smaller = min(first.width * first.height, second.width * second.height)
     return intersection / smaller >= 0.5
+
+
+def _next_passage_label_number(models: list[Passage]) -> int:
+    numbers = [
+        number
+        for model in models
+        if (number := _passage_label_number(model.label)) is not None
+    ]
+    return max(numbers, default=0) + 1
+
+
+def _passage_label_number(label: str) -> int | None:
+    suffix = label.removeprefix("Passage ")
+    return int(suffix) if suffix.isdigit() else None

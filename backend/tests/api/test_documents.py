@@ -90,6 +90,31 @@ def test_upload_rejects_non_pdf_content_without_retaining_it(tmp_path: Path) -> 
     assert list((tmp_path / "stored-documents").rglob("*.pdf")) == []
 
 
+def test_upload_rejects_extreme_page_dimensions_before_rendering(
+    tmp_path: Path,
+) -> None:
+    app = create_test_app(tmp_path)
+
+    response = asyncio.run(
+        request(
+            app,
+            "POST",
+            "/v1/documents",
+            files={
+                "file": (
+                    "extreme-page.pdf",
+                    make_pdf(page_width=10_000, page_height=10_000),
+                    "application/pdf",
+                )
+            },
+        )
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "page_render_limit"
+    assert list((tmp_path / "stored-documents").rglob("*.pdf")) == []
+
+
 def test_browser_cannot_supply_document_date_metadata(
     tmp_path: Path,
 ) -> None:

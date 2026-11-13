@@ -79,6 +79,15 @@ def test_rejects_a_pdf_whose_streams_exceed_the_expansion_limit(tmp_path: Path) 
     )
 
 
+def test_rejects_a_tiny_pdf_with_an_extreme_page_render_size(tmp_path: Path) -> None:
+    path = write_pdf(
+        tmp_path / "extreme-page.pdf",
+        make_pdf(page_width=10_000, page_height=10_000),
+    )
+
+    assert_validation_code(path, PdfLimits(), "page_render_limit")
+
+
 def test_terminates_pdf_inspection_after_the_parser_timeout(tmp_path: Path) -> None:
     path = write_pdf(tmp_path / "slow.pdf", make_pdf())
 

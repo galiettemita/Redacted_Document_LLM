@@ -26,4 +26,5 @@ class Settings(BaseSettings):
     pdf_max_file_bytes: int = 100 * 1024 * 1024
     pdf_max_pages: int = 500
     pdf_max_decompressed_bytes: int = 512 * 1024 * 1024
+    pdf_max_rendered_page_pixels: int = 25_000_000
     pdf_parser_timeout_seconds: float = 10.0

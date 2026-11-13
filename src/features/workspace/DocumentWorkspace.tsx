@@ -31,6 +31,11 @@ type PassageDetectionStatus = 'idle' | 'detecting' | 'ready' | 'failed'
 type ContextPreparationStatus = 'idle' | 'preparing' | 'ready' | 'failed'
 type AnalysisRequestStatus = 'idle' | 'submitting' | 'received' | 'failed'
 
+interface DetectionTask {
+  documentId: string
+  promise: Promise<PassageDetectionResult>
+}
+
 export function DocumentWorkspace({
   document,
   onReplace,
@@ -51,7 +56,7 @@ export function DocumentWorkspace({
   const [analysisJob, setAnalysisJob] = useState<AnalysisJobRecord | null>(null)
   const [analysisError, setAnalysisError] = useState<string | null>(null)
   const passageTargets = useRef(new Map<string, HTMLElement>())
-  const detectionRequest = useRef<AbortController | null>(null)
+  const detectionTask = useRef<DetectionTask | null>(null)
   const passageRequest = useRef<AbortController | null>(null)
   const contextRequest = useRef<AbortController | null>(null)
   const analysisRequest = useRef<AbortController | null>(null)
@@ -75,8 +80,6 @@ export function DocumentWorkspace({
     setAnalysisStatus('idle')
     setAnalysisJob(null)
     setAnalysisError(null)
-    detectionRequest.current?.abort()
-    detectionRequest.current = null
     passageRequest.current?.abort()
     passageRequest.current = null
     contextRequest.current?.abort()
@@ -87,7 +90,6 @@ export function DocumentWorkspace({
   }, [document.id])
 
   useEffect(() => () => {
-    detectionRequest.current?.abort()
     passageRequest.current?.abort()
     contextRequest.current?.abort()
     analysisRequest.current?.abort()
@@ -141,17 +143,26 @@ export function DocumentWorkspace({
 
   useEffect(() => {
     if (!backendReady || !document.backendDocumentId) return
-
-    detectionRequest.current?.abort()
-    const controller = new AbortController()
-    detectionRequest.current = controller
+    const documentId = document.backendDocumentId
+    const task = detectionTask.current?.documentId === documentId
+      ? detectionTask.current
+      : {
+          documentId,
+          promise: backendApi.detectDocumentPassages(
+            documentId,
+            new AbortController().signal,
+          ),
+        }
+    detectionTask.current = task
+    let active = true
     setDetectionStatus('detecting')
     setDetectionResult(null)
     setDetectionError(null)
 
-    void backendApi.detectDocumentPassages(document.backendDocumentId, controller.signal)
+    void task.promise
       .then((result) => {
-        if (result.document_id !== document.backendDocumentId) {
+        if (!active) return
+        if (result.document_id !== documentId) {
           throw new Error('The backend returned passages for a different document.')
         }
         dispatch({ type: 'set-passages', passages: result.passages.map(toPassage) })
@@ -159,16 +170,14 @@ export function DocumentWorkspace({
         setDetectionStatus('ready')
       })
       .catch((error: unknown) => {
-        if (isAbortError(error)) return
+        if (!active || isAbortError(error)) return
         dispatch({ type: 'set-passages', passages: [] })
         setDetectionStatus('failed')
         setDetectionError(errorMessage(error, 'Automatic passage detection could not finish.'))
       })
-      .finally(() => {
-        if (detectionRequest.current === controller) detectionRequest.current = null
-      })
-
-    return () => controller.abort()
+    return () => {
+      active = false
+    }
   }, [backendApi, backendReady, document.backendDocumentId])
 
   useEffect(() => {
@@ -190,10 +199,12 @@ export function DocumentWorkspace({
     passageRequest.current?.abort()
     const controller = new AbortController()
     passageRequest.current = controller
-    const existingPassage = selectedPassage
+    const existingPassage = state.passages.find(
+      (passage) => passage.id === state.markingPassageId,
+    ) ?? null
     const passage: Passage = {
       id: existingPassage?.id ?? `pending-${createIdempotencyKey()}`,
-      label: existingPassage?.label ?? `Passage ${state.passages.length + 1}`,
+      label: existingPassage?.label ?? nextPassageLabel(state.passages),
       page,
       rects: [rect],
     }
@@ -364,13 +375,27 @@ export function DocumentWorkspace({
                 <strong>{markingToolbarTitle(backendDocument, state.markingEnabled, passageSaveStatus, detectionStatus)}</strong>
                 {markingToolbarMessage(backendDocument, state.markingEnabled, passageSaveStatus, detectionStatus, Boolean(selectedPassage))}
               </p>
-              <button
-                type="button"
-                disabled={markingUnavailable}
-                onClick={() => dispatch({ type: 'start-marking' })}
-              >
-                {selectedPassage ? 'Correct selected area' : 'Mark a passage'}
-              </button>
+              <div className="marking-actions">
+                {selectedPassage ? (
+                  <button
+                    type="button"
+                    disabled={markingUnavailable}
+                    onClick={() => dispatch({
+                      type: 'start-marking',
+                      passageId: selectedPassage.id,
+                    })}
+                  >
+                    Correct selected area
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  disabled={markingUnavailable}
+                  onClick={() => dispatch({ type: 'start-marking', passageId: null })}
+                >
+                  {selectedPassage ? 'Add missed passage' : 'Mark a passage'}
+                </button>
+              </div>
             </div>
           ) : null}
           <PdfViewer
@@ -555,7 +580,7 @@ function markingToolbarTitle(
   if (backendDocument?.status === 'failed') return 'Upload not saved'
   if (detectionStatus === 'detecting') return 'Scanning every page'
   if (passageSaveStatus === 'saving') return 'Saving passage'
-  return markingEnabled ? 'Draw the corrected area' : 'Correct passage detection'
+  return markingEnabled ? 'Draw the passage area' : 'Review passage detection'
 }
 
 function markingToolbarMessage(
@@ -584,7 +609,7 @@ function markingToolbarMessage(
   return markingEnabled
     ? ' Drag one rectangle over the correct hidden area.'
     : hasSelectedPassage
-      ? ' Select a passage, then use this only if its detected rectangle needs correction.'
+      ? ' Correct the selected rectangle, or add a passage only if the automatic scan missed it.'
       : ' Use this only if the automatic scan missed a hidden passage.'
 }
 
@@ -605,7 +630,9 @@ function backendNoteTitle(
   if (passageSaveStatus === 'failed') return 'Passage save failed'
   if (detectionStatus === 'detecting') return 'Scanning every page'
   if (detectionStatus === 'failed') return 'Automatic detection needs review'
-  if (detectionStatus === 'ready' && passageCount > 0) return `${passageCount} passages detected`
+  if (detectionStatus === 'ready' && passageCount > 0) {
+    return `${passageCount} ${passageCount === 1 ? 'passage' : 'passages'} detected`
+  }
   if (detectionStatus === 'ready') return 'No redactions detected'
   return 'PDF upload complete'
 }
@@ -647,7 +674,7 @@ function backendNoteMessage(
   }
   if (detectionStatus === 'ready' && detectionResult) {
     return passageCount
-      ? `All ${detectionResult.pages_scanned} pages were scanned automatically. Each detected area now has a stable passage record and PDF highlight; manual marking is only for corrections.`
+      ? `All ${detectionResult.pages_scanned} pages were scanned automatically. Each detected area now has a stable passage record and PDF highlight; manual marking is only for corrections or a missed-area fallback.`
       : `All ${detectionResult.pages_scanned} pages were scanned automatically, but no reliable hidden passages were found. Manual marking remains available for a missed passage.`
   }
   return 'The PDF is stored temporarily by the local backend. Automatic all-page passage detection will begin now.'
@@ -656,4 +683,12 @@ function backendNoteMessage(
 function backendDocumentError(backendDocument: BackendDocumentState | undefined): string | null {
   if (backendDocument?.status !== 'failed' && backendDocument?.status !== 'unavailable') return null
   return backendDocument.error ?? 'The local backend is unavailable.'
+}
+
+function nextPassageLabel(passages: Passage[]): string {
+  const numbers = passages.flatMap((passage) => {
+    const match = /^Passage (\d+)$/.exec(passage.label)
+    return match ? [Number(match[1])] : []
+  })
+  return `Passage ${Math.max(0, ...numbers) + 1}`
 }

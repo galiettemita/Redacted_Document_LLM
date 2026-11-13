@@ -52,6 +52,14 @@ class DocumentRepository:
         document = self._session.get(Document, str(document_id))
         return _to_record(document) if document is not None else None
 
+    def get_for_update(self, document_id: UUID | str) -> DocumentRecord | None:
+        document = self._session.get(
+            Document,
+            str(document_id),
+            with_for_update=True,
+        )
+        return _to_record(document) if document is not None else None
+
     def set_detected_visible_date(
         self,
         document_id: UUID | str,
@@ -83,7 +91,11 @@ class DocumentRepository:
         return _to_record(document)
 
     def mark_deleted(self, document_id: UUID | str) -> DocumentRecord | None:
-        document = self._session.get(Document, str(document_id))
+        document = self._session.get(
+            Document,
+            str(document_id),
+            with_for_update=True,
+        )
         if document is None or document.status == DocumentStatus.DELETED.value:
             return None
         document.status = DocumentStatus.DELETED.value

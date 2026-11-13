@@ -53,7 +53,7 @@ def test_discovers_a_high_contrast_black_rectangle() -> None:
     assert black_masks[0].rect.height == 0.08
 
 
-def test_discovers_a_white_covered_span_between_words_on_one_line() -> None:
+def test_plain_white_gap_on_one_line_is_never_confirmed_as_a_redaction() -> None:
     image = np.full((1000, 1000, 3), 255, dtype=np.uint8)
     words = [
         word("before", x=0.1, y=0.2, width=0.08, line_id=1),
@@ -66,11 +66,12 @@ def test_discovers_a_white_covered_span_between_words_on_one_line() -> None:
 
     white_masks = [candidate for candidate in result.masks if candidate.kind == "white"]
     assert len(white_masks) == 1
+    assert white_masks[0].confirmed is False
     assert white_masks[0].rect.x >= 0.18
     assert white_masks[0].rect.x + white_masks[0].rect.width <= 0.65
 
 
-def test_discovers_a_white_span_across_aligned_pdf_text_blocks() -> None:
+def test_plain_white_gap_across_text_blocks_is_never_confirmed_as_a_redaction() -> None:
     image = np.full((1000, 1000, 3), 255, dtype=np.uint8)
     words = [
         word("white", x=0.1, y=0.4, width=0.06, block_id=1, line_id=1),
@@ -86,6 +87,7 @@ def test_discovers_a_white_span_across_aligned_pdf_text_blocks() -> None:
 
     white_masks = [candidate for candidate in result.masks if candidate.kind == "white"]
     assert len(white_masks) == 1
+    assert white_masks[0].confirmed is False
     assert white_masks[0].rect.x == 0.25
     assert white_masks[0].rect.x + white_masks[0].rect.width == 0.42
 
@@ -104,6 +106,7 @@ def test_white_pixels_over_an_embedded_word_are_treated_as_a_mask() -> None:
 
     assert any(
         candidate.kind == "white"
+        and candidate.confirmed
         and candidate.rect.x <= 0.3
         and candidate.rect.x + candidate.rect.width >= 0.4
         for candidate in result.masks

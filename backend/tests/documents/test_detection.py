@@ -172,7 +172,7 @@ def test_detect_passages_discovers_each_page_before_rendering_the_next() -> None
     assert events == ["render:1", "discover:1", "render:2", "discover:2"]
 
 
-def test_real_embedded_fixture_detects_each_black_and_white_passage_once() -> None:
+def test_real_embedded_fixture_does_not_promote_plain_whitespace_to_a_passage() -> None:
     fixture = Path(__file__).parents[1] / "fixtures" / "pdfs" / "visible-layout.pdf"
 
     result = detect_passages(fixture)
@@ -184,9 +184,7 @@ def test_real_embedded_fixture_detects_each_black_and_white_passage_once() -> No
         for passage in result.passages
     ] == [
         (1, ["black"]),
-        (1, ["white"]),
         (2, ["black"]),
-        (2, ["white"]),
     ]
 
 

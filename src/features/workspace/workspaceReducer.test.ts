@@ -85,4 +85,32 @@ describe('workspaceReducer', () => {
     expect(state.passages.map((passage) => passage.id)).toEqual(['durable-1'])
     expect(state.pinnedId).toBe('durable-1')
   })
+
+  it('distinguishes adding a missed passage from correcting the selected passage', () => {
+    const detected = workspaceReducer(initialWorkspaceState, {
+      type: 'set-passages',
+      passages: [
+        { id: 'passage-1', label: 'Passage 1', page: 1, rects: [] },
+        { id: 'passage-2', label: 'Passage 2', page: 2, rects: [] },
+      ],
+    })
+
+    const adding = workspaceReducer(detected, {
+      type: 'start-marking',
+      passageId: null,
+    })
+    const correcting = workspaceReducer(detected, {
+      type: 'start-marking',
+      passageId: 'passage-2',
+    })
+
+    expect(adding).toMatchObject({
+      markingEnabled: true,
+      markingPassageId: null,
+    })
+    expect(correcting).toMatchObject({
+      markingEnabled: true,
+      markingPassageId: 'passage-2',
+    })
+  })
 })

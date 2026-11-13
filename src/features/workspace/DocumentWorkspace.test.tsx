@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { StrictMode } from 'react'
 import { SAMPLE_DOCUMENT } from '../../data/sampleDocument'
 import type {
   AnalysisJobRecord,
@@ -177,13 +178,15 @@ describe('DocumentWorkspace', () => {
     const detectDocumentPassages = vi.fn().mockResolvedValue(detectedPassages)
     const api = apiWithCreate(undefined, { detectDocumentPassages })
     const { container } = render(
-      <DocumentWorkspace
-        document={uploadedDocument}
-        backendDocument={readyBackendDocument}
-        backendApi={api}
-        onReplace={vi.fn()}
-        onViewSample={vi.fn()}
-      />,
+      <StrictMode>
+        <DocumentWorkspace
+          document={uploadedDocument}
+          backendDocument={readyBackendDocument}
+          backendApi={api}
+          onReplace={vi.fn()}
+          onViewSample={vi.fn()}
+        />
+      </StrictMode>,
     )
 
     expect(await screen.findByRole('heading', {
@@ -193,9 +196,81 @@ describe('DocumentWorkspace', () => {
       uploadedDocument.backendDocumentId,
       expect.any(AbortSignal),
     )
+    expect(detectDocumentPassages).toHaveBeenCalledOnce()
     expect(container.querySelectorAll('[data-passage-id]')).toHaveLength(2)
     expect(screen.getByText(/all 2 pages were scanned automatically/i)).toBeInTheDocument()
     expect(screen.queryByText('Predicted hidden passage')).not.toBeInTheDocument()
+  })
+
+  it('adds a missed passage without replacing an automatic detection', async () => {
+    vi.useRealTimers()
+    const addedPassage: BackendPassageRecord = {
+      ...savedPassage,
+      id: '55555555-5555-4555-8555-555555555555',
+      label: 'Passage 3',
+    }
+    const createPassage = vi.fn().mockResolvedValue(addedPassage)
+    const updatePassage = vi.fn()
+    const api = apiWithCreate(createPassage, {
+      detectDocumentPassages: vi.fn().mockResolvedValue({
+        ...detectedPassages,
+        passages: [detectedSecondPassage],
+      }),
+      updatePassage,
+    })
+    render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={api}
+        onReplace={vi.fn()}
+        onViewSample={vi.fn()}
+      />,
+    )
+    await screen.findByRole('heading', { name: '1 passage detected' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add missed passage' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Complete marked rectangle' }))
+
+    await waitFor(() => expect(createPassage).toHaveBeenCalledWith(
+      uploadedDocument.backendDocumentId,
+      expect.objectContaining({ label: 'Passage 3' }),
+      expect.objectContaining({ idempotencyKey: expect.any(String) }),
+    ))
+    expect(updatePassage).not.toHaveBeenCalled()
+  })
+
+  it('corrects the selected automatic passage without dropping the others', async () => {
+    vi.useRealTimers()
+    const updatePassage = vi.fn().mockResolvedValue({
+      ...savedPassage,
+      source: 'manual',
+      revision: 2,
+    })
+    const api = apiWithCreate(undefined, {
+      detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
+      updatePassage,
+    })
+    const { container } = render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={api}
+        onReplace={vi.fn()}
+        onViewSample={vi.fn()}
+      />,
+    )
+    await screen.findByRole('heading', { name: '2 passages detected' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Correct selected area' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Complete marked rectangle' }))
+
+    await waitFor(() => expect(updatePassage).toHaveBeenCalledWith(
+      savedPassage.id,
+      expect.objectContaining({ page: 1 }),
+      expect.any(Object),
+    ))
+    expect(container.querySelectorAll('[data-passage-id]')).toHaveLength(2)
   })
 
   it('persists one drawn rectangle without inventing prediction text', async () => {

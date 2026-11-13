@@ -6,6 +6,7 @@ export interface WorkspaceState {
   pinnedId: string | null
   activeView: 'document' | 'predictions'
   markingEnabled: boolean
+  markingPassageId: string | null
   passages: Passage[]
 }
 
@@ -15,6 +16,7 @@ export const initialWorkspaceState: WorkspaceState = {
   pinnedId: null,
   activeView: 'document',
   markingEnabled: false,
+  markingPassageId: null,
   passages: [],
 }
 
@@ -25,7 +27,7 @@ type WorkspaceAction =
   | { type: 'pin'; passageId: string | null }
   | { type: 'dismiss' }
   | { type: 'set-view'; view: WorkspaceState['activeView'] }
-  | { type: 'start-marking' }
+  | { type: 'start-marking'; passageId: string | null }
   | { type: 'set-passages'; passages: Passage[] }
   | { type: 'upsert-passage'; passage: Passage }
   | { type: 'replace-passage'; previousId: string; passage: Passage }
@@ -46,12 +48,19 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
     case 'set-view':
       return { ...state, activeView: action.view }
     case 'start-marking':
-      return { ...state, activeView: 'document', markingEnabled: true, hoveredId: null }
+      return {
+        ...state,
+        activeView: 'document',
+        markingEnabled: true,
+        markingPassageId: action.passageId,
+        hoveredId: null,
+      }
     case 'set-passages':
       return {
         ...state,
         passages: action.passages,
         markingEnabled: false,
+        markingPassageId: null,
         pinnedId: action.passages.some((passage) => passage.id === state.pinnedId)
           ? state.pinnedId
           : action.passages[0]?.id ?? null,
@@ -66,6 +75,7 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
             ))
           : [...state.passages, action.passage],
         markingEnabled: false,
+        markingPassageId: null,
         pinnedId: action.passage.id,
       }
     case 'replace-passage':
@@ -76,6 +86,7 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
           passage.id === action.previousId ? action.passage : passage
         )),
         markingEnabled: false,
+        markingPassageId: null,
         pinnedId: action.passage.id,
       }
     case 'select-passage':

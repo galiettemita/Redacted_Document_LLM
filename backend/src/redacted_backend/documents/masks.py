@@ -202,8 +202,8 @@ def _append_white_gaps(
                     height=bottom - y,
                 ),
                 kind="white",
-                confidence=0.8,
-                confirmed=True,
+                confidence=0.35,
+                confirmed=False,
             )
         )
 
