@@ -64,6 +64,17 @@ class ScientificConfig(BaseModel):
     mask_detection_version: str = "mask-discovery-v1"
     length_cue_version: str = "visible-geometry-v1"
     embedding_model: str = "BAAI/bge-base-en-v1.5"
+    embedding_model_revision: str = "a5beb1e3e68b9ab74eb54cfd186867f64f240e1a"
+    embedding_query_instruction: str = (
+        "Represent this sentence for searching relevant passages: "
+    )
+    embedding_dimension: int = 768
+    dense_index_version: str = "faiss-hnsw-flat-v1"
+    dense_hnsw_m: int = 32
+    dense_ef_construction: int = 200
+    dense_ef_search: int = 512
+    dense_candidate_count: int = 2_000
+    dense_recall_minimum: float = 0.98
     model: Literal["gpt-6-astra"] = "gpt-6-astra"
     reasoning_effort: Literal["medium"] = "medium"
 

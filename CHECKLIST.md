@@ -71,3 +71,10 @@
       - [x] Verify the migration, container OCR, real PDF upload/passage/context API flow, cleanup, frontend tests, TypeScript, and production build with no retrieval or model call.
       - [ ] Repeat the real click-through with browser automation when its connector is available; the connector was unavailable for this increment, so no visual run is claimed.
     - [ ] Complete the real exclusion maps, build the locked corpus/index, and record one visible-only context query.
+  - [ ] Task 8: Add pinned BGE embeddings and exact-rescored dense retrieval.
+    - [x] Pin the immutable BGE revision, query instruction, 768 dimensions, and normalized document/query encoding.
+    - [x] Implement float16 exact re-scoring over FAISS HNSW candidates with stable rank ties and provenance.
+    - [x] Build atomic, checksummed dense artifacts and require measured `recall@300 >= 0.98`.
+    - [x] Require matching corpus, BM25, and dense manifests before corpus readiness can pass.
+    - [x] Verify a real local BGE encode and FAISS save/load/search smoke test without a paid call.
+    - [ ] Build the full-corpus dense artifact and real visible-query recall sample after the official complete source is available.

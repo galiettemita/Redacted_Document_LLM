@@ -45,6 +45,7 @@ services:
       REDACTED_REDIS_URL: redis://redis:6379/0
       REDACTED_CORPUS_MANIFEST_PATH: /artifacts/corpus/manifest.json
       REDACTED_BM25_MANIFEST_PATH: /artifacts/corpus/bm25-manifest.json
+      REDACTED_DENSE_MANIFEST_PATH: /artifacts/corpus/dense-manifest.json
       REDACTED_OPENSEARCH_URL: http://opensearch:9200
     healthcheck:
       test:

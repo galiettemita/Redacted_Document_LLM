@@ -38,6 +38,39 @@ class Bm25IndexManifest(BaseModel):
         return hashlib.sha256(canonical).hexdigest()
 
 
+class DenseIndexManifest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal["dense-index-manifest-v1"] = "dense-index-manifest-v1"
+    model_name: str
+    model_revision: str = Field(pattern=r"^[0-9a-f]{40}$")
+    embedding_dimension: int = Field(ge=1)
+    corpus_manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    scientific_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    chunks_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    embeddings_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    metadata_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    candidate_index_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    chunk_count: int = Field(ge=0)
+    dtype: Literal["float16"]
+    metric: Literal["inner_product"]
+    candidate_index: Literal["faiss-hnsw-flat-v1"]
+    hnsw_m: int = Field(ge=1)
+    ef_construction: int = Field(ge=1)
+    ef_search: int = Field(ge=1)
+    candidate_count: int = Field(ge=300)
+    recall_at_300: float = Field(ge=0, le=1)
+    recall_sample_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    def manifest_hash(self) -> str:
+        canonical = json.dumps(
+            self.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(canonical).hexdigest()
+
+
 class RankedChunk(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 

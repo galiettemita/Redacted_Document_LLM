@@ -348,9 +348,11 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - [x] **Step 2: Run focused tests and confirm the persistence/API contract is missing.**
 - [x] **Step 3: Implement deterministic query preparation, revision-bound persistence, migration `0005_context_queries.py`, and safe summary fields; update Task 11 to `0006_analysis_jobs.py`.**
 - [x] **Step 4: Write failing frontend tests for the query-ready summary and absence of search-result or PDF-overlay text, then implement the existing-design sidebar copy.**
-- [ ] **Step 5: Run full backend/frontend/migration/container/browser verification with the real generated PDF; confirm zero retrieval/model calls, update docs/checklist, commit with `feat: persist visible context queries`, and push.**
+- [ ] **Step 5: Run full backend/frontend/migration/container/browser verification with the real generated PDF; confirm zero retrieval/model calls, update docs/checklist, commit with `feat: persist visible context queries`, and push.** Browser automation remains unavailable; all non-browser checks passed and were committed/pushed.
 
 ### Task 8: Pinned BGE embeddings and exact-rescored dense retrieval
+
+**Execution grouping (November 12, 2026):** At the user's request for larger increments, Tasks 8 through 11 are delivered as one prediction-ready milestone, with focused commits and test gates retained inside it. The milestone is not called a working prediction until the complete corpus/index passes readiness and the user separately approves model access and a paid one-passage call. The retired History Lab API and the unavailable replacement corpus backend remain explicit external gates; no incomplete export or hosted search result may be substituted.
 
 **Files:**
 - Create: `backend/src/redacted_backend/retrieval/dense.py`
@@ -363,9 +365,9 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - Produces: `DenseIndex.search(query, candidates=2000, limit=300) -> list[RankedChunk]` using HNSW candidate generation and float16 exact re-score.
 - Produces: `measure_recall_at_300(queries, approximate, exact) -> float` with required result `>=0.98`.
 
-- [ ] **Step 1: Write failing tests for query/document encoding distinction, normalization, stable rank tie-breaks, exact re-scoring, incompatible model revision, and `recall@300 < 0.98` readiness failure.**
-- [ ] **Step 2: Run focused tests; expect missing dense interfaces.**
-- [ ] **Step 3: Implement the pinned BGE encoder, memory-mapped float16 matrix, FAISS HNSW (`M=32`, `efConstruction=200`, `efSearch=512`), candidate map, and exact inner-product re-score.**
+- [x] **Step 1: Write failing tests for query/document encoding distinction, normalization, stable rank tie-breaks, exact re-scoring, incompatible model revision, and `recall@300 < 0.98` readiness failure.**
+- [x] **Step 2: Run focused tests; expect missing dense interfaces.**
+- [x] **Step 3: Implement the pinned BGE encoder, memory-mapped float16 matrix, FAISS HNSW (`M=32`, `efConstruction=200`, `efSearch=512`), candidate map, and exact inner-product re-score.**
 - [ ] **Step 4: Build real dense artifacts on the approved machine/volume and record revision, checksums, dimensions, timings, and recall sample.**
 - [ ] **Step 5: Run focused tests and the quality gate; expect PASS with recall at least 0.98.**
 - [ ] **Step 6: Update the checklist, commit with `feat: add BGE dense retrieval`, and push.**

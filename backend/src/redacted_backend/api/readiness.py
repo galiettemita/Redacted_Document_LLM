@@ -8,7 +8,7 @@ from redacted_backend.domain.readiness import (
     ReadinessResponse,
     verify_corpus_readiness,
 )
-from redacted_backend.retrieval.types import Bm25IndexManifest
+from redacted_backend.retrieval.types import Bm25IndexManifest, DenseIndexManifest
 from redacted_backend.scientific_config import ScientificConfig
 
 
@@ -56,11 +56,16 @@ def create_readiness_router(settings: Settings) -> APIRouter:
 
 
 def _corpus_readiness(settings: Settings) -> ComponentReadiness:
-    if settings.corpus_manifest_path is None or settings.bm25_manifest_path is None:
+    if (
+        settings.corpus_manifest_path is None
+        or settings.bm25_manifest_path is None
+        or settings.dense_manifest_path is None
+    ):
         return ComponentReadiness(ready=False, detail="not configured")
     if (
         not settings.corpus_manifest_path.is_file()
         or not settings.bm25_manifest_path.is_file()
+        or not settings.dense_manifest_path.is_file()
     ):
         return ComponentReadiness(ready=False, detail="manifest not verified")
     try:
@@ -70,6 +75,9 @@ def _corpus_readiness(settings: Settings) -> ComponentReadiness:
         index = Bm25IndexManifest.model_validate_json(
             settings.bm25_manifest_path.read_text(encoding="utf-8")
         )
+        dense = DenseIndexManifest.model_validate_json(
+            settings.dense_manifest_path.read_text(encoding="utf-8")
+        )
     except (OSError, ValidationError, ValueError):
         return ComponentReadiness(ready=False, detail="manifest invalid")
-    return verify_corpus_readiness(corpus, index, ScientificConfig())
+    return verify_corpus_readiness(corpus, index, dense, ScientificConfig())

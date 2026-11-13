@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from redacted_backend.corpus.build_bm25 import build_bm25_from_files
+from redacted_backend.corpus.build_dense import build_dense_from_files
 from redacted_backend.corpus.exclusions import load_exclusion_manifest
 from redacted_backend.corpus.frus_metadata import (
     FrusPublicationManifest,
@@ -99,6 +100,22 @@ def run(argv: Sequence[str] | None = None) -> int:
         )
         print(json.dumps(report.model_dump(mode="json"), sort_keys=True, indent=2))
         return 0
+    if args.command == "build-dense":
+        recall_queries = [
+            line.strip()
+            for line in Path(args.recall_queries).read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        report = build_dense_from_files(
+            Path(args.chunks),
+            Path(args.corpus_manifest),
+            Path(args.output_directory),
+            Path(args.output_manifest),
+            recall_queries=recall_queries,
+            batch_size=args.batch_size,
+        )
+        print(json.dumps(report.model_dump(mode="json"), sort_keys=True, indent=2))
+        return 0
     parser.error("A corpus command is required")
     return 2
 
@@ -154,6 +171,14 @@ def _parser() -> argparse.ArgumentParser:
     bm25.add_argument("--corpus-manifest", required=True)
     bm25.add_argument("--output-manifest", required=True)
     bm25.add_argument("--opensearch-url", default="http://127.0.0.1:59200")
+
+    dense = subparsers.add_parser("build-dense")
+    dense.add_argument("--chunks", required=True)
+    dense.add_argument("--corpus-manifest", required=True)
+    dense.add_argument("--recall-queries", required=True)
+    dense.add_argument("--output-directory", required=True)
+    dense.add_argument("--output-manifest", required=True)
+    dense.add_argument("--batch-size", type=int, default=64)
     return parser
 
 

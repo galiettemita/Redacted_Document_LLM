@@ -108,7 +108,18 @@ uv run corpus build-bm25 \
   --output-manifest /absolute/path/to/corpus/bm25-manifest.json
 ```
 
-The index uses the standard Unicode tokenizer, a versioned lowercase stop-word list, no stemming, and frozen BM25 parameters `k1=1.2` and `b=0.75`. Search is capped at the paper's exact top 300 and records the query, corpus, and index provenance. Do not treat the service as corpus-ready unless `/v1/readiness` verifies matching corpus and BM25 manifests.
+Create a newline-delimited recall sample from real visible-only queries, then build the pinned dense index:
+
+```bash
+uv run corpus build-dense \
+  --chunks /absolute/path/to/corpus/chunks.jsonl \
+  --corpus-manifest /absolute/path/to/corpus/manifest.json \
+  --recall-queries /absolute/path/to/corpus/visible-recall-queries.txt \
+  --output-directory /absolute/path/to/corpus/dense \
+  --output-manifest /absolute/path/to/corpus/dense-manifest.json
+```
+
+The sparse index uses the standard Unicode tokenizer, a versioned lowercase stop-word list, no stemming, and frozen BM25 parameters `k1=1.2` and `b=0.75`. The dense index uses the immutable `BAAI/bge-base-en-v1.5` revision recorded in the scientific manifest, normalized 768-dimensional embeddings, float16 exact re-scoring, and FAISS HNSW candidates with `M=32`, `efConstruction=200`, and `efSearch=512`. Both searches are capped at the paper's exact top 300 and record query, corpus, and index provenance. Dense build and readiness fail unless measured `recall@300` is at least `0.98`. Do not treat the service as corpus-ready unless `/v1/readiness` verifies matching corpus, BM25, and dense manifests.
 
 ## Run locally
 
@@ -133,7 +144,7 @@ To create a production bundle, run `npm run build`. The output is written to `di
 
 - Visible-only context preparation is an explicit per-passage action. Because the paper requires a date but does not prescribe a parser, `visible-date-v1` accepts only one agreeing ISO or English month-name date that occupies a complete line in the top 20% of page one. OCR date words must each have at least 0.75 confidence. It fails closed when that date is missing, ambiguous, low-confidence, inside any automatic or manually marked redaction, mask coverage is uncertain, OCR is unavailable, or nearby visible geometry cannot support a length cue. Browser-supplied dates, PDF metadata alone, corpus results, models, and hidden passages cannot supply the date.
 - The context query is persisted but not sent to a search service. Corpus retrieval and a real LLM are not connected to uploaded passages, so uploaded documents receive no evidence or prediction text.
-- The deterministic corpus and BM25 tooling and the CIA/FRUS exclusion provenance are implemented, but the full History Lab API capture and real index cannot be completed while `https://api.foiarchive.org/corpora` is unavailable (HTTP 502 on November 12, 2026). The incomplete Hugging Face export is not silently substituted.
+- The deterministic corpus, BM25, and pinned BGE/FAISS tooling and the CIA/FRUS exclusion provenance are implemented, but the full History Lab capture and real indexes cannot be completed while the retired API and the replacement public MCP corpus backend return HTTP 502 (verified November 12, 2026). The incomplete Hugging Face export is not silently substituted.
 - Stored documents expire after 24 hours by configuration; replacement requests immediate deletion. Automated retention cleanup is a later hardening task.
 - The bundled Northstar memorandum and all of its passage predictions are fictional.
 - `Demo LLM` is used only by the fictional sample and is not an active model.

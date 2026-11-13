@@ -61,6 +61,17 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters() -> No
         "mask_detection_version": "mask-discovery-v1",
         "length_cue_version": "visible-geometry-v1",
         "embedding_model": "BAAI/bge-base-en-v1.5",
+        "embedding_model_revision": "a5beb1e3e68b9ab74eb54cfd186867f64f240e1a",
+        "embedding_query_instruction": (
+            "Represent this sentence for searching relevant passages: "
+        ),
+        "embedding_dimension": 768,
+        "dense_index_version": "faiss-hnsw-flat-v1",
+        "dense_hnsw_m": 32,
+        "dense_ef_construction": 200,
+        "dense_ef_search": 512,
+        "dense_candidate_count": 2000,
+        "dense_recall_minimum": 0.98,
         "model": "gpt-6-astra",
         "reasoning_effort": "medium",
     }
