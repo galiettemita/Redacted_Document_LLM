@@ -2,12 +2,17 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from redacted_backend.db.models import VisibleExampleArtifact
 from redacted_backend.documents.preparation import PreparedVisibleContext
 from redacted_backend.domain.visible_examples import VisibleExample
+from redacted_backend.retrieval.context_query import (
+    ContextQueryError,
+    validate_context_query_example,
+)
 from redacted_backend.retrieval.types import PreparedContextQuery
 
 
@@ -99,4 +104,18 @@ class VisibleExampleRepository:
 
 
 def artifact_example(artifact: VisibleExampleArtifact) -> VisibleExample:
-    return VisibleExample.model_validate(artifact.payload)
+    try:
+        example = VisibleExample.model_validate(artifact.payload)
+        validate_context_query_example(example)
+    except (ContextQueryError, ValidationError) as error:
+        raise ContextQueryArtifactConflictError(
+            "stored visible example is not a valid context-query source"
+        ) from error
+    if (
+        str(example.passage_id) != artifact.passage_id
+        or str(example.document_id) != artifact.document_id
+    ):
+        raise ContextQueryArtifactConflictError(
+            "stored visible example identity does not match its artifact"
+        )
+    return example

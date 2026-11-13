@@ -9,6 +9,7 @@ from redacted_backend.retrieval.types import PreparedContextQuery
 from redacted_backend.scientific_config import ScientificConfig
 
 _TOKEN = re.compile(r"[^\W_]+(?:['’][^\W_]+)*", flags=re.UNICODE)
+_TARGET_MARKER = re.compile(r"\[\[TARGET\]\]", flags=re.IGNORECASE)
 _STRUCTURAL_MARKER = re.compile(r"\[\[TARGET\]\]|\[REDACTED\]", flags=re.IGNORECASE)
 
 
@@ -34,6 +35,7 @@ def prepare_context_query(
     example: VisibleExample,
     scientific: ScientificConfig | None = None,
 ) -> PreparedContextQuery:
+    validate_context_query_example(example)
     config = scientific or ScientificConfig()
     text = build_context_query(example.context_window, config)
     return PreparedContextQuery(
@@ -42,3 +44,8 @@ def prepare_context_query(
         term_count=len(text.split()),
         stopwords_version=config.context_stopwords_version,
     )
+
+
+def validate_context_query_example(example: VisibleExample) -> None:
+    if len(_TARGET_MARKER.findall(example.context_window)) != 1:
+        raise ContextQueryError("Context window must contain exactly one target marker")

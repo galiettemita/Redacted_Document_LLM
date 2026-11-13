@@ -4,7 +4,9 @@ import asyncio
 import json
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from uuid import uuid4
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
@@ -275,6 +277,100 @@ def test_prepare_refuses_incomplete_query_metadata_instead_of_overwriting_it(
         assert artifact.context_query_sha256 is None
 
 
+def test_prepare_refuses_fully_populated_query_metadata_that_does_not_match(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app, _document, passage = create_test_app_and_passage(tmp_path)
+    calls: list[int] = []
+    install_fake_preparation(monkeypatch, calls=calls)
+    path = f"/v1/passages/{passage.id}:prepare-context"
+    assert asyncio.run(request(app, "POST", path)).status_code == 200
+
+    with app.state.database.session_factory() as session, session.begin():
+        artifact = session.scalar(select(VisibleExampleArtifact))
+        assert artifact is not None
+        artifact.context_query_sha256 = "0" * 64
+
+    response = asyncio.run(request(app, "POST", path))
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "context_query_conflict"
+    assert calls == [1]
+    with app.state.database.session_factory() as session:
+        artifact = session.scalar(select(VisibleExampleArtifact))
+        assert artifact is not None
+        assert artifact.context_query_sha256 == "0" * 64
+
+
+@pytest.mark.parametrize("identity_field", ("passage_id", "document_id"))
+def test_prepare_refuses_legacy_payload_bound_to_a_different_identity(
+    tmp_path: Path,
+    monkeypatch,
+    identity_field: str,
+) -> None:
+    app, _document, passage = create_test_app_and_passage(tmp_path)
+    calls: list[int] = []
+    install_fake_preparation(monkeypatch, calls=calls)
+    path = f"/v1/passages/{passage.id}:prepare-context"
+    assert asyncio.run(request(app, "POST", path)).status_code == 200
+
+    with app.state.database.session_factory() as session, session.begin():
+        artifact = session.scalar(select(VisibleExampleArtifact))
+        assert artifact is not None
+        payload = dict(artifact.payload)
+        payload[identity_field] = str(uuid4())
+        artifact.payload = payload
+        _clear_query_metadata(artifact)
+
+    response = asyncio.run(request(app, "POST", path))
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "context_query_conflict"
+    assert calls == [1]
+    with app.state.database.session_factory() as session:
+        artifact = session.scalar(select(VisibleExampleArtifact))
+        assert artifact is not None
+        assert artifact.context_query is None
+
+
+@pytest.mark.parametrize(
+    "context_window",
+    (
+        "visible before visible after",
+        "visible [[TARGET]] middle [[TARGET]] after",
+    ),
+)
+def test_prepare_refuses_legacy_payload_without_exactly_one_target_marker(
+    tmp_path: Path,
+    monkeypatch,
+    context_window: str,
+) -> None:
+    app, _document, passage = create_test_app_and_passage(tmp_path)
+    calls: list[int] = []
+    install_fake_preparation(monkeypatch, calls=calls)
+    path = f"/v1/passages/{passage.id}:prepare-context"
+    assert asyncio.run(request(app, "POST", path)).status_code == 200
+
+    with app.state.database.session_factory() as session, session.begin():
+        artifact = session.scalar(select(VisibleExampleArtifact))
+        assert artifact is not None
+        payload = dict(artifact.payload)
+        payload["context_window"] = context_window
+        artifact.payload = payload
+        _clear_query_metadata(artifact)
+
+    response = asyncio.run(request(app, "POST", path))
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "context_query_conflict"
+    assert calls == [1]
+    with app.state.database.session_factory() as session:
+        artifact = session.scalar(select(VisibleExampleArtifact))
+        assert artifact is not None
+        assert artifact.context_query is None
+
+
 def test_browser_summary_omits_transcript_prediction_and_hidden_fields(
     tmp_path: Path,
     monkeypatch,
@@ -413,3 +509,11 @@ def test_deleted_passage_cannot_prepare_context(tmp_path: Path, monkeypatch) -> 
     assert deleted.status_code == 200
     assert response.status_code == 404
     assert calls == []
+
+
+def _clear_query_metadata(artifact: VisibleExampleArtifact) -> None:
+    artifact.context_query = None
+    artifact.context_query_sha256 = None
+    artifact.context_query_term_count = None
+    artifact.context_query_version = None
+    artifact.context_stopwords_version = None
