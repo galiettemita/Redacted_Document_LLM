@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import numpy as np
-
 from redacted_backend.documents.layout import serialize_visible_document
 from redacted_backend.documents.masks import discover_candidate_masks
+
 from tests.documents.factories import discovery, mask, page, word
 
 
@@ -51,6 +51,36 @@ def test_discovers_a_high_contrast_black_rectangle() -> None:
     assert black_masks[0].rect.y == 0.18
     assert black_masks[0].rect.width == 0.3
     assert black_masks[0].rect.height == 0.08
+
+
+def test_preserves_the_visible_gaps_inside_connected_multi_line_redactions() -> None:
+    image = np.full((1000, 1000, 3), 255, dtype=np.uint8)
+    image[180:220, 600:900] = 0
+    image[220:260, 120:900] = 0
+    image[260:300, 120:400] = 0
+    image[260:300, 520:820] = 0
+
+    result = discover_candidate_masks(
+        image,
+        [
+            word("visible", x=0.12, y=0.18),
+            word("between", x=0.4, y=0.26),
+            word("redactions", x=0.82, y=0.26),
+        ],
+        page_number=1,
+    )
+
+    black_rects = [
+        candidate.rect.model_dump()
+        for candidate in result.masks
+        if candidate.kind == "black"
+    ]
+    assert black_rects == [
+        {"x": 0.6, "y": 0.18, "width": 0.3, "height": 0.04},
+        {"x": 0.12, "y": 0.22, "width": 0.78, "height": 0.04},
+        {"x": 0.12, "y": 0.26, "width": 0.28, "height": 0.04},
+        {"x": 0.52, "y": 0.26, "width": 0.3, "height": 0.04},
+    ]
 
 
 def test_plain_white_gap_on_one_line_is_never_confirmed_as_a_redaction() -> None:

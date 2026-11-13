@@ -33,9 +33,24 @@ def discover_candidate_masks(
         cv2.RETR_EXTERNAL,
         cv2.CHAIN_APPROX_SIMPLE,
     )
-    candidates: list[MaskCandidate] = []
+    black_rectangles: list[tuple[int, int, int, int]] = []
     for x, y, candidate_width, candidate_height in sorted(
         (cv2.boundingRect(contour) for contour in contours),
+        key=lambda rect: (rect[1], rect[0]),
+    ):
+        black_rectangles.extend(
+            _decompose_connected_black_shape(
+                black_binary,
+                x=x,
+                y=y,
+                width=candidate_width,
+                height=candidate_height,
+            )
+        )
+
+    candidates: list[MaskCandidate] = []
+    for x, y, candidate_width, candidate_height in sorted(
+        black_rectangles,
         key=lambda rect: (rect[1], rect[0]),
     ):
         normalized_width = candidate_width / width
@@ -80,6 +95,102 @@ def discover_candidate_masks(
         coverage_confident=coverage_confident,
         warnings=warnings,
     )
+
+
+def _decompose_connected_black_shape(
+    binary: np.ndarray,
+    *,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+) -> list[tuple[int, int, int, int]]:
+    page_width = binary.shape[1]
+    minimum_run = max(1, int(np.ceil(page_width * 0.02)))
+    maximum_hole = max(1, round(page_width * 0.01))
+    crop = binary[y : y + height, x : x + width] > 0
+    rows = [
+        _long_black_runs(row, minimum_run=minimum_run, maximum_hole=maximum_hole)
+        for row in crop
+    ]
+
+    rectangles: list[tuple[int, int, int, int]] = []
+    band_start: int | None = None
+    band_rows: list[list[tuple[int, int]]] = []
+    previous: list[tuple[int, int]] | None = None
+
+    def finish_band(end: int) -> None:
+        nonlocal band_start, band_rows, previous
+        if band_start is None or not band_rows:
+            band_start = None
+            band_rows = []
+            previous = None
+            return
+        for index in range(len(band_rows[0])):
+            left = min(row[index][0] for row in band_rows)
+            right = max(row[index][1] for row in band_rows)
+            rectangles.append(
+                (x + left, y + band_start, right - left, end - band_start)
+            )
+        band_start = None
+        band_rows = []
+        previous = None
+
+    for row_index, intervals in enumerate(rows):
+        if not intervals:
+            finish_band(row_index)
+            continue
+        if previous is not None and not _same_black_band(previous, intervals):
+            finish_band(row_index)
+        if band_start is None:
+            band_start = row_index
+        band_rows.append(intervals)
+        previous = intervals
+    finish_band(height)
+    return rectangles
+
+
+def _long_black_runs(
+    row: np.ndarray,
+    *,
+    minimum_run: int,
+    maximum_hole: int,
+) -> list[tuple[int, int]]:
+    padded = np.concatenate((np.array([False]), row, np.array([False])))
+    changes = np.flatnonzero(padded[1:] != padded[:-1])
+    runs = [
+        (int(start), int(end))
+        for start, end in zip(changes[::2], changes[1::2], strict=True)
+        if end - start >= minimum_run
+    ]
+    merged: list[tuple[int, int]] = []
+    for start, end in runs:
+        if merged and start - merged[-1][1] <= maximum_hole:
+            merged[-1] = (merged[-1][0], end)
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _same_black_band(
+    first: list[tuple[int, int]],
+    second: list[tuple[int, int]],
+) -> bool:
+    if len(first) != len(second):
+        return False
+    for (first_start, first_end), (second_start, second_end) in zip(
+        first,
+        second,
+        strict=True,
+    ):
+        intersection = max(
+            0,
+            min(first_end, second_end) - max(first_start, second_start),
+        )
+        union = max(first_end, second_end) - min(first_start, second_start)
+        if union <= 0 or intersection / union < 0.6:
+            return False
+    return True
 
 
 def _covered_embedded_word_candidates(

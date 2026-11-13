@@ -109,3 +109,7 @@
     - [ ] Connect the worker to the four-list retrieval service and persist its immutable trace transactionally.
     - [ ] Connect the SSE prediction event to the existing passage-linked sidebar cards and hover ordering.
     - [ ] After complete corpus evidence exists, show exact token cost and obtain explicit approval before the first paid model call.
+  - [x] Task 12A: Correct automatic multi-line mask geometry and passage-length estimation.
+    - [x] Split connected stepped black regions into exact line-level rectangles so visible words remain visible.
+    - [x] Estimate wrapped-passage length from visible line pitch instead of treating a tall block as one oversized text line.
+    - [x] Reproduce the original failure and verify all three real redaction groups in the uploaded DOJ PDF without a retrieval or model call.

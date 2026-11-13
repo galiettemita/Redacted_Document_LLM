@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import pytest
-
 from redacted_backend.documents.length_cue import (
     LengthCueError,
     estimate_length_cue,
 )
 from redacted_backend.domain.passages import PassageRect
+
 from tests.documents.factories import word
 
 NEARBY_WORDS = [
@@ -64,3 +64,24 @@ def test_refuses_to_guess_without_enough_nearby_visible_text() -> None:
         )
 
     assert error.value.code == "insufficient_visible_text_for_length"
+
+
+def test_estimates_a_multi_line_redaction_detected_as_one_tall_rectangle() -> None:
+    estimate = estimate_length_cue(
+        [PassageRect(x=0.1, y=0.2, width=0.6, height=0.06)],
+        NEARBY_WORDS,
+    )
+
+    assert estimate.estimated_words == 20
+    assert estimate.bucket == "about a sentence"
+    assert estimate.line_capacities == [60, 60]
+
+
+def test_does_not_count_a_single_black_bar_as_two_text_lines() -> None:
+    estimate = estimate_length_cue(
+        [PassageRect(x=0.1, y=0.2, width=0.6, height=0.04)],
+        NEARBY_WORDS,
+    )
+
+    assert estimate.estimated_words == 10
+    assert estimate.line_capacities == [60]
