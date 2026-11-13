@@ -120,3 +120,9 @@
     - [x] Reject stale in-flight scans after mask changes and reconcile repeated concurrent preparation requests without a server error.
     - [x] Remove temporary manual prepare/predict controls and show automatic readiness honestly in the existing sidebar.
     - [x] Verify the real DOJ PDF produces three linked contexts in one request without a retrieval or model call.
+  - [x] Task 12C: Remove false-positive passages from the production review workflow.
+    - [x] Require explicit confirmation before tombstoning the selected stable passage.
+    - [x] Keep removed automatic detections suppressed across rescans through the existing backend correction record.
+    - [x] Select the next passage in document order and rebuild only the remaining visible-only contexts.
+    - [x] Cancel stale context/removal requests and reject an unconfirmed backend tombstone.
+    - [x] Cover transport, state transition, confirmation, overlay removal, and context rebuilding with frontend tests.

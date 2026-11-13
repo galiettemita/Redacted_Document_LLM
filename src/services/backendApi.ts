@@ -159,6 +159,10 @@ export interface BackendApi {
     passage: PassageMutation,
     options?: Pick<PassageRequestOptions, 'signal'>,
   ): Promise<BackendPassageRecord>
+  deletePassage(
+    passageId: string,
+    signal?: AbortSignal,
+  ): Promise<BackendPassageRecord>
   detectDocumentPassages(
     documentId: string,
     signal?: AbortSignal,
@@ -239,6 +243,14 @@ export function createBackendApi(fetchImplementation?: typeof fetch): BackendApi
           }),
           signal: options.signal,
         },
+      )
+    },
+
+    deletePassage(passageId, signal) {
+      return requestJson<BackendPassageRecord>(
+        fetchRequest,
+        `/v1/passages/${encodeURIComponent(passageId)}`,
+        { method: 'DELETE', signal },
       )
     },
 

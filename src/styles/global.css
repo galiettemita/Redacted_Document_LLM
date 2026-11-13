@@ -425,6 +425,11 @@ input:focus-visible {
   opacity: 0.58;
 }
 
+.marking-toolbar .danger-text-button {
+  border-color: #dfc2c2;
+  color: #8b3434;
+}
+
 .workspace-grid {
   flex: 1;
   min-height: 0;
@@ -480,6 +485,57 @@ input:focus-visible {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.passage-removal-confirmation {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid #dfc2c2;
+  background: #fff7f7;
+}
+
+.passage-removal-confirmation strong {
+  color: #6f2929;
+  font-size: 0.78rem;
+}
+
+.passage-removal-confirmation p {
+  margin: 3px 0 0;
+  color: #765151;
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.passage-removal-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+}
+
+.passage-removal-actions button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.passage-removal-actions .danger-button {
+  border-color: #a83d3d;
+  background: #a83d3d;
+  color: #fff;
+}
+
+.passage-removal-actions button:disabled {
+  cursor: wait;
+  opacity: 0.58;
 }
 
 .predictions-column,

@@ -258,4 +258,24 @@ describe('BackendApi', () => {
       signal: controller.signal,
     })
   })
+
+  it('removes the exact persisted passage and returns its durable tombstone', async () => {
+    const deletedPassage = {
+      ...passageRecord,
+      status: 'deleted' as const,
+      revision: 2,
+    }
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(deletedPassage))
+    const api = createBackendApi(fetchMock)
+    const controller = new AbortController()
+
+    await expect(api.deletePassage(
+      passageRecord.id,
+      controller.signal,
+    )).resolves.toEqual(deletedPassage)
+    expect(fetchMock).toHaveBeenCalledWith(`/v1/passages/${passageRecord.id}`, {
+      method: 'DELETE',
+      signal: controller.signal,
+    })
+  })
 })

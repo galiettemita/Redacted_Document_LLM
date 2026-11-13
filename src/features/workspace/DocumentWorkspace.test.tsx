@@ -151,6 +151,11 @@ function apiWithCreate(
     deleteDocument: vi.fn(),
     createPassage,
     updatePassage: vi.fn().mockResolvedValue({ ...savedPassage, revision: 2 }),
+    deletePassage: vi.fn().mockResolvedValue({
+      ...savedPassage,
+      status: 'deleted',
+      revision: 2,
+    }),
     detectDocumentPassages: vi.fn().mockResolvedValue(emptyDetection),
     prepareVisibleContext: vi.fn().mockResolvedValue(preparedContext),
     prepareDocumentContexts: vi.fn().mockResolvedValue(preparedDocumentContexts),
@@ -318,6 +323,98 @@ describe('DocumentWorkspace', () => {
       expect.any(Object),
     ))
     expect(container.querySelectorAll('[data-passage-id]')).toHaveLength(2)
+  })
+
+  it('confirms a false-positive removal and rebuilds only the remaining contexts', async () => {
+    vi.useRealTimers()
+    const deletedPassage: BackendPassageRecord = {
+      ...savedPassage,
+      status: 'deleted',
+      revision: 2,
+    }
+    const deletePassage = vi.fn().mockResolvedValue(deletedPassage)
+    const prepareDocumentContexts = vi.fn()
+      .mockResolvedValueOnce(preparedDocumentContexts)
+      .mockResolvedValueOnce(contextsFor(detectedSecondPassage))
+    const api = apiWithCreate(undefined, {
+      detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
+      prepareDocumentContexts,
+      deletePassage,
+    })
+    const { container } = render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={api}
+        onReplace={vi.fn()}
+        onViewSample={vi.fn()}
+      />,
+    )
+    await screen.findByRole('heading', { name: '2 passages ready for retrieval' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove selected passage' }))
+    expect(screen.getByRole('alertdialog', { name: 'Remove Passage 1?' })).toBeInTheDocument()
+    expect(deletePassage).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Keep passage' })).toHaveFocus()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Keep passage' }))
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    await waitFor(() => expect(
+      screen.getByRole('button', { name: 'Remove selected passage' }),
+    ).toHaveFocus())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove selected passage' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm removal' }))
+
+    await waitFor(() => expect(deletePassage).toHaveBeenCalledWith(
+      savedPassage.id,
+      expect.any(AbortSignal),
+    ))
+    expect(await screen.findByRole('heading', {
+      name: '1 passage ready for retrieval',
+    })).toBeInTheDocument()
+    expect(container.querySelectorAll('[data-passage-id]')).toHaveLength(1)
+    expect(container.querySelector('[data-passage-id]')).toHaveAttribute(
+      'data-passage-id',
+      detectedSecondPassage.id,
+    )
+    expect(prepareDocumentContexts).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the passage and prepared context when removal is not confirmed by the backend', async () => {
+    vi.useRealTimers()
+    const deletePassage = vi.fn().mockRejectedValue(
+      new Error('The local backend could not remove this passage.'),
+    )
+    const prepareDocumentContexts = vi.fn().mockResolvedValue(preparedDocumentContexts)
+    const api = apiWithCreate(undefined, {
+      detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
+      prepareDocumentContexts,
+      deletePassage,
+    })
+    const { container } = render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={api}
+        onReplace={vi.fn()}
+        onViewSample={vi.fn()}
+      />,
+    )
+    await screen.findByRole('heading', { name: '2 passages ready for retrieval' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove selected passage' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm removal' }))
+
+    expect(await screen.findByText(
+      'The local backend could not remove this passage.',
+    )).toBeInTheDocument()
+    expect(container.querySelectorAll('[data-passage-id]')).toHaveLength(2)
+    expect(screen.getByRole('heading', { name: 'Visible-only context ready' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', {
+      name: '2 passages ready for retrieval',
+    })).toBeInTheDocument()
+    expect(prepareDocumentContexts).toHaveBeenCalledOnce()
   })
 
   it('persists one drawn rectangle without inventing prediction text', async () => {

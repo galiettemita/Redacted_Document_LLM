@@ -28,6 +28,7 @@ interface DocumentWorkspaceProps {
 type PassageSaveStatus = 'idle' | 'saving' | 'saved' | 'failed'
 type PassageDetectionStatus = 'idle' | 'detecting' | 'ready' | 'failed'
 type ContextPreparationStatus = 'idle' | 'preparing' | 'ready' | 'failed'
+type PassageRemovalStatus = 'idle' | 'confirming' | 'deleting'
 
 interface DetectionTask {
   documentId: string
@@ -50,10 +51,14 @@ export function DocumentWorkspace({
   const [contextStatus, setContextStatus] = useState<ContextPreparationStatus>('idle')
   const [contextSummaries, setContextSummaries] = useState<Record<string, VisibleContextSummary>>({})
   const [contextError, setContextError] = useState<string | null>(null)
+  const [passageRemovalStatus, setPassageRemovalStatus] = useState<PassageRemovalStatus>('idle')
+  const [passageRemovalId, setPassageRemovalId] = useState<string | null>(null)
   const passageTargets = useRef(new Map<string, HTMLElement>())
+  const passageRemovalTrigger = useRef<HTMLButtonElement | null>(null)
   const detectionTask = useRef<DetectionTask | null>(null)
   const passageRequest = useRef<AbortController | null>(null)
   const contextRequest = useRef<AbortController | null>(null)
+  const passageRemovalRequest = useRef<AbortController | null>(null)
   const sampleService = useMemo(() => createMockPredictionService({
     predictionsByDocument: { [document.id]: document.mode === 'sample' ? SAMPLE_PREDICTIONS : [] },
     delayMs: 650,
@@ -70,15 +75,20 @@ export function DocumentWorkspace({
     setContextStatus('idle')
     setContextSummaries({})
     setContextError(null)
+    setPassageRemovalStatus('idle')
+    setPassageRemovalId(null)
     passageRequest.current?.abort()
     passageRequest.current = null
     contextRequest.current?.abort()
     contextRequest.current = null
+    passageRemovalRequest.current?.abort()
+    passageRemovalRequest.current = null
   }, [document.id])
 
   useEffect(() => () => {
     passageRequest.current?.abort()
     contextRequest.current?.abort()
+    passageRemovalRequest.current?.abort()
   }, [])
 
   useEffect(() => {
@@ -109,6 +119,7 @@ export function DocumentWorkspace({
   const markingUnavailable = !backendReady
     || detectionStatus === 'detecting'
     || passageSaveStatus === 'saving'
+    || passageRemovalStatus !== 'idle'
   const selectedPassage = state.passages.find((passage) => passage.id === state.pinnedId)
     ?? state.passages[0]
     ?? null
@@ -118,6 +129,9 @@ export function DocumentWorkspace({
   const contextSummary = stablePassageId
     ? contextSummaries[stablePassageId] ?? null
     : null
+  const passageRemovalTarget = state.passages.find(
+    (passage) => passage.id === passageRemovalId,
+  ) ?? null
 
   const prepareAllPassageContexts = useCallback(async (
     documentId: string,
@@ -269,6 +283,73 @@ export function DocumentWorkspace({
     }
   }
 
+  async function handleConfirmPassageRemoval() {
+    if (
+      !backendReady
+      || !document.backendDocumentId
+      || !passageRemovalTarget
+      || passageRemovalTarget.id.startsWith('pending-')
+    ) return
+    passageRemovalRequest.current?.abort()
+    contextRequest.current?.abort()
+    contextRequest.current = null
+    const controller = new AbortController()
+    passageRemovalRequest.current = controller
+    const removedPassageId = passageRemovalTarget.id
+    const remainingPassages = state.passages.filter(
+      (passage) => passage.id !== removedPassageId,
+    )
+    const contextStatusBeforeRemoval = contextStatus
+    setPassageRemovalStatus('deleting')
+    setPassageError(null)
+
+    try {
+      const deleted = await backendApi.deletePassage(
+        removedPassageId,
+        controller.signal,
+      )
+      if (deleted.id !== removedPassageId || deleted.status !== 'deleted') {
+        throw new Error('The backend did not confirm the selected passage removal.')
+      }
+      setContextStatus('idle')
+      setContextSummaries({})
+      setContextError(null)
+      dispatch({ type: 'remove-passage', passageId: removedPassageId })
+      setDetectionResult((current) => current
+        ? {
+            ...current,
+            passages: current.passages.filter(
+              (passage) => passage.id !== removedPassageId,
+            ),
+          }
+        : current)
+      setPassageRemovalId(null)
+      setPassageRemovalStatus('idle')
+      if (remainingPassages.length > 0) {
+        await prepareAllPassageContexts(
+          document.backendDocumentId,
+          remainingPassages.map((passage) => passage.id),
+        )
+      }
+    } catch (error) {
+      if (isAbortError(error)) return
+      setPassageRemovalStatus('idle')
+      setPassageRemovalId(null)
+      setPassageError(errorMessage(error, 'The selected passage could not be removed.'))
+      queueMicrotask(() => passageRemovalTrigger.current?.focus())
+      if (contextStatusBeforeRemoval === 'preparing') {
+        void prepareAllPassageContexts(
+          document.backendDocumentId,
+          state.passages.map((passage) => passage.id),
+        )
+      }
+    } finally {
+      if (passageRemovalRequest.current === controller) {
+        passageRemovalRequest.current = null
+      }
+    }
+  }
+
   function handleSelectPassage(passageId: string) {
     const passage = passages.find((item) => item.id === passageId)
     if (!passage) return
@@ -323,16 +404,31 @@ export function DocumentWorkspace({
               </p>
               <div className="marking-actions">
                 {selectedPassage ? (
-                  <button
-                    type="button"
-                    disabled={markingUnavailable}
-                    onClick={() => dispatch({
-                      type: 'start-marking',
-                      passageId: selectedPassage.id,
-                    })}
-                  >
-                    Correct selected area
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      disabled={markingUnavailable}
+                      onClick={() => dispatch({
+                        type: 'start-marking',
+                        passageId: selectedPassage.id,
+                      })}
+                    >
+                      Correct selected area
+                    </button>
+                    <button
+                      ref={passageRemovalTrigger}
+                      className="danger-text-button"
+                      type="button"
+                      disabled={markingUnavailable}
+                      onClick={() => {
+                        setPassageRemovalId(selectedPassage.id)
+                        setPassageRemovalStatus('confirming')
+                        setPassageError(null)
+                      }}
+                    >
+                      Remove selected passage
+                    </button>
+                  </>
                 ) : null}
                 <button
                   type="button"
@@ -343,6 +439,46 @@ export function DocumentWorkspace({
                 </button>
               </div>
             </div>
+          ) : null}
+          {passageRemovalTarget ? (
+            <section
+              className="passage-removal-confirmation"
+              role="alertdialog"
+              aria-labelledby="passage-removal-title"
+              aria-describedby="passage-removal-description"
+            >
+              <div>
+                <strong id="passage-removal-title">
+                  Remove {passageRemovalTarget.label}?
+                </strong>
+                <p id="passage-removal-description">
+                  Its highlight and saved context will be removed. The remaining passage
+                  contexts will be rebuilt automatically.
+                </p>
+              </div>
+              <div className="passage-removal-actions">
+                <button
+                  autoFocus
+                  type="button"
+                  disabled={passageRemovalStatus === 'deleting'}
+                  onClick={() => {
+                    setPassageRemovalId(null)
+                    setPassageRemovalStatus('idle')
+                    queueMicrotask(() => passageRemovalTrigger.current?.focus())
+                  }}
+                >
+                  Keep passage
+                </button>
+                <button
+                  className="danger-button"
+                  type="button"
+                  disabled={passageRemovalStatus === 'deleting'}
+                  onClick={() => void handleConfirmPassageRemoval()}
+                >
+                  {passageRemovalStatus === 'deleting' ? 'Removing…' : 'Confirm removal'}
+                </button>
+              </div>
+            </section>
           ) : null}
           <PdfViewer
             source={document.source}

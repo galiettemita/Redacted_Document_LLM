@@ -113,4 +113,26 @@ describe('workspaceReducer', () => {
       markingPassageId: 'passage-2',
     })
   })
+
+  it('removes one passage and selects the next passage in document order', () => {
+    const detected = workspaceReducer(initialWorkspaceState, {
+      type: 'set-passages',
+      passages: [
+        { id: 'passage-1', label: 'Passage 1', page: 1, rects: [] },
+        { id: 'passage-2', label: 'Passage 2', page: 2, rects: [] },
+        { id: 'passage-3', label: 'Passage 3', page: 3, rects: [] },
+      ],
+    })
+
+    const state = workspaceReducer(detected, {
+      type: 'remove-passage',
+      passageId: 'passage-1',
+    })
+
+    expect(state.passages.map((passage) => passage.id)).toEqual([
+      'passage-2',
+      'passage-3',
+    ])
+    expect(state).toMatchObject({ pinnedId: 'passage-2', page: 2 })
+  })
 })

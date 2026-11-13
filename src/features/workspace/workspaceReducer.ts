@@ -31,6 +31,7 @@ type WorkspaceAction =
   | { type: 'set-passages'; passages: Passage[] }
   | { type: 'upsert-passage'; passage: Passage }
   | { type: 'replace-passage'; previousId: string; passage: Passage }
+  | { type: 'remove-passage'; passageId: string }
   | { type: 'select-passage'; passageId: string; page: number }
 
 export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction): WorkspaceState {
@@ -89,6 +90,27 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
         markingPassageId: null,
         pinnedId: action.passage.id,
       }
+    case 'remove-passage': {
+      const removedIndex = state.passages.findIndex(
+        (passage) => passage.id === action.passageId,
+      )
+      if (removedIndex === -1) return state
+      const passages = state.passages.filter(
+        (passage) => passage.id !== action.passageId,
+      )
+      const replacement = state.pinnedId === action.passageId
+        ? passages[Math.min(removedIndex, passages.length - 1)] ?? null
+        : passages.find((passage) => passage.id === state.pinnedId) ?? null
+      return {
+        ...state,
+        page: replacement?.page ?? state.page,
+        passages,
+        markingEnabled: false,
+        markingPassageId: null,
+        hoveredId: state.hoveredId === action.passageId ? null : state.hoveredId,
+        pinnedId: replacement?.id ?? null,
+      }
+    }
     case 'select-passage':
       return {
         ...state,
