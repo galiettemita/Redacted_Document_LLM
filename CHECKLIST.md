@@ -113,3 +113,10 @@
     - [x] Split connected stepped black regions into exact line-level rectangles so visible words remain visible.
     - [x] Estimate wrapped-passage length from visible line pitch instead of treating a tall block as one oversized text line.
     - [x] Reproduce the original failure and verify all three real redaction groups in the uploaded DOJ PDF without a retrieval or model call.
+  - [x] Task 12B: Prepare every detected passage for retrieval automatically.
+    - [x] Extract and render the PDF once while building a separate visible-only context and search query for every passage.
+    - [x] Emit exactly one target marker for each multi-rectangle passage while masking every rectangle from visible text.
+    - [x] Invalidate sibling contexts whenever the document mask set changes, then rebuild the complete passage set.
+    - [x] Reject stale in-flight scans after mask changes and reconcile repeated concurrent preparation requests without a server error.
+    - [x] Remove temporary manual prepare/predict controls and show automatic readiness honestly in the existing sidebar.
+    - [x] Verify the real DOJ PDF produces three linked contexts in one request without a retrieval or model call.

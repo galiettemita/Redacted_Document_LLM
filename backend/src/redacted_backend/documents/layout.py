@@ -75,6 +75,7 @@ def serialize_visible_document(
     page_texts: list[str] = []
     visible_words: list[PageWord] = []
     target_count = 0
+    emitted_marker_ids: set[str] = set()
     for page in sorted(pages, key=lambda item: item.page_number):
         discovery = discoveries.get(page.page_number)
         if discovery is None:
@@ -106,6 +107,9 @@ def serialize_visible_document(
         ]
         next_marker_block = -1
         for candidate in confirmed_masks:
+            if candidate.id in emitted_marker_ids:
+                continue
+            emitted_marker_ids.add(candidate.id)
             marker = "[[TARGET]]" if candidate.id == target_id else "[REDACTED]"
             if candidate.id == target_id:
                 target_count += 1

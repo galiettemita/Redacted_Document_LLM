@@ -8,6 +8,7 @@ import numpy as np
 import pytesseract
 import pytest
 
+from redacted_backend.documents import preparation as preparation_module
 from redacted_backend.documents.preparation import (
     VisibleContextPreparationError,
     prepare_visible_context,
@@ -18,6 +19,7 @@ from tests.documents.factories import discovery, mask, page, passage, word
 
 DOCUMENT_ID = UUID("00000000-0000-0000-0000-000000000001")
 TARGET_ID = UUID("00000000-0000-0000-0000-000000000010")
+SECOND_TARGET_ID = UUID("00000000-0000-0000-0000-000000000011")
 
 
 def document_record() -> DocumentRecord:
@@ -41,6 +43,13 @@ def target_passage():
     return passage(
         str(TARGET_ID),
         rects=[PassageRect(x=0.35, y=0.2, width=0.18, height=0.025)],
+    )
+
+
+def second_target_passage():
+    return passage(
+        str(SECOND_TARGET_ID),
+        rects=[PassageRect(x=0.7, y=0.2, width=0.15, height=0.025)],
     )
 
 
@@ -94,6 +103,45 @@ def test_preparation_feeds_each_rendered_page_to_mask_discovery() -> None:
     assert result.example.document_date == date(1945, 5, 8)
     assert result.date_evidence.value == date(1945, 5, 8)
     assert result.date_evidence.line_text == "DATE: 1945-05-08"
+
+
+def test_prepares_every_passage_with_one_document_extraction_and_render() -> None:
+    prepare_visible_contexts = getattr(
+        preparation_module,
+        "prepare_visible_contexts",
+        None,
+    )
+    assert callable(prepare_visible_contexts)
+    extraction_calls = 0
+    render_calls = 0
+
+    def extract(_path):
+        nonlocal extraction_calls
+        extraction_calls += 1
+        return [visible_page()]
+
+    def render(_path):
+        nonlocal render_calls
+        render_calls += 1
+        return [np.zeros((10, 10), dtype=np.uint8)]
+
+    passages = [target_passage(), second_target_passage()]
+    prepared = prepare_visible_contexts(
+        Path("stored.pdf"),
+        document_record(),
+        passages,
+        [item.id for item in passages],
+        _extractor=extract,
+        _renderer=render,
+        _discoverer=lambda _image, _words, *, page_number: discovery(page_number),
+    )
+
+    assert extraction_calls == 1
+    assert render_calls == 1
+    assert [item.example.passage_id for item in prepared] == [
+        TARGET_ID,
+        SECOND_TARGET_ID,
+    ]
 
 
 def test_preparation_never_serializes_text_covered_by_a_confirmed_mask() -> None:

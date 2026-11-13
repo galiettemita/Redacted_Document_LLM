@@ -26,6 +26,7 @@ function apiWith(overrides: Partial<BackendApi> = {}): BackendApi {
     updatePassage: vi.fn(),
     detectDocumentPassages: vi.fn(),
     prepareVisibleContext: vi.fn(),
+    prepareDocumentContexts: vi.fn(),
     schedulePassageAnalysis: vi.fn(),
     ...overrides,
   }

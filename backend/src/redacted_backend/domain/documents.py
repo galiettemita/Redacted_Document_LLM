@@ -48,5 +48,6 @@ class DocumentRecord(BaseModel):
     visible_date: date | None = None
     date_provenance: DateProvenance | None = None
     visible_date_evidence: VisibleDateEvidence | None = None
+    mask_set_revision: int = Field(default=0, ge=0)
     created_at: datetime
     expires_at: datetime

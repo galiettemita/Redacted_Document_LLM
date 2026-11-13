@@ -53,9 +53,7 @@ class PassageRepository:
         source: PassageSource = PassageSource.MANUAL,
         split_from: UUID | str | None = None,
     ) -> PassageRecord:
-        document = self._session.get(Document, str(document_id))
-        if document is None or document.status == DocumentStatus.DELETED.value:
-            raise PassageNotFoundError("document not found")
+        document = self._lock_document_for_mask_mutation(document_id)
         self._validate_page(document, page_number)
         model = Passage(
             id=str(uuid4()),
@@ -69,6 +67,7 @@ class PassageRepository:
             split_from=str(split_from) if split_from is not None else None,
         )
         self._session.add(model)
+        document.mask_set_revision += 1
         self._session.flush()
         self._session.refresh(model)
         return _to_record(model)
@@ -101,6 +100,7 @@ class PassageRepository:
         )
         if document is None or document.status == DocumentStatus.DELETED.value:
             raise PassageNotFoundError("document not found")
+        initial_mask_set_revision = document.mask_set_revision
         all_models = self._session.scalars(
             select(Passage).where(
                 Passage.document_id == str(document_id),
@@ -126,10 +126,13 @@ class PassageRepository:
             tuple[int, tuple[tuple[float, float, float, float], ...]],
             Passage,
         ] = {}
+        mask_set_changed = False
+        created_ids: set[str] = set()
         for model in live_detected:
             key = _geometry_key(model.page_number, model.rects)
             if key in existing_detected:
                 self._invalidate(model, "duplicate_detection", deleted=True)
+                mask_set_changed = True
                 continue
             existing_detected[key] = model
 
@@ -156,10 +159,22 @@ class PassageRepository:
             )
             next_label_number += 1
             retained_ids.add(str(created.id))
+            created_ids.add(str(created.id))
+            mask_set_changed = True
 
         for model in existing_detected.values():
             if model.id not in retained_ids:
                 self._invalidate(model, "detection_removed", deleted=True)
+                mask_set_changed = True
+
+        if mask_set_changed:
+            if document.mask_set_revision == initial_mask_set_revision:
+                document.mask_set_revision += 1
+            self.invalidate_mask_dependents(
+                document_id,
+                reason="document_mask_set_changed",
+                exclude_ids=created_ids,
+            )
 
         self._session.flush()
         current = self._session.scalars(
@@ -237,12 +252,16 @@ class PassageRepository:
         rects: list[PassageRect] | None,
     ) -> PassageRecord:
         model = self._get_live(passage_id)
+        mask_set_changed = page_number is not None or rects is not None
+        document = (
+            self._lock_document_for_mask_mutation(model.document_id)
+            if mask_set_changed
+            else None
+        )
         if label is not None:
             model.label = label
         if page_number is not None:
-            document = self._session.get(Document, model.document_id)
-            if document is None:
-                raise PassageNotFoundError("document not found")
+            assert document is not None
             self._validate_page(document, page_number)
             model.page_number = page_number
         if rects is not None:
@@ -252,14 +271,29 @@ class PassageRepository:
         ):
             model.source = PassageSource.MANUAL.value
         self._invalidate(model, "passage_corrected")
+        if mask_set_changed:
+            assert document is not None
+            document.mask_set_revision += 1
+            self.invalidate_mask_dependents(
+                model.document_id,
+                reason="document_mask_set_changed",
+                exclude_ids={model.id},
+            )
         self._session.flush()
         return _to_record(model)
 
     def mark_deleted(self, passage_id: UUID | str) -> PassageRecord:
         model = self._get_live(passage_id)
+        document = self._lock_document_for_mask_mutation(model.document_id)
         if model.source == PassageSource.DETECTED.value:
             model.source = PassageSource.MANUAL.value
         self._invalidate(model, "passage_deleted", deleted=True)
+        document.mask_set_revision += 1
+        self.invalidate_mask_dependents(
+            model.document_id,
+            reason="document_mask_set_changed",
+            exclude_ids={model.id},
+        )
         self._session.flush()
         return _to_record(model)
 
@@ -269,6 +303,7 @@ class PassageRepository:
             raise PassageConflictError("passages must belong to one document")
         if len({model.page_number for model in models}) != 1:
             raise PassageConflictError("passages on different pages cannot be merged")
+        document = self._lock_document_for_mask_mutation(models[0].document_id)
         ordered = sorted(models, key=_document_order_key)
         survivor = ordered[0]
         for model in ordered:
@@ -283,6 +318,12 @@ class PassageRepository:
             merged.merged_into = survivor.id
             self._invalidate(merged, "merged_into_passage", deleted=True)
             merged_ids.append(UUID(merged.id))
+        document.mask_set_revision += 1
+        self.invalidate_mask_dependents(
+            survivor.document_id,
+            reason="document_mask_set_changed",
+            exclude_ids={model.id for model in ordered},
+        )
         self._session.flush()
         return _to_record(survivor), merged_ids
 
@@ -294,9 +335,7 @@ class PassageRepository:
     ) -> list[PassageRecord]:
         original = self._get_live(passage_id)
         first_label, first_page, first_rects = parts[0]
-        document = self._session.get(Document, original.document_id)
-        if document is None:
-            raise PassageNotFoundError("document not found")
+        document = self._lock_document_for_mask_mutation(original.document_id)
         self._validate_page(document, first_page)
         original.source = PassageSource.MANUAL.value
         original.label = first_label
@@ -315,8 +354,41 @@ class PassageRepository:
                     split_from=original.id,
                 )
             )
+        self.invalidate_mask_dependents(
+            original.document_id,
+            reason="document_mask_set_changed",
+            exclude_ids={str(record.id) for record in records},
+        )
         self._session.flush()
         return records
+
+    def invalidate_mask_dependents(
+        self,
+        document_id: UUID | str,
+        *,
+        reason: str,
+        exclude_ids: set[str] | None = None,
+    ) -> None:
+        excluded = exclude_ids or set()
+        active_artifact_passage_ids = set(
+            self._session.scalars(
+                select(VisibleExampleArtifact.passage_id).where(
+                    VisibleExampleArtifact.document_id == str(document_id),
+                    VisibleExampleArtifact.invalidated_at.is_(None),
+                )
+            ).all()
+        )
+        if not active_artifact_passage_ids:
+            return
+        models = self._session.scalars(
+            select(Passage).where(
+                Passage.document_id == str(document_id),
+                Passage.status != PassageStatus.DELETED.value,
+                Passage.id.in_(active_artifact_passage_ids - excluded),
+            )
+        ).all()
+        for model in models:
+            self._invalidate(model, reason)
 
     def invalidate_document_date(self, document_id: UUID | str) -> None:
         models = self._session.scalars(
@@ -345,6 +417,17 @@ class PassageRepository:
         if model is None or model.status == PassageStatus.DELETED.value:
             raise PassageNotFoundError("passage not found")
         return model
+
+    def _lock_document_for_mask_mutation(
+        self,
+        document_id: UUID | str,
+    ) -> Document:
+        document = self._session.scalar(
+            select(Document).where(Document.id == str(document_id)).with_for_update()
+        )
+        if document is None or document.status == DocumentStatus.DELETED.value:
+            raise PassageNotFoundError("document not found")
+        return document
 
     @staticmethod
     def _validate_page(document: Document, page_number: int) -> None:

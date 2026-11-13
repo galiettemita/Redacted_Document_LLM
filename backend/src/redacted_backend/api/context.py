@@ -25,9 +25,10 @@ from redacted_backend.db.repositories.visible_examples import (
 from redacted_backend.documents.preparation import (
     VisibleContextPreparationError,
     prepare_visible_context,
+    prepare_visible_contexts,
 )
 from redacted_backend.domain.documents import DocumentStatus
-from redacted_backend.domain.passages import PassageStatus
+from redacted_backend.domain.passages import PassageRecord, PassageStatus
 from redacted_backend.domain.visible_examples import VisibleExample
 from redacted_backend.retrieval.context_query import (
     ContextQueryError,
@@ -61,11 +62,259 @@ class VisibleContextSummary(BaseModel):
     context_stopwords_version: str = Field(min_length=1)
 
 
+class DocumentVisibleContextsSummary(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    document_id: UUID
+    status: Literal["contexts_ready"] = "contexts_ready"
+    passage_count: int = Field(ge=0)
+    contexts: list[VisibleContextSummary]
+
+
+class DocumentMaskSetChangedError(ValueError):
+    pass
+
+
 def create_context_router(
     database: Database | None,
     document_store: LocalDocumentStore | None,
 ) -> APIRouter:
     router = APIRouter()
+
+    @router.post(
+        "/documents/{document_id}:prepare-contexts",
+        response_model=DocumentVisibleContextsSummary,
+    )
+    def prepare_document_contexts(
+        document_id: UUID,
+    ) -> DocumentVisibleContextsSummary:
+        ready_database, ready_store = _require_services(database, document_store)
+        try:
+            with ready_database.session_factory() as session, session.begin():
+                document = DocumentRepository(session).get(document_id)
+                if document is None or document.status == DocumentStatus.DELETED:
+                    raise _not_found()
+                passages = PassageRepository(session).list_live_for_document(
+                    document.id
+                )
+                if not passages:
+                    return DocumentVisibleContextsSummary(
+                        document_id=document.id,
+                        passage_count=0,
+                        contexts=[],
+                    )
+                artifacts = VisibleExampleRepository(session)
+                existing_summaries: dict[UUID, VisibleContextSummary] = {}
+                for passage in passages:
+                    existing = artifacts.get_current(passage.id, passage.revision)
+                    if existing is None:
+                        continue
+                    query = _prepare_query(artifact_example(existing))
+                    artifacts.ensure_context_query(existing, query)
+                    existing_summaries[passage.id] = _summary(existing)
+                missing = [
+                    passage
+                    for passage in passages
+                    if passage.id not in existing_summaries
+                ]
+                if not missing:
+                    return DocumentVisibleContextsSummary(
+                        document_id=document.id,
+                        passage_count=len(passages),
+                        contexts=[
+                            existing_summaries[passage.id] for passage in passages
+                        ],
+                    )
+                expected_revisions = {
+                    passage.id: passage.revision for passage in passages
+                }
+                expected_mask_set_revision = document.mask_set_revision
+                pdf_path = ready_store.resolve(document.storage_key)
+        except ContextQueryArtifactConflictError as error:
+            raise _query_conflict(error) from error
+
+        try:
+            prepared_contexts = prepare_visible_contexts(
+                pdf_path,
+                document,
+                passages,
+                [passage.id for passage in missing],
+            )
+        except VisibleContextPreparationError as error:
+            raise _preparation_error(error) from error
+        prepared_by_id = {
+            prepared.example.passage_id: prepared for prepared in prepared_contexts
+        }
+        queries = {
+            passage_id: _prepare_query(prepared.example)
+            for passage_id, prepared in prepared_by_id.items()
+        }
+
+        try:
+            with ready_database.session_factory() as session, session.begin():
+                documents = DocumentRepository(session)
+                current_document = documents.get_for_update(document.id)
+                if (
+                    current_document is None
+                    or current_document.status == DocumentStatus.DELETED
+                    or current_document.sha256 != document.sha256
+                    or current_document.storage_key != document.storage_key
+                ):
+                    raise PassageConflictError("document changed during preparation")
+                if current_document.mask_set_revision != expected_mask_set_revision:
+                    raise DocumentMaskSetChangedError(
+                        "document mask set changed during preparation"
+                    )
+                persisted_document = documents.set_detected_visible_date(
+                    current_document.id,
+                    prepared_contexts[0].date_evidence,
+                )
+                if persisted_document is None:
+                    raise PassageConflictError("document changed during preparation")
+
+                passage_repository = PassageRepository(session)
+                current_passages = passage_repository.list_live_for_document(
+                    document.id
+                )
+                if _passage_set_signature(current_passages) != _passage_set_signature(
+                    passages
+                ):
+                    raise DocumentMaskSetChangedError(
+                        "document passage set changed during preparation"
+                    )
+                artifacts = VisibleExampleRepository(session)
+                summaries: list[VisibleContextSummary] = []
+                for original in current_passages:
+                    current = passage_repository.get(original.id)
+                    if (
+                        current is None
+                        or current.status == PassageStatus.DELETED
+                        or current.revision != expected_revisions[original.id]
+                    ):
+                        raise PassageConflictError(
+                            "passage revision changed during preparation"
+                        )
+                    artifact = artifacts.get_current(current.id, current.revision)
+                    if artifact is None:
+                        prepared = prepared_by_id.get(current.id)
+                        if prepared is None:
+                            raise PassageConflictError(
+                                "prepared passage context is missing"
+                            )
+                        artifact = artifacts.save(
+                            prepared,
+                            queries[current.id],
+                            passage_revision=current.revision,
+                        )
+                    else:
+                        query = queries.get(current.id) or _prepare_query(
+                            artifact_example(artifact)
+                        )
+                        artifacts.ensure_context_query(artifact, query)
+                    passage_repository.mark_context_ready(
+                        current.id,
+                        expected_revision=current.revision,
+                    )
+                    summaries.append(_summary(artifact))
+                return DocumentVisibleContextsSummary(
+                    document_id=document.id,
+                    passage_count=len(summaries),
+                    contexts=summaries,
+                )
+        except DocumentMaskSetChangedError as error:
+            raise _mask_set_conflict(error) from error
+        except VisibleDateConflictError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "visible_date_conflict", "message": str(error)},
+            ) from error
+        except PassageConflictError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "passage_revision_changed", "message": str(error)},
+            ) from error
+        except ContextQueryArtifactConflictError as error:
+            raise _query_conflict(error) from error
+        except IntegrityError:
+            for recovery_attempt in range(len(passages) + 1):
+                try:
+                    with ready_database.session_factory() as session, session.begin():
+                        documents = DocumentRepository(session)
+                        current_document = documents.get_for_update(document.id)
+                        if (
+                            current_document is None
+                            or current_document.status == DocumentStatus.DELETED
+                            or current_document.sha256 != document.sha256
+                            or current_document.storage_key != document.storage_key
+                        ):
+                            raise PassageConflictError(
+                                "document changed during preparation"
+                            )
+                        if (
+                            current_document.mask_set_revision
+                            != expected_mask_set_revision
+                        ):
+                            raise DocumentMaskSetChangedError(
+                                "document mask set changed during preparation"
+                            )
+                        passage_repository = PassageRepository(session)
+                        current_passages = passage_repository.list_live_for_document(
+                            document.id
+                        )
+                        if _passage_set_signature(
+                            current_passages
+                        ) != _passage_set_signature(passages):
+                            raise DocumentMaskSetChangedError(
+                                "document passage set changed during preparation"
+                            )
+                        artifacts = VisibleExampleRepository(session)
+                        summaries: list[VisibleContextSummary] = []
+                        for current in current_passages:
+                            artifact = artifacts.get_current(
+                                current.id,
+                                current.revision,
+                            )
+                            if artifact is None:
+                                prepared = prepared_by_id.get(current.id)
+                                if prepared is None:
+                                    raise PassageConflictError(
+                                        "prepared passage context is missing"
+                                    )
+                                artifact = artifacts.save(
+                                    prepared,
+                                    queries[current.id],
+                                    passage_revision=current.revision,
+                                )
+                            else:
+                                query = _prepare_query(artifact_example(artifact))
+                                artifacts.ensure_context_query(artifact, query)
+                            passage_repository.mark_context_ready(
+                                current.id,
+                                expected_revision=current.revision,
+                            )
+                            summaries.append(_summary(artifact))
+                        return DocumentVisibleContextsSummary(
+                            document_id=document.id,
+                            passage_count=len(summaries),
+                            contexts=summaries,
+                        )
+                except IntegrityError:
+                    if recovery_attempt == len(passages):
+                        raise
+                    continue
+                except DocumentMaskSetChangedError as conflict:
+                    raise _mask_set_conflict(conflict) from conflict
+                except PassageConflictError as conflict:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "code": "passage_revision_changed",
+                            "message": str(conflict),
+                        },
+                    ) from conflict
+                except ContextQueryArtifactConflictError as conflict:
+                    raise _query_conflict(conflict) from conflict
+            raise RuntimeError("document context recovery attempts were exhausted")
 
     @router.post(
         "/passages/{passage_id}:prepare-context",
@@ -93,6 +342,7 @@ def create_context_router(
                     return _summary(existing)
                 all_passages = passages.list_live_for_document(document.id)
                 expected_revision = passage.revision
+                expected_mask_set_revision = document.mask_set_revision
                 pdf_path = ready_store.resolve(document.storage_key)
         except ContextQueryArtifactConflictError as error:
             raise _query_conflict(error) from error
@@ -121,7 +371,7 @@ def create_context_router(
                         "passage revision changed during preparation"
                     )
                 documents = DocumentRepository(session)
-                current_document = documents.get(current.document_id)
+                current_document = documents.get_for_update(current.document_id)
                 if (
                     current_document is None
                     or current_document.status == DocumentStatus.DELETED
@@ -129,6 +379,17 @@ def create_context_router(
                     or current_document.storage_key != document.storage_key
                 ):
                     raise PassageConflictError("document changed during preparation")
+                if current_document.mask_set_revision != expected_mask_set_revision:
+                    raise DocumentMaskSetChangedError(
+                        "document mask set changed during preparation"
+                    )
+                current_passages = passages.list_live_for_document(current.document_id)
+                if _passage_set_signature(current_passages) != _passage_set_signature(
+                    all_passages
+                ):
+                    raise DocumentMaskSetChangedError(
+                        "document passage set changed during preparation"
+                    )
                 persisted_document = documents.set_detected_visible_date(
                     current_document.id,
                     prepared.date_evidence,
@@ -150,6 +411,8 @@ def create_context_router(
                     expected_revision=current.revision,
                 )
                 return _summary(artifact)
+        except DocumentMaskSetChangedError as error:
+            raise _mask_set_conflict(error) from error
         except VisibleDateConflictError as error:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -170,7 +433,30 @@ def create_context_router(
             raise _query_conflict(error) from error
         except IntegrityError:
             with ready_database.session_factory() as session, session.begin():
-                current = PassageRepository(session).get(passage.id)
+                documents = DocumentRepository(session)
+                current_document = documents.get_for_update(document.id)
+                if (
+                    current_document is None
+                    or current_document.mask_set_revision != expected_mask_set_revision
+                ):
+                    raise _mask_set_conflict(
+                        DocumentMaskSetChangedError(
+                            "document mask set changed during preparation"
+                        )
+                    )
+                passage_repository = PassageRepository(session)
+                current_passages = passage_repository.list_live_for_document(
+                    document.id
+                )
+                if _passage_set_signature(current_passages) != _passage_set_signature(
+                    all_passages
+                ):
+                    raise _mask_set_conflict(
+                        DocumentMaskSetChangedError(
+                            "document passage set changed during preparation"
+                        )
+                    )
+                current = passage_repository.get(passage.id)
                 if current is not None:
                     artifacts = VisibleExampleRepository(session)
                     existing = artifacts.get_current(
@@ -218,6 +504,19 @@ def _query_conflict(error: ContextQueryArtifactConflictError) -> HTTPException:
         status_code=status.HTTP_409_CONFLICT,
         detail={"code": "context_query_conflict", "message": str(error)},
     )
+
+
+def _mask_set_conflict(error: DocumentMaskSetChangedError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"code": "document_mask_set_changed", "message": str(error)},
+    )
+
+
+def _passage_set_signature(
+    passages: list[PassageRecord],
+) -> tuple[tuple[UUID, int], ...]:
+    return tuple((passage.id, passage.revision) for passage in passages)
 
 
 def _require_services(

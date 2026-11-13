@@ -4,11 +4,13 @@ import asyncio
 import json
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from uuid import uuid4
+from threading import Barrier, Event, Lock
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 import redacted_backend.api.context as context_api
 from redacted_backend.config import Settings
@@ -16,8 +18,13 @@ from redacted_backend.db.base import Base
 from redacted_backend.db.models import Document, VisibleExampleArtifact
 from redacted_backend.db.repositories.documents import DocumentRepository
 from redacted_backend.db.repositories.passages import PassageRepository
+from redacted_backend.db.repositories.visible_examples import VisibleExampleRepository
 from redacted_backend.documents.preparation import PreparedVisibleContext
-from redacted_backend.domain.documents import DateProvenance, VisibleDateEvidence
+from redacted_backend.domain.documents import (
+    DateProvenance,
+    DocumentRecord,
+    VisibleDateEvidence,
+)
 from redacted_backend.domain.passages import PassageRect
 from redacted_backend.domain.visible_examples import (
     LengthEstimate,
@@ -124,6 +131,37 @@ def _date_evidence(value: date) -> VisibleDateEvidence:
     )
 
 
+def _prepared_contexts(
+    document: DocumentRecord,
+    target_ids: list[UUID],
+) -> list[PreparedVisibleContext]:
+    return [
+        PreparedVisibleContext(
+            example=VisibleExample(
+                passage_id=target_id,
+                document_id=document.id,
+                document_date=date(1945, 5, 8),
+                before_target="visible before",
+                after_target="visible after",
+                context_window="visible before [[TARGET]] visible after",
+                length_cue=LengthEstimate(
+                    estimated_words=8,
+                    bucket="part of a sentence",
+                    median_character_width=0.01,
+                    median_characters_per_word=5,
+                    line_capacities=[48],
+                ),
+                visible_words=[],
+                serialization_version="visible-transcript-v1",
+            ),
+            confirmed_mask_count=2,
+            visible_word_count=17,
+            date_evidence=_date_evidence(date(1945, 5, 8)),
+        )
+        for target_id in target_ids
+    ]
+
+
 def test_prepare_detects_and_persists_the_visible_document_date(
     tmp_path: Path,
     monkeypatch,
@@ -191,6 +229,225 @@ def test_prepare_persists_one_revision_and_reuses_it(
         assert artifacts[0].context_query_term_count == 4
         assert artifacts[0].context_query_version == "context-query-v1"
         assert artifacts[0].context_stopwords_version == "visible-english-v1"
+
+
+def test_prepare_document_contexts_builds_and_persists_every_live_passage(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app, document, first = create_test_app_and_passage(tmp_path)
+    with app.state.database.session_factory() as session, session.begin():
+        second = PassageRepository(session).create(
+            document_id=document.id,
+            label="Passage 2",
+            page_number=1,
+            rects=[PassageRect(x=0.6, y=0.2, width=0.2, height=0.04)],
+        )
+    calls: list[list[UUID]] = []
+
+    def fake_prepare_many(_pdf_path, prepared_document, _passages, target_ids):
+        calls.append(target_ids)
+        return [
+            PreparedVisibleContext(
+                example=VisibleExample(
+                    passage_id=target_id,
+                    document_id=prepared_document.id,
+                    document_date=date(1945, 5, 8),
+                    before_target="visible before",
+                    after_target="visible after",
+                    context_window="visible before [[TARGET]] visible after",
+                    length_cue=LengthEstimate(
+                        estimated_words=8,
+                        bucket="part of a sentence",
+                        median_character_width=0.01,
+                        median_characters_per_word=5,
+                        line_capacities=[48],
+                    ),
+                    visible_words=[],
+                    serialization_version="visible-transcript-v1",
+                ),
+                confirmed_mask_count=2,
+                visible_word_count=17,
+                date_evidence=_date_evidence(date(1945, 5, 8)),
+            )
+            for target_id in target_ids
+        ]
+
+    monkeypatch.setattr(
+        context_api,
+        "prepare_visible_contexts",
+        fake_prepare_many,
+        raising=False,
+    )
+
+    response = asyncio.run(
+        request(app, "POST", f"/v1/documents/{document.id}:prepare-contexts")
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["document_id"] == str(document.id)
+    assert body["status"] == "contexts_ready"
+    assert body["passage_count"] == 2
+    assert [item["passage_id"] for item in body["contexts"]] == [
+        str(first.id),
+        str(second.id),
+    ]
+    assert calls == [[first.id, second.id]]
+    with app.state.database.session_factory() as session:
+        artifacts = session.scalars(select(VisibleExampleArtifact)).all()
+        assert len(artifacts) == 2
+        assert {
+            PassageRepository(session).get(first.id).status,
+            PassageRepository(session).get(second.id).status,
+        } == {"context_ready"}
+
+
+def test_prepare_document_contexts_rejects_a_mask_added_during_preparation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app, document, first = create_test_app_and_passage(tmp_path)
+
+    def fake_prepare_many(_pdf_path, prepared_document, _passages, target_ids):
+        with app.state.database.session_factory() as session, session.begin():
+            PassageRepository(session).create(
+                document_id=document.id,
+                label="Passage 2",
+                page_number=1,
+                rects=[PassageRect(x=0.6, y=0.2, width=0.2, height=0.04)],
+            )
+        return _prepared_contexts(prepared_document, target_ids)
+
+    monkeypatch.setattr(context_api, "prepare_visible_contexts", fake_prepare_many)
+
+    response = asyncio.run(
+        request(app, "POST", f"/v1/documents/{document.id}:prepare-contexts")
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "document_mask_set_changed"
+    with app.state.database.session_factory() as session:
+        assert session.scalars(select(VisibleExampleArtifact)).all() == []
+        persisted = PassageRepository(session).get(first.id)
+        assert persisted is not None
+        assert persisted.status == "marked"
+
+
+def test_concurrent_document_context_requests_reuse_the_winning_artifacts(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app, document, passage = create_test_app_and_passage(tmp_path)
+    with app.state.database.session_factory() as session, session.begin():
+        persisted = DocumentRepository(session).set_detected_visible_date(
+            document.id,
+            _date_evidence(date(1945, 5, 8)),
+        )
+        assert persisted is not None
+
+    preparation_barrier = Barrier(2)
+    save_barrier = Barrier(2)
+
+    def fake_prepare_many(_pdf_path, prepared_document, _passages, target_ids):
+        preparation_barrier.wait(timeout=5)
+        return _prepared_contexts(prepared_document, target_ids)
+
+    original_save = VisibleExampleRepository.save
+
+    def synchronized_save(repository, *args, **kwargs):
+        save_barrier.wait(timeout=5)
+        return original_save(repository, *args, **kwargs)
+
+    monkeypatch.setattr(context_api, "prepare_visible_contexts", fake_prepare_many)
+    monkeypatch.setattr(VisibleExampleRepository, "save", synchronized_save)
+
+    async def send_both_requests():
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            path = f"/v1/documents/{document.id}:prepare-contexts"
+            return await asyncio.gather(client.post(path), client.post(path))
+
+    responses = asyncio.run(send_both_requests())
+
+    assert [response.status_code for response in responses] == [200, 200]
+    assert responses[0].json() == responses[1].json()
+    with app.state.database.session_factory() as session:
+        artifacts = session.scalars(select(VisibleExampleArtifact)).all()
+        assert len(artifacts) == 1
+        assert artifacts[0].passage_id == str(passage.id)
+
+
+def test_document_context_request_retries_repeated_artifact_races(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app, document, first = create_test_app_and_passage(tmp_path)
+    with app.state.database.session_factory() as session, session.begin():
+        second = PassageRepository(session).create(
+            document_id=document.id,
+            label="Passage 2",
+            page_number=1,
+            rects=[PassageRect(x=0.6, y=0.2, width=0.2, height=0.04)],
+        )
+        persisted = DocumentRepository(session).set_detected_visible_date(
+            document.id,
+            _date_evidence(date(1945, 5, 8)),
+        )
+        assert persisted is not None
+
+    def fake_prepare_many(_pdf_path, prepared_document, _passages, target_ids):
+        return _prepared_contexts(prepared_document, target_ids)
+
+    def fake_prepare_one(_pdf_path, prepared_document, _passages, target_id):
+        return _prepared_contexts(prepared_document, [target_id])[0]
+
+    first_save_started = Event()
+    release_first_save = Event()
+    save_lock = Lock()
+    save_count = 0
+    original_save = VisibleExampleRepository.save
+
+    def pause_first_save(repository, *args, **kwargs):
+        nonlocal save_count
+        with save_lock:
+            save_count += 1
+            call_number = save_count
+        if call_number == 1:
+            first_save_started.set()
+            assert release_first_save.wait(timeout=5)
+        if call_number == 3:
+            raise IntegrityError("INSERT", {}, RuntimeError("simulated second race"))
+        return original_save(repository, *args, **kwargs)
+
+    monkeypatch.setattr(context_api, "prepare_visible_contexts", fake_prepare_many)
+    monkeypatch.setattr(context_api, "prepare_visible_context", fake_prepare_one)
+    monkeypatch.setattr(VisibleExampleRepository, "save", pause_first_save)
+
+    async def run_race():
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            batch_task = asyncio.create_task(
+                client.post(f"/v1/documents/{document.id}:prepare-contexts")
+            )
+            assert await asyncio.to_thread(first_save_started.wait, 5)
+            single = await client.post(f"/v1/passages/{first.id}:prepare-context")
+            release_first_save.set()
+            batch = await batch_task
+            return single, batch
+
+    single_response, batch_response = asyncio.run(run_race())
+
+    assert single_response.status_code == 200
+    assert batch_response.status_code == 200
+    assert batch_response.json()["passage_count"] == 2
+    assert {context["passage_id"] for context in batch_response.json()["contexts"]} == {
+        str(first.id),
+        str(second.id),
+    }
+    with app.state.database.session_factory() as session:
+        artifacts = session.scalars(select(VisibleExampleArtifact)).all()
+        assert len(artifacts) == 2
 
 
 def test_prepare_backfills_query_metadata_on_a_same_revision_artifact(
@@ -441,6 +698,102 @@ def test_passage_correction_invalidates_context_and_builds_new_revision(
         assert artifacts[0].context_query_sha256 == CONTEXT_QUERY_SHA256
         assert artifacts[1].invalidated_at is None
         assert artifacts[1].context_query_sha256 == CONTEXT_QUERY_SHA256
+
+
+def test_passage_correction_invalidates_sibling_contexts_from_the_same_mask_set(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app, document, first = create_test_app_and_passage(tmp_path)
+    with app.state.database.session_factory() as session, session.begin():
+        second = PassageRepository(session).create(
+            document_id=document.id,
+            label="Passage 2",
+            page_number=1,
+            rects=[PassageRect(x=0.6, y=0.2, width=0.2, height=0.04)],
+        )
+    calls: list[int] = []
+    install_fake_preparation(monkeypatch, calls=calls)
+
+    def fake_prepare_many(pdf_path, prepared_document, passages, target_ids):
+        return [
+            context_api.prepare_visible_context(
+                pdf_path,
+                prepared_document,
+                passages,
+                target_id,
+            )
+            for target_id in target_ids
+        ]
+
+    monkeypatch.setattr(context_api, "prepare_visible_contexts", fake_prepare_many)
+    prepared = asyncio.run(
+        request(app, "POST", f"/v1/documents/{document.id}:prepare-contexts")
+    )
+    assert prepared.status_code == 200
+
+    corrected = asyncio.run(
+        request(
+            app,
+            "PATCH",
+            f"/v1/passages/{first.id}",
+            json={"rects": [{"x": 0.32, "y": 0.22, "width": 0.18, "height": 0.04}]},
+        )
+    )
+
+    assert corrected.status_code == 200
+    with app.state.database.session_factory() as session:
+        sibling = PassageRepository(session).get(second.id)
+        assert sibling is not None
+        assert sibling.revision == 2
+        assert sibling.status == "marked"
+        artifacts = session.scalars(select(VisibleExampleArtifact)).all()
+        assert len(artifacts) == 2
+        assert all(artifact.invalidated_at is not None for artifact in artifacts)
+
+
+def test_label_only_change_keeps_sibling_context_current(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app, document, first = create_test_app_and_passage(tmp_path)
+    with app.state.database.session_factory() as session, session.begin():
+        second = PassageRepository(session).create(
+            document_id=document.id,
+            label="Passage 2",
+            page_number=1,
+            rects=[PassageRect(x=0.6, y=0.2, width=0.2, height=0.04)],
+        )
+
+    def fake_prepare_many(_pdf_path, prepared_document, _passages, target_ids):
+        return _prepared_contexts(prepared_document, target_ids)
+
+    monkeypatch.setattr(context_api, "prepare_visible_contexts", fake_prepare_many)
+    prepared = asyncio.run(
+        request(app, "POST", f"/v1/documents/{document.id}:prepare-contexts")
+    )
+    assert prepared.status_code == 200
+
+    renamed = asyncio.run(
+        request(
+            app,
+            "PATCH",
+            f"/v1/passages/{first.id}",
+            json={"label": "Renamed passage"},
+        )
+    )
+
+    assert renamed.status_code == 200
+    with app.state.database.session_factory() as session:
+        sibling = PassageRepository(session).get(second.id)
+        assert sibling is not None
+        assert sibling.revision == 1
+        assert sibling.status == "context_ready"
+        sibling_artifact = VisibleExampleRepository(session).get_current(
+            second.id,
+            sibling.revision,
+        )
+        assert sibling_artifact is not None
 
 
 def test_conflicting_automatic_date_is_refused_without_overwriting_evidence(

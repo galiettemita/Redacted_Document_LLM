@@ -50,3 +50,29 @@ def test_rejoins_a_geometry_supported_line_break_hyphenation() -> None:
 
     assert "international relations" in transcript.text
     assert "inter- national" not in transcript.text
+
+
+def test_serializes_one_marker_for_a_passage_with_multiple_mask_rectangles() -> None:
+    words = [
+        word("before", x=0.1, y=0.2, block_id=1, line_id=1),
+        word("COVERED", x=0.4, y=0.2, block_id=1, line_id=1),
+        word("MORE", x=0.1, y=0.24, block_id=1, line_id=2),
+        word("after", x=0.7, y=0.24, block_id=1, line_id=2),
+    ]
+    target_id = "passage-1"
+
+    transcript = serialize_visible_document(
+        [page(*words)],
+        [
+            discovery(
+                1,
+                mask(target_id, x=0.35, y=0.19, width=0.2, height=0.03),
+                mask(target_id, x=0.08, y=0.23, width=0.2, height=0.03),
+            )
+        ],
+        target_id,
+    )
+
+    assert transcript.text.count("[[TARGET]]") == 1
+    assert "COVERED" not in transcript.text
+    assert "MORE" not in transcript.text

@@ -90,6 +90,13 @@ export interface VisibleContextSummary {
   context_stopwords_version: string
 }
 
+export interface DocumentVisibleContextsSummary {
+  document_id: string
+  status: 'contexts_ready'
+  passage_count: number
+  contexts: VisibleContextSummary[]
+}
+
 export interface AnalysisBlocker {
   component: string
   detail: string
@@ -160,6 +167,10 @@ export interface BackendApi {
     passageId: string,
     signal?: AbortSignal,
   ): Promise<VisibleContextSummary>
+  prepareDocumentContexts(
+    documentId: string,
+    signal?: AbortSignal,
+  ): Promise<DocumentVisibleContextsSummary>
   schedulePassageAnalysis(
     passageId: string,
     expectedRevision: number,
@@ -243,6 +254,14 @@ export function createBackendApi(fetchImplementation?: typeof fetch): BackendApi
       return requestJson<VisibleContextSummary>(
         fetchRequest,
         `/v1/passages/${encodeURIComponent(passageId)}:prepare-context`,
+        { method: 'POST', signal },
+      )
+    },
+
+    prepareDocumentContexts(documentId, signal) {
+      return requestJson<DocumentVisibleContextsSummary>(
+        fetchRequest,
+        `/v1/documents/${encodeURIComponent(documentId)}:prepare-contexts`,
         { method: 'POST', signal },
       )
     },

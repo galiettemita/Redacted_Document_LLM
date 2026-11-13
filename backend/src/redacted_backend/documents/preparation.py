@@ -60,6 +60,27 @@ def prepare_visible_context(
     _renderer: Renderer | None = None,
     _discoverer: Discoverer = discover_candidate_masks,
 ) -> PreparedVisibleContext:
+    return prepare_visible_contexts(
+        pdf_path,
+        document,
+        passages,
+        [target_id],
+        _extractor=_extractor,
+        _renderer=_renderer,
+        _discoverer=_discoverer,
+    )[0]
+
+
+def prepare_visible_contexts(
+    pdf_path: Path,
+    document: DocumentRecord,
+    passages: list[PassageRecord],
+    target_ids: list[UUID],
+    *,
+    _extractor: Extractor = extract_visible_words,
+    _renderer: Renderer | None = None,
+    _discoverer: Discoverer = discover_candidate_masks,
+) -> list[PreparedVisibleContext]:
     renderer = _renderer or render_page_images
     try:
         pages = _extractor(pdf_path)
@@ -104,21 +125,26 @@ def prepare_visible_context(
         pages=pages,
         mask_discoveries=discoveries,
     )
-    try:
-        example = build_visible_example(visible_document, passages, target_id)
-    except VisibleExampleError as error:
-        raise VisibleContextPreparationError(error.code, str(error)) from error
-
-    return PreparedVisibleContext(
-        example=example,
-        confirmed_mask_count=sum(
-            candidate.confirmed
-            for discovery in discoveries
-            for candidate in discovery.masks
-        ),
-        visible_word_count=len(example.visible_words),
-        date_evidence=date_evidence,
+    confirmed_mask_count = sum(
+        candidate.confirmed
+        for discovery in discoveries
+        for candidate in discovery.masks
     )
+    prepared: list[PreparedVisibleContext] = []
+    for target_id in target_ids:
+        try:
+            example = build_visible_example(visible_document, passages, target_id)
+        except VisibleExampleError as error:
+            raise VisibleContextPreparationError(error.code, str(error)) from error
+        prepared.append(
+            PreparedVisibleContext(
+                example=example,
+                confirmed_mask_count=confirmed_mask_count,
+                visible_word_count=len(example.visible_words),
+                date_evidence=date_evidence,
+            )
+        )
+    return prepared
 
 
 def render_page_images(pdf_path: Path) -> list[Image.Image]:

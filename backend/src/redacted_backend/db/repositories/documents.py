@@ -127,6 +127,7 @@ def _to_record(document: Document) -> DocumentRecord:
         visible_date=document.visible_date,
         date_provenance=document.date_provenance,
         visible_date_evidence=document.visible_date_evidence,
+        mask_set_revision=document.mask_set_revision,
         created_at=document.created_at,
         expires_at=document.expires_at,
     )

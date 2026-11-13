@@ -81,6 +81,13 @@ const detectionResult: PassageDetectionResult = {
   passages: [passageRecord],
 }
 
+const documentContexts = {
+  document_id: documentRecord.id,
+  status: 'contexts_ready' as const,
+  passage_count: 1,
+  contexts: [visibleContext],
+}
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -166,6 +173,24 @@ describe('BackendApi', () => {
     expect(fetchMock).toHaveBeenCalledOnce()
     expect(fetchMock).toHaveBeenCalledWith(
       `/v1/passages/${passageRecord.id}:prepare-context`,
+      { method: 'POST', signal: controller.signal },
+    )
+  })
+
+  it('prepares every detected passage through one document request', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(documentContexts))
+    const api = createBackendApi(fetchMock) as ReturnType<typeof createBackendApi> & {
+      prepareDocumentContexts?: (documentId: string, signal?: AbortSignal) => Promise<unknown>
+    }
+    const controller = new AbortController()
+
+    expect(typeof api.prepareDocumentContexts).toBe('function')
+    await expect(api.prepareDocumentContexts?.(
+      documentRecord.id,
+      controller.signal,
+    )).resolves.toEqual(documentContexts)
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/v1/documents/${documentRecord.id}:prepare-contexts`,
       { method: 'POST', signal: controller.signal },
     )
   })

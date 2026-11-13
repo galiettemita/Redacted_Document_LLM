@@ -186,6 +186,11 @@ def create_passages_router(
                     rects=request.rects,
                     source=PassageSource.MANUAL,
                 )
+                repository.invalidate_mask_dependents(
+                    document_id,
+                    reason="document_mask_set_changed",
+                    exclude_ids={str(created.id)},
+                )
                 if idempotency_key is not None:
                     repository.save_idempotency(
                         scope=scope,
