@@ -85,3 +85,11 @@
     - [x] Serialize only the frozen `[DOCUMENT n]` and `[EXCERPT n]` evidence format.
     - [x] Preserve raw ranks, scores, query/index/corpus hashes, exclusions, and fused evidence in an immutable trace boundary.
     - [ ] Persist the trace transactionally with the analysis job after Task 11 storage is added.
+  - [ ] Task 10: Freeze Andrew's prompts and add the real model boundary without making a paid call.
+    - [x] Freeze and hash the Appendix F own-query and single-prediction-with-documents prompts.
+    - [x] Render prompts only from the visible example, geometry-derived cue, and retrieved evidence.
+    - [x] Fix one user message, no system/tools, `gpt-6-astra`, medium reasoning, `store: false`, and disabled truncation.
+    - [x] Validate one-line 30-word punctuation-free queries and fail explicitly on empty, refused, incomplete, rate-limited, or invalid output.
+    - [x] Count the exact provider request before generation and reject an oversized prompt without truncating evidence.
+    - [x] Preserve passage ID, trace/prompt/request hashes, provider IDs, usage, cost, pricing version, and idempotent result reuse.
+    - [ ] Obtain an exact real-passage token count and ask for explicit spending approval only after complete evidence exists.

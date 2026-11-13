@@ -88,6 +88,8 @@ class ScientificConfig(BaseModel):
     dense_recall_minimum: float = 0.98
     model: Literal["gpt-6-astra"] = "gpt-6-astra"
     reasoning_effort: Literal["medium"] = "medium"
+    model_context_window: int = 1_050_000
+    model_max_output_tokens: int = 4_096
 
     def context_stopwords_hash(self) -> str:
         canonical = json.dumps(

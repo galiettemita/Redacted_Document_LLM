@@ -1,0 +1,16 @@
+Below is the declassified CIA intelligence bulletin of {date}.
+Redacted text appears as [REDACTED]; one redaction is
+marked [[TARGET]]. You will shortly be asked to predict
+the redacted text at [[TARGET]]. It is {bucket} long.
+Before predicting, you may search a corpus of
+declassified US government documents (State Department
+cables, FRUS volumes, CIA releases, UN and World Bank
+records). Write ONE line of at most 30 words: the
+search query most likely to retrieve documents
+containing evidence that would let you predict the
+redacted text at [[TARGET]]. Name the specific actors,
+places, dates and the event at issue; do not repeat
+generic words. No quotes, no punctuation other than
+spaces. Reply with the query line only.
+
+{before}[[TARGET]]{after}

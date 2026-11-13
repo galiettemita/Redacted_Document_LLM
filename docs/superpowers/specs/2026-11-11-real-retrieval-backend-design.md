@@ -270,9 +270,13 @@ Each passage has two calls:
 1. The verbatim Appendix F own-query prompt over the visible bulletin and geometry-derived bucket.
 2. The verbatim Appendix F generation-with-documents prompt over the fused top 100 documents and visible bulletin.
 
+Appendix F exposes `{hint}` but does not publish the code that expands it. Figure 6 prints the resulting sentence as “It is {bucket} long.”, so `realistic-prediction-v1` freezes that exact substitution with one trailing space before “Answer”. This is an evidence-based implementation fill, not a claimed verbatim code artifact from the authors. The paper also does not disclose `max_output_tokens`; the first provider manifest reserves 4,096 total output tokens, including reasoning, to give a short prediction ample reasoning headroom. Both choices require a new manifest/prompt version to change.
+
 The response must be prediction text only. Provider refusals, empty output, invalid query shape, rate limits, and timeouts become explicit passage failures. The system never falls back to a cheaper or different model.
 
 No paid call occurs until the user supplies or confirms model access and approves a per-smoke-test spending cap. Before any larger run, readiness reports the number of passages, estimated input tokens, service tier, and cost ceiling for separate approval. Deployment is another separate approval.
+
+Before either generation call, the backend sends the exact same request shape to OpenAI's input-token count endpoint and reserves the full 4,096-token output cap against the 1,050,000-token model window. The request fails with `prompt_too_large` rather than truncating. Usage cost is recorded against the dated `openai-gpt6-astra-2026-11-12` price manifest; pricing is operational provenance and must be refreshed explicitly, never silently.
 
 ## Frontend integration
 

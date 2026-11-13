@@ -1,0 +1,15 @@
+Below are documents retrieved from a corpus of declassified
+US government documents (State Department cables, FRUS
+volumes, CIA releases, UN and World Bank records); they
+may or may not be relevant, so use them only if they
+help. After them is the declassified CIA intelligence
+bulletin of {date}. Redacted text appears as [REDACTED];
+one redaction is marked [[TARGET]]. Predict the
+redacted text at [[TARGET]] as exactly as you can. {hint}Answer with the
+predicted text only, with no preamble or commentary.
+
+DOCUMENTS:
+{documents}
+
+BULLETIN:
+{before}[[TARGET]]{after}

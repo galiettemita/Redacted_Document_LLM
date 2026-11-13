@@ -388,7 +388,7 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 
 - [x] **Step 1: Write failing tests proving exactly four 300-item calls, document RRF from each list's best chunk, chunk-level RRF selection of two excerpts, duplicate filename/opening merge, stable ties, top-100 limit, and `no_evidence_retrieved` when fusion is empty.**
 - [x] **Step 2: Add failing self-exclusion tests for known aliases, same-release near duplicate, multiple ambiguous releases, and a clearly unrelated document.**
-- [ ] **Step 3: Add a failing serialization/token-budget test asserting the exact `[DOCUMENT n]`/`[EXCERPT n]` format and `prompt_too_large` without truncation.**
+- [x] **Step 3: Add a failing serialization/token-budget test asserting the exact `[DOCUMENT n]`/`[EXCERPT n]` format and `prompt_too_large` without truncation.**
 - [x] **Step 4: Run focused tests; expect missing fusion service.**
 - [ ] **Step 5: Implement the pure retrieval service and immutable trace persistence. Raw BM25/cosine scores may be stored but never compared across methods.**
 - [x] **Step 6: Run focused and full backend tests; expect PASS.**
@@ -409,12 +409,12 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - Produces: `OpenAIGateway.generate_prediction(example, retrieval, idempotency_key) -> PredictionRecord`.
 - Every request fixes `model='gpt-6-astra'`, reasoning `medium`, no system message/tools, and one user message.
 
-- [ ] **Step 1: Copy the two Appendix F prompts verbatim into frozen files and write snapshot/hash tests against those files.**
-- [ ] **Step 2: Write failing gateway tests using an injected HTTP/SDK transport: exact model/settings, one user message, no system/tools, query validation (one line, at most 30 words), refusal/empty/rate-limit handling, response ID/usage/cost capture, and no fallback.**
-- [ ] **Step 3: Add failing idempotency tests asserting a retry returns the persisted result without a second provider request.**
-- [ ] **Step 4: Run focused tests; expect missing model modules.**
-- [ ] **Step 5: Implement prompt loading/rendering, target-model token counting, the Responses API gateway, and persistence boundary without making a real API call.**
-- [ ] **Step 6: Run focused and full backend tests; expect PASS.**
+- [x] **Step 1: Copy the two Appendix F prompts verbatim into frozen files and write snapshot/hash tests against those files.**
+- [x] **Step 2: Write failing gateway tests using an injected HTTP/SDK transport: exact model/settings, one user message, no system/tools, query validation (one line, at most 30 words), refusal/empty/rate-limit handling, response ID/usage/cost capture, and no fallback.**
+- [x] **Step 3: Add failing idempotency tests asserting a retry returns the persisted result without a second provider request.**
+- [x] **Step 4: Run focused tests; expect missing model modules.**
+- [x] **Step 5: Implement prompt loading/rendering, target-model token counting, the Responses API gateway, and persistence boundary without making a real API call.**
+- [x] **Step 6: Run focused and full backend tests; expect PASS.**
 - [ ] **Step 7: Update the checklist, commit with `feat: add frozen realistic model prompts`, and push.**
 
 **Execution gate after Task 10:** Show the exact one-passage token estimate and maximum cost, then ask the user for model access and explicit approval before any real query/prediction request.

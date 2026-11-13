@@ -18,6 +18,7 @@ COPY --from=uv /uv /uvx /bin/
 COPY backend/pyproject.toml backend/uv.lock ./
 COPY backend/src ./src
 COPY backend/corpus ./corpus
+COPY backend/prompts ./prompts
 COPY backend/alembic.ini ./alembic.ini
 COPY backend/alembic ./alembic
 RUN uv sync --frozen --no-dev

@@ -85,6 +85,8 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters() -> No
         "dense_recall_minimum": 0.98,
         "model": "gpt-6-astra",
         "reasoning_effort": "medium",
+        "model_context_window": 1_050_000,
+        "model_max_output_tokens": 4_096,
     }
     assert len(config.manifest_hash()) == 64
     assert config.manifest_hash() == ScientificConfig().manifest_hash()
