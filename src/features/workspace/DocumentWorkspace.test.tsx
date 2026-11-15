@@ -1,6 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { StrictMode } from 'react'
-import { SAMPLE_DOCUMENT } from '../../data/sampleDocument'
 import type {
   AnalysisJobRecord,
   BackendApi,
@@ -193,25 +192,13 @@ describe('DocumentWorkspace', () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
-  it('starts sample predictions automatically and reveals cards progressively', async () => {
-    render(<DocumentWorkspace document={SAMPLE_DOCUMENT} onReplace={vi.fn()} onViewSample={vi.fn()} />)
-    expect(screen.getByText('Fictional demonstration document')).toBeInTheDocument()
-    expect(screen.getByText('Predicting hidden passages…')).toBeInTheDocument()
-
-    await act(async () => vi.advanceTimersByTimeAsync(700))
-    expect(screen.getByRole('button', { name: 'Open Passage 1 on page 1' })).toBeInTheDocument()
-    expect(screen.getByText('Predicting hidden passages…')).toBeInTheDocument()
-  })
-
-  it('is honest about uploaded files and offers the complete interactive sample', async () => {
+  it('is honest about uploaded files and exposes no simulated sample route', async () => {
     vi.useRealTimers()
-    const onViewSample = vi.fn()
-    render(<DocumentWorkspace document={uploadedDocument} backendDocument={readyBackendDocument} backendApi={apiWithCreate()} onReplace={vi.fn()} onViewSample={onViewSample} />)
+    render(<DocumentWorkspace document={uploadedDocument} backendDocument={readyBackendDocument} backendApi={apiWithCreate()} onReplace={vi.fn()} />)
 
     expect(await screen.findByRole('heading', { name: 'No redactions detected' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Prepare visible context' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'View interactive sample' }))
-    expect(onViewSample).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: 'View interactive sample' })).not.toBeInTheDocument()
   })
 
   it('automatically detects and displays every passage without manual highlighting', async () => {
@@ -225,7 +212,6 @@ describe('DocumentWorkspace', () => {
           backendDocument={readyBackendDocument}
           backendApi={api}
           onReplace={vi.fn()}
-          onViewSample={vi.fn()}
         />
       </StrictMode>,
     )
@@ -256,7 +242,6 @@ describe('DocumentWorkspace', () => {
         backendDocument={readyBackendDocument}
         backendApi={api}
         onReplace={vi.fn()}
-        onViewSample={vi.fn()}
       />,
     )
 
@@ -299,7 +284,6 @@ describe('DocumentWorkspace', () => {
         backendDocument={readyBackendDocument}
         backendApi={api}
         onReplace={vi.fn()}
-        onViewSample={vi.fn()}
       />,
     )
     await screen.findByRole('heading', { name: '1 passage ready for retrieval' })
@@ -332,7 +316,6 @@ describe('DocumentWorkspace', () => {
         backendDocument={readyBackendDocument}
         backendApi={api}
         onReplace={vi.fn()}
-        onViewSample={vi.fn()}
       />,
     )
     await screen.findByRole('heading', { name: '2 passages ready for retrieval' })
@@ -370,7 +353,6 @@ describe('DocumentWorkspace', () => {
         backendDocument={readyBackendDocument}
         backendApi={api}
         onReplace={vi.fn()}
-        onViewSample={vi.fn()}
       />,
     )
     await screen.findByRole('heading', { name: '2 passages ready for retrieval' })
@@ -421,7 +403,6 @@ describe('DocumentWorkspace', () => {
         backendDocument={readyBackendDocument}
         backendApi={api}
         onReplace={vi.fn()}
-        onViewSample={vi.fn()}
       />,
     )
     await screen.findByRole('heading', { name: '2 passages ready for retrieval' })
@@ -443,7 +424,7 @@ describe('DocumentWorkspace', () => {
   it('persists one drawn rectangle without inventing prediction text', async () => {
     vi.useRealTimers()
     const createPassage = vi.fn().mockResolvedValue(savedPassage)
-    render(<DocumentWorkspace document={uploadedDocument} backendDocument={readyBackendDocument} backendApi={apiWithCreate(createPassage)} onReplace={vi.fn()} onViewSample={vi.fn()} />)
+    render(<DocumentWorkspace document={uploadedDocument} backendDocument={readyBackendDocument} backendApi={apiWithCreate(createPassage)} onReplace={vi.fn()} />)
 
     const markButton = screen.getByRole('button', { name: 'Mark a passage' })
     await waitFor(() => expect(markButton).toBeEnabled())
@@ -462,7 +443,7 @@ describe('DocumentWorkspace', () => {
     expect(await screen.findByRole('heading', { name: '1 passage ready for retrieval' })).toBeInTheDocument()
     expect(screen.queryByText(/sample prediction/i)).not.toBeInTheDocument()
     expect(screen.queryByText('Simulated prediction')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'View interactive sample' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'View interactive sample' })).not.toBeInTheDocument()
   })
 
   it('shows the visible date after automatic document context preparation', async () => {
@@ -481,7 +462,6 @@ describe('DocumentWorkspace', () => {
         backendDocument={readyBackendDocument}
         backendApi={api}
         onReplace={vi.fn()}
-        onViewSample={vi.fn()}
       />,
     )
 
@@ -516,7 +496,6 @@ describe('DocumentWorkspace', () => {
         backendDocument={readyBackendDocument}
         backendApi={apiWithCreate()}
         onReplace={vi.fn()}
-        onViewSample={vi.fn()}
       />,
     )
 
@@ -537,7 +516,6 @@ describe('DocumentWorkspace', () => {
         backendDocument={readyBackendDocument}
         backendApi={api}
         onReplace={vi.fn()}
-        onViewSample={vi.fn()}
       />,
     )
 
@@ -577,7 +555,6 @@ describe('DocumentWorkspace', () => {
         backendApi={api}
         predictionService={predictionService}
         onReplace={vi.fn()}
-        onViewSample={vi.fn()}
       />,
     )
     await screen.findByRole('heading', { name: '2 passages ready for retrieval' })
@@ -619,7 +596,6 @@ describe('DocumentWorkspace', () => {
         backendApi={api}
         predictionService={predictionService}
         onReplace={vi.fn()}
-        onViewSample={vi.fn()}
       />,
     )
     await screen.findByRole('heading', { name: '2 passages ready for retrieval' })
@@ -657,7 +633,6 @@ describe('DocumentWorkspace', () => {
         backendApi={api}
         predictionService={predictionService}
         onReplace={vi.fn()}
-        onViewSample={vi.fn()}
       />,
     )
     await screen.findByRole('heading', { name: '2 passages ready for retrieval' })
@@ -689,7 +664,6 @@ describe('DocumentWorkspace', () => {
         backendDocument={readyBackendDocument}
         backendApi={api}
         onReplace={vi.fn()}
-        onViewSample={vi.fn()}
       />,
     )
 
@@ -707,7 +681,7 @@ describe('DocumentWorkspace', () => {
       error: null,
       remove: vi.fn(),
     }
-    render(<DocumentWorkspace document={{ ...uploadedDocument, backendDocumentId: undefined }} backendDocument={uploading} backendApi={apiWithCreate(createPassage)} onReplace={vi.fn()} onViewSample={vi.fn()} />)
+    render(<DocumentWorkspace document={{ ...uploadedDocument, backendDocumentId: undefined }} backendDocument={uploading} backendApi={apiWithCreate(createPassage)} onReplace={vi.fn()} />)
 
     expect(screen.getAllByText(/Uploading to the loopback-only local backend/)).not.toHaveLength(0)
     expect(screen.getByRole('button', { name: 'Mark a passage' })).toBeDisabled()
@@ -719,22 +693,10 @@ describe('DocumentWorkspace', () => {
       ...readyBackendDocument,
       status: 'deleting',
     }
-    render(<DocumentWorkspace document={uploadedDocument} backendDocument={deleting} backendApi={apiWithCreate()} onReplace={vi.fn()} onViewSample={vi.fn()} />)
+    render(<DocumentWorkspace document={uploadedDocument} backendDocument={deleting} backendApi={apiWithCreate()} onReplace={vi.fn()} />)
 
     expect(screen.getByRole('button', { name: 'Removing document…' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'View interactive sample' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'View interactive sample' })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Removing stored PDF' })).toBeInTheDocument()
-  })
-
-  it('returns to the document view when a prediction card is activated', async () => {
-    render(<DocumentWorkspace document={SAMPLE_DOCUMENT} onReplace={vi.fn()} onViewSample={vi.fn()} />)
-    await act(async () => vi.advanceTimersByTimeAsync(1400))
-
-    fireEvent.click(screen.getByRole('button', { name: 'Predictions' }))
-    expect(screen.getByRole('button', { name: 'Predictions' })).toHaveAttribute('aria-pressed', 'true')
-    fireEvent.click(screen.getByRole('button', { name: 'Open Passage 2 on page 1' }))
-
-    expect(screen.getByRole('button', { name: 'Document' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getAllByText('Passage 2')).toHaveLength(1)
   })
 })

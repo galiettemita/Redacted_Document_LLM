@@ -78,7 +78,7 @@ export function UploadScreen({ onFileAccepted, validate = validatePdfFile }: Upl
           </button>
           {error ? <p className="upload-error" role="alert">{error}</p> : null}
         </div>
-        <p className="demo-note"><span aria-hidden="true" />Demo — predictions are simulated</p>
+        <p className="demo-note"><span aria-hidden="true" />Production pipeline — real predictions only</p>
       </section>
     </main>
   )

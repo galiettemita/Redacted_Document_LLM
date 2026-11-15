@@ -377,19 +377,6 @@ input:focus-visible {
   white-space: nowrap;
 }
 
-.fictional-badge {
-  flex: 0 0 auto;
-  padding: 4px 7px;
-  border: 1px solid #c9d7e1;
-  border-radius: 999px;
-  background: var(--blue-soft);
-  color: var(--blue-dark);
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.035em;
-  text-transform: uppercase;
-}
-
 .secondary-button,
 .marking-toolbar button,
 .text-button {
@@ -812,7 +799,7 @@ input:focus-visible {
 
 .page-label,
 .prediction-model,
-.simulated-label {
+.prediction-provenance {
   color: var(--muted);
   font-size: 0.7rem;
 }
@@ -840,7 +827,7 @@ input:focus-visible {
   line-height: 1.55;
 }
 
-.simulated-label {
+.prediction-provenance {
   display: block;
   letter-spacing: 0.025em;
 }
@@ -893,8 +880,7 @@ input:focus-visible {
   }
 
   .workspace-brand,
-  .header-divider,
-  .fictional-badge {
+  .header-divider {
     display: none;
   }
 

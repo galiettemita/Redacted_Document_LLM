@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
@@ -147,7 +148,11 @@ class AnalysisOrchestrator:
                     "passage_deleted",
                     "Passage was deleted before analysis completed",
                 )
-            elif document is None or document.status == DocumentStatus.DELETED.value:
+            elif (
+                document is None
+                or document.status == DocumentStatus.DELETED.value
+                or _as_utc(document.expires_at) <= datetime.now(UTC)
+            ):
                 reason = (
                     "document_deleted",
                     "Document was deleted before analysis completed",
@@ -224,3 +229,7 @@ def _execution_lock(database: Database, job_id: str) -> Iterator[bool]:
                     text("SELECT pg_advisory_unlock(hashtext(:job_id))"),
                     {"job_id": job_id},
                 )
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)

@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { SAMPLE_DOCUMENT } from './data/sampleDocument'
 import { UploadScreen } from './features/upload/UploadScreen'
 import { DocumentWorkspace } from './features/workspace/DocumentWorkspace'
 import { useLocalPdf } from './hooks/useLocalPdf'
@@ -49,16 +48,6 @@ export function App() {
         localPdf.clear()
         setUploadedFile(null)
         setDocument(null)
-      }}
-      onViewSample={async () => {
-        try {
-          await backendDocument.remove()
-        } catch {
-          return
-        }
-        localPdf.clear()
-        setUploadedFile(null)
-        setDocument(SAMPLE_DOCUMENT)
       }}
     />
   )

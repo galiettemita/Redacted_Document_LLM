@@ -57,6 +57,11 @@ class Document(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    deletion_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    storage_deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
 
 class Passage(Base):

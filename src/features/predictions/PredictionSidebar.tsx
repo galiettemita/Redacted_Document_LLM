@@ -47,7 +47,7 @@ export function PredictionSidebar({
         </div>
 
         {error ? <p className="sidebar-state is-error" role="alert">{error}</p> : null}
-        {phase === 'empty' ? <p className="sidebar-state">No simulated passages are available for this document.</p> : null}
+        {phase === 'empty' ? <p className="sidebar-state">No model predictions are available for this document.</p> : null}
         {children}
         <div className="prediction-list">
           {visiblePredictions.map((prediction) => {

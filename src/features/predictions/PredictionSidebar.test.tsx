@@ -1,13 +1,13 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { SAMPLE_PASSAGES, SAMPLE_PREDICTIONS } from '../../data/sampleDocument'
+import { TEST_PASSAGES, TEST_PREDICTIONS } from '../../test/fixtures'
 import { PredictionSidebar } from './PredictionSidebar'
 
 describe('PredictionSidebar', () => {
   it('shows the active passage once and keeps the remaining cards in document order', () => {
     render(
       <PredictionSidebar
-        passages={SAMPLE_PASSAGES}
-        predictions={SAMPLE_PREDICTIONS.slice(0, 3)}
+        passages={TEST_PASSAGES}
+        predictions={TEST_PREDICTIONS.slice(0, 3)}
         phase="partial"
         error={null}
         activePassageId="passage-2"
@@ -30,8 +30,8 @@ describe('PredictionSidebar', () => {
     const onSelectPassage = vi.fn()
     render(
       <PredictionSidebar
-        passages={SAMPLE_PASSAGES}
-        predictions={SAMPLE_PREDICTIONS.slice(0, 2)}
+        passages={TEST_PASSAGES}
+        predictions={TEST_PREDICTIONS.slice(0, 2)}
         phase="complete"
         error={null}
         activePassageId={null}
@@ -51,8 +51,8 @@ describe('PredictionSidebar', () => {
     const onDismissSelection = vi.fn()
     render(
       <PredictionSidebar
-        passages={SAMPLE_PASSAGES}
-        predictions={SAMPLE_PREDICTIONS.slice(0, 1)}
+        passages={TEST_PASSAGES}
+        predictions={TEST_PREDICTIONS.slice(0, 1)}
         phase="complete"
         error={null}
         activePassageId="passage-1"
@@ -68,9 +68,9 @@ describe('PredictionSidebar', () => {
   it('labels provider output as a model prediction and never as simulated', () => {
     render(
       <PredictionSidebar
-        passages={SAMPLE_PASSAGES}
+        passages={TEST_PASSAGES}
         predictions={[{
-          ...SAMPLE_PREDICTIONS[0],
+          ...TEST_PREDICTIONS[0],
           model: 'GPT-6 Astra',
           provenance: 'model',
           usage: {
@@ -92,6 +92,26 @@ describe('PredictionSidebar', () => {
 
     expect(screen.getByText('Model prediction')).toBeInTheDocument()
     expect(screen.getByText('2,120 tokens · $0.0260 estimated')).toBeInTheDocument()
+    expect(screen.queryByText('Simulated prediction')).not.toBeInTheDocument()
+  })
+
+  it('never renders a simulated provenance label in the production sidebar', () => {
+    render(
+      <PredictionSidebar
+        passages={TEST_PASSAGES}
+        predictions={[{
+          ...TEST_PREDICTIONS[0],
+          provenance: undefined,
+        }]}
+        phase="complete"
+        error={null}
+        activePassageId="passage-1"
+        onSelectPassage={vi.fn()}
+        onDismissSelection={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('Model prediction')).toBeInTheDocument()
     expect(screen.queryByText('Simulated prediction')).not.toBeInTheDocument()
   })
 })

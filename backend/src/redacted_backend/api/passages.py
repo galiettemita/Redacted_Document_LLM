@@ -25,7 +25,6 @@ from redacted_backend.documents.detection import (
     PassageDetectionError,
     detect_passages,
 )
-from redacted_backend.domain.documents import DocumentStatus
 from redacted_backend.domain.passages import (
     PassageMergeResult,
     PassageRecord,
@@ -117,8 +116,10 @@ def create_passages_router(
             try:
                 with ready_database.session_factory() as session, session.begin():
                     _lock_sqlite_detection_transaction(ready_database, session)
-                    document = DocumentRepository(session).get_for_update(document_id)
-                    if document is None or document.status == DocumentStatus.DELETED:
+                    document = DocumentRepository(session).get_live_for_update(
+                        document_id
+                    )
+                    if document is None:
                         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
                     try:
                         result = detect_passages(

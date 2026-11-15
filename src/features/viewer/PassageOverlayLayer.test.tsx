@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
-import { SAMPLE_PASSAGES } from '../../data/sampleDocument'
+import { TEST_PASSAGES } from '../../test/fixtures'
 import { PassageOverlayLayer } from './PassageOverlayLayer'
 
 function OverlayHarness() {
@@ -10,7 +10,7 @@ function OverlayHarness() {
     <div style={{ position: 'relative', width: 600, height: 800 }}>
       <PassageOverlayLayer
         page={1}
-        passages={SAMPLE_PASSAGES}
+        passages={TEST_PASSAGES}
         hoveredId={hoveredId}
         pinnedId={pinnedId}
         onHover={setHoveredId}

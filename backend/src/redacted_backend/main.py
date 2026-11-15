@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from redacted_backend.api.analysis import create_analysis_router
@@ -8,6 +10,8 @@ from redacted_backend.api.readiness import create_readiness_router
 from redacted_backend.config import Settings
 from redacted_backend.db.base import Database
 from redacted_backend.jobs.queue import AnalysisDispatcher, DramatiqAnalysisDispatcher
+from redacted_backend.jobs.retention import RetentionScheduler
+from redacted_backend.observability import install_log_redaction
 from redacted_backend.storage.local import LocalDocumentStore
 
 
@@ -16,8 +20,8 @@ def create_app(
     *,
     analysis_dispatcher: AnalysisDispatcher | None = None,
 ) -> FastAPI:
+    install_log_redaction()
     resolved_settings = settings or Settings()
-    app = FastAPI(title=resolved_settings.app_name)
     database = (
         Database.connect(resolved_settings.database_url)
         if resolved_settings.database_url is not None
@@ -28,11 +32,33 @@ def create_app(
         if database is not None
         else None
     )
+    retention = (
+        RetentionScheduler(
+            database,
+            document_store,
+            interval_seconds=resolved_settings.document_retention_sweep_seconds,
+        )
+        if database is not None and document_store is not None
+        else None
+    )
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        if retention is not None:
+            retention.start()
+        try:
+            yield
+        finally:
+            if retention is not None:
+                retention.stop()
+
+    app = FastAPI(title=resolved_settings.app_name, lifespan=lifespan)
     dispatcher = analysis_dispatcher
     if dispatcher is None and resolved_settings.redis_url is not None:
         dispatcher = DramatiqAnalysisDispatcher(resolved_settings)
     app.state.database = database
     app.state.document_store = document_store
+    app.state.retention_scheduler = retention
     app.include_router(
         create_readiness_router(resolved_settings, database),
         prefix="/v1",

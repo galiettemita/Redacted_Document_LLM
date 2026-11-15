@@ -487,10 +487,10 @@ def test_scientific_manifest_is_stable_and_contains_disclosed_parameters():
 - Uploaded PDFs and page images expire according to configured retention; deletion is idempotent and auditable.
 - Normal logs exclude PDF text, prompt bodies, retrieved excerpts, and credentials.
 
-- [ ] **Step 1: Write failing tests proving production imports cannot reach fixture predictions, UI labels real output `Model prediction`, security limits hold, logs redact sensitive bodies, and retention deletes expired artifacts without touching active references.**
-- [ ] **Step 2: Run focused tests; expect failures while the simulated sample remains production-accessible.**
-- [ ] **Step 3: Remove or test-confine simulation assets, finish retention/resource/logging behavior, and update all user copy and documentation truthfully. Preserve the existing visual layout; if `View interactive sample` remains, it must load a cited public PDF and execute the same real backend rather than returning stored fixture text.**
-- [ ] **Step 4: Run `cd backend && uv run pytest`, backend type/lint checks, `npm test -- --run`, `npm run typecheck`, and `npm run build`; expect all PASS.**
+- [x] **Step 1: Write failing tests proving production imports cannot reach fixture predictions, UI labels real output `Model prediction`, security limits hold, logs redact sensitive bodies, and retention deletes expired artifacts without touching active references.**
+- [x] **Step 2: Run focused tests; expect failures while the simulated sample remains production-accessible.**
+- [x] **Step 3: Remove or test-confine simulation assets, finish retention/resource/logging behavior, and update all user copy and documentation truthfully. Preserve the existing visual layout; if `View interactive sample` remains, it must load a cited public PDF and execute the same real backend rather than returning stored fixture text.**
+- [x] **Step 4: Run `cd backend && uv run pytest`, backend type/lint checks, `npm test -- --run`, `npm run typecheck`, and `npm run build`; expect all PASS.**
 - [ ] **Step 5: Run complete browser QA: upload, detection, correction, one/all prediction, hover/pin, card navigation, zoom, replacement/cancellation, keyboard, and responsive behavior.**
 - [ ] **Step 6: Confirm no deployment occurred, update the checklist, commit with `feat: complete real retrieval workflow`, and push.**
 

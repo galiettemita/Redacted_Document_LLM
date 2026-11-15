@@ -20,6 +20,10 @@ from redacted_backend.documents.validation import (
     validate_pdf,
 )
 from redacted_backend.domain.documents import DocumentRecord
+from redacted_backend.jobs.retention import (
+    cleanup_unreferenced_storage,
+    storage_lifecycle_lock,
+)
 from redacted_backend.storage.local import LocalDocumentStore
 
 
@@ -37,54 +41,7 @@ def create_documents_router(
     )
     def upload_document(file: Annotated[UploadFile, File()]) -> DocumentRecord:
         ready_database, ready_store = _require_services(database, document_store)
-        if file.content_type not in {"application/pdf", "application/x-pdf"}:
-            raise HTTPException(
-                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                detail={
-                    "code": "unsupported_media_type",
-                    "message": "Select a PDF file",
-                },
-            )
-        sha256 = _hash_stream(file.file, settings.pdf_max_file_bytes)
-        file.file.seek(0)
-        stored = ready_store.put(file.file, sha256)
-        try:
-            metadata = validate_pdf(
-                stored.local_path,
-                _pdf_limits(settings),
-            )
-        except PdfValidationError as error:
-            with ready_database.session_factory() as session:
-                if (
-                    DocumentRepository(session).live_reference_count(stored.storage_key)
-                    == 0
-                ):
-                    ready_store.delete(stored.storage_key)
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={"code": error.code, "message": error.message},
-            ) from error
-
-        try:
-            with ready_database.session_factory() as session, session.begin():
-                record = DocumentRepository(session).create(
-                    filename=sanitize_filename(file.filename),
-                    sha256=stored.sha256,
-                    media_type="application/pdf",
-                    page_count=metadata.page_count,
-                    storage_key=stored.storage_key,
-                    expires_at=datetime.now(UTC)
-                    + timedelta(hours=settings.document_retention_hours),
-                )
-            return record
-        except Exception:
-            with ready_database.session_factory() as session:
-                if (
-                    DocumentRepository(session).live_reference_count(stored.storage_key)
-                    == 0
-                ):
-                    ready_store.delete(stored.storage_key)
-            raise
+        return _persist_upload(file, settings, ready_database, ready_store)
 
     @router.delete(
         "/documents/{document_id}",
@@ -94,16 +51,87 @@ def create_documents_router(
         ready_database, ready_store = _require_services(database, document_store)
         with ready_database.session_factory() as session, session.begin():
             repository = DocumentRepository(session)
-            record = repository.mark_deleted(document_id)
+            record = repository.mark_deleted(document_id, reason="user_deleted")
             if record is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
             PassageRepository(session).delete_for_document(document_id)
-            live_references = repository.live_reference_count(record.storage_key)
-        if live_references == 0:
-            ready_store.delete(record.storage_key)
+            repository.delete_sensitive_artifacts(document_id)
+        cleanup_unreferenced_storage(
+            ready_database,
+            ready_store,
+            record.storage_key,
+        )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     return router
+
+
+def _persist_upload(
+    file: UploadFile,
+    settings: Settings,
+    ready_database: Database,
+    ready_store: LocalDocumentStore,
+) -> DocumentRecord:
+    if file.content_type not in {"application/pdf", "application/x-pdf"}:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail={
+                "code": "unsupported_media_type",
+                "message": "Select a PDF file",
+            },
+        )
+    sha256 = _hash_stream(file.file, settings.pdf_max_file_bytes)
+    file.file.seek(0)
+    storage_key = ready_store.key_for(sha256)
+    with storage_lifecycle_lock(ready_database, storage_key):
+        stored = ready_store.put(file.file, sha256)
+        try:
+            metadata = validate_pdf(
+                stored.local_path,
+                _pdf_limits(settings),
+            )
+        except PdfValidationError as error:
+            _delete_unreferenced_upload(
+                ready_database,
+                ready_store,
+                stored.storage_key,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"code": error.code, "message": error.message},
+            ) from error
+
+        try:
+            with ready_database.session_factory() as session, session.begin():
+                return DocumentRepository(session).create(
+                    filename=sanitize_filename(file.filename),
+                    sha256=stored.sha256,
+                    media_type="application/pdf",
+                    page_count=metadata.page_count,
+                    storage_key=stored.storage_key,
+                    expires_at=datetime.now(UTC)
+                    + timedelta(hours=settings.document_retention_hours),
+                )
+        except Exception:
+            _delete_unreferenced_upload(
+                ready_database,
+                ready_store,
+                stored.storage_key,
+            )
+            raise
+
+
+def _delete_unreferenced_upload(
+    database: Database,
+    store: LocalDocumentStore,
+    storage_key: str,
+) -> None:
+    with database.session_factory() as session:
+        if DocumentRepository(session).live_reference_count(storage_key) > 0:
+            return
+    store.delete(storage_key)
+    with database.session_factory() as session, session.begin():
+        DocumentRepository(session).mark_storage_deleted(storage_key)
 
 
 def _require_services(

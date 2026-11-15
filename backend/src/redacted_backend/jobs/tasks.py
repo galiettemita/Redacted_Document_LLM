@@ -9,8 +9,10 @@ from redacted_backend.db.repositories.analysis import AnalysisJobRepository
 from redacted_backend.jobs.heartbeat import WorkerHeartbeatMiddleware
 from redacted_backend.jobs.runtime import build_analysis_orchestrator
 from redacted_backend.models.openai_gateway import ModelGatewayError
+from redacted_backend.observability import install_log_redaction
 from redacted_backend.retrieval.service import RetrievalError
 
+install_log_redaction()
 _settings = Settings()
 if _settings.redis_url is None:
     raise RuntimeError("REDACTED_REDIS_URL is required for the analysis worker")

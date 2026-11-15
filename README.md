@@ -22,16 +22,19 @@ Validate the local service definition:
 docker compose config
 ```
 
-Start the local backend:
+Start the stateful dependencies first:
 
 ```bash
-docker compose up --build backend
+docker compose up -d postgres redis
 ```
 
-Apply the database migrations in a second terminal:
+Build the backend image and apply migrations before starting the API. This order
+ensures the retention service never runs against an older schema:
 
 ```bash
+docker compose build backend
 docker compose run --rm backend alembic upgrade head
+docker compose up -d backend
 ```
 
 Then open `http://127.0.0.1:8000/v1/readiness`. HTTP readiness is independent from database, worker, corpus, and model readiness, so prediction readiness remains false until every real dependency is connected. Docker publishes the database, Redis, and API on `127.0.0.1` only.
@@ -46,6 +49,17 @@ docker compose --profile retrieval up --build backend opensearch worker
 `REDACTED_CORPUS_ROOT` must be the directory containing `manifest.json`, `bm25-manifest.json`, `dense-manifest.json`, and the `dense/` artifact directory; Compose mounts it read-only into the API and worker while OpenSearch keeps its own writable subdirectory there. The worker image installs the locked BGE/FAISS retrieval group; the web API image remains small. The worker publishes no port, and readiness stays false unless its expiring Redis heartbeat is current.
 
 The upload screen sends PDFs to the local backend for validation and temporary content-addressed persistence while rendering a local object URL immediately. The backend scans every page, persists detected redactions under stable passage IDs, and prepares a separate hidden-answer-free context and `context-query-v1` retrieval input for every passage in one extraction/render pass. Structural target/redaction markers and the frozen stop-word list are removed from each query; query text, SHA-256, term count, query version, and stop-word version stay bound to the exact passage revision. The browser receives only safe readiness summaries, not transcript, query, or evidence text.
+
+Uploaded PDFs become inaccessible at their 24-hour deadline. A background
+retention sweep marks expired records with the auditable `retention_expired`
+reason, removes PDF-derived date/context/retrieval/prediction payloads, and
+deletes content-addressed bytes only after the final live document reference is
+gone. Physical deletion is durably recorded and retried after storage failures;
+the default sweep interval is five minutes. User deletion is idempotent and
+records `user_deleted`. Runtime settings cannot raise the frozen
+PDF size, page, decompression, render-pixel, parser-timeout, or retention ceilings.
+Normal Python logs globally redact structured PDF text, prompt/evidence fields,
+authorization values, and OpenAI-style secret tokens.
 
 Users can redraw, add, or remove passages, then choose **Predict passage** or **Predict all passages**. A blocked run displays the exact corpus, model, and worker gates. A ready run executes outside the request, resumes from durable query/retrieval checkpoints, filters replayed events to the newly scheduled jobs, and renders provider output as **Model prediction** with recorded token usage and estimated cost in the sidebar—never over the PDF. The worker uses an expiring Redis heartbeat and a PostgreSQL advisory lock per job. Provider results are stored on the owning job before the next stage advances; passage changes or deletion cancel active work before another external stage is allowed.
 
@@ -157,18 +171,16 @@ To create a production bundle, run `npm run build`. The output is written to `di
 3. It automatically detects the date from uncovered visible text in the first-page header and prepares a separate visible-only context and deterministic search query for every passage. The selected passage summary shows the date, geometry-derived length cue, estimated words, visible-word count, confirmed-mask count, and visible-query-term count. Transcript and query text are not exposed as predictions or placed over the PDF.
 4. Review the highlights. Use **Correct selected area** to redraw one, **Add missed passage** for an omission, or **Remove selected passage** to confirm a false-positive removal. Remaining contexts rebuild automatically after every correction.
 5. Choose **Predict passage** or **Predict all passages**. If readiness is incomplete, the sidebar lists the exact blockers and makes no retrieval or model call. If ready, the worker streams each real result into its passage-linked sidebar card.
-6. Hover, focus, or select a passage to link its PDF geometry with the selected-passage area in the sidebar. Choose **View interactive sample** only if you want to inspect the separate fictional prediction demonstration.
+6. Hover, focus, or select a passage to link its PDF geometry with the selected-passage area in the sidebar. Every prediction card comes only from the real provider event stream and is labeled **Model prediction**.
 
 ## Important limitations
 
 - Visible-only context preparation runs automatically for all detected passages. Because the paper requires a date but does not prescribe a parser, `visible-date-v1` accepts only one agreeing ISO or English month-name date that occupies a complete line in the top 20% of page one. OCR date words must each have at least 0.75 confidence. It fails closed when that date is missing, ambiguous, low-confidence, inside any automatic or manually marked redaction, mask coverage is uncertain, OCR is unavailable, or nearby visible geometry cannot support a length cue. Browser-supplied dates, PDF metadata alone, corpus results, models, and hidden passages cannot supply the date.
 - The production worker, retrieval, model boundary, and website control are connected, but live prediction readiness remains false until the complete corpus/index manifests, worker heartbeat, model key, and explicit paid-call approval all pass. The current loopback instance therefore creates a durable blocked job and makes no retrieval, token-count, or model request.
-- History Lab's replacement public MCP was healthy on November 13, 2026 and reports the expected multi-million-document collections, but its hosted top-100 search tools are not a bulk export and cannot replace Andrew's locally reproduced BM25/BGE indexes. The older document API remains retired, the inspected Hugging Face snapshot remains scientifically incomplete, and this Mac has 129 GiB free versus the capture preflight's 150 GiB minimum. Full source acquisition still needs a complete export path and additional storage.
+- History Lab's replacement public MCP was healthy on November 15, 2026 and reports the expected multi-million-document collections, but its capped hosted search tools are not a bulk export and cannot replace Andrew's locally reproduced BM25/BGE indexes. The older document API still returns HTTP 502, the inspected Hugging Face snapshot remains scientifically incomplete, and this Mac has 115 GiB free versus the capture preflight's 150 GiB minimum. Full source acquisition still needs a complete export path and additional storage.
 - Appendix F prints `{hint}` but does not publish its substitution code or a generation token cap. The implementation records the evidence-supported rendering `It is {bucket} long.` (matching the paper's examples) and a 4,096-token provider reservation as versioned engineering choices rather than attributing either to Andrew's method.
-- Stored documents expire after 24 hours by configuration; replacement requests immediate deletion. Automated retention cleanup is a later hardening task.
-- The bundled Northstar memorandum and all of its passage predictions are fictional.
-- `Demo LLM` is used only by the fictional sample and is not an active model.
-- Prediction timing, empty states, and failures are simulated only for the fictional sample.
+- Stored documents become unavailable after at most 24 hours; the production retention scheduler and replacement flow retry unreferenced-byte cleanup and remove derived sensitive artifacts while retaining an auditable tombstone.
+- The production frontend contains no fictional document, fixture prediction, mock prediction service, or simulated-result route. Deterministic fixtures remain test-only.
 
 ## Project structure
 
@@ -176,9 +188,10 @@ To create a production bundle, run `npm run build`. The output is written to `di
 - `src/features/viewer/` — PDF rendering, controls, overlays, and rectangle drawing.
 - `src/features/predictions/` — selected passage area and ordered prediction cards.
 - `src/features/workspace/` — integrated document state and responsive navigation.
-- `src/services/` — typed backend transport plus the fictional sample's deterministic mock.
-- `src/data/` — fictional passage coordinates and prediction fixtures.
-- `scripts/generate-sample-pdf.mjs` — regenerates the bundled fictional PDF from shared geometry.
+- `src/services/` — typed backend transport and the real HTTP/SSE prediction adapter.
+- `src/test/` — deterministic fixtures imported only by automated tests.
+- `backend/src/redacted_backend/jobs/retention.py` — scheduled expiry, sensitive-artifact cleanup, and reference-safe storage deletion.
+- `backend/src/redacted_backend/observability.py` — process-wide structured log redaction.
 
 ## Verification
 
@@ -190,4 +203,4 @@ npm run typecheck
 npm run build
 ```
 
-The automated suite covers upload errors, object-URL cleanup, simulation cancellation, normalized drawing, grouped multi-line passage selection, deterministic visible-date evidence and conflicts, revision-bound context/query/job persistence and invalidation, ordered/resumable analysis events, uncertain-request idempotency, structural-marker removal, safe retry/backfill/conflict behavior, safe response fields, no prediction text over uploaded PDFs, sidebar ordering, replacement reset, and responsive prediction-to-document navigation.
+The automated suite covers upload errors, object-URL cleanup, production-only provider labels, normalized drawing, grouped multi-line passage selection, deterministic visible-date evidence and conflicts, revision-bound context/query/job persistence and invalidation, ordered/resumable analysis events, uncertain-request idempotency, structural-marker removal, safe retry/backfill/conflict behavior, PDF safety ceilings, log redaction, reference-safe retention, safe response fields, no prediction text over uploaded PDFs, sidebar ordering, replacement reset, and responsive prediction-to-document navigation.

@@ -51,3 +51,5 @@ class DocumentRecord(BaseModel):
     mask_set_revision: int = Field(default=0, ge=0)
     created_at: datetime
     expires_at: datetime
+    deletion_reason: str | None = None
+    storage_deleted_at: datetime | None = None

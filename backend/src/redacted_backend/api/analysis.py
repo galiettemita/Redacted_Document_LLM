@@ -19,10 +19,10 @@ from redacted_backend.db.repositories.analysis import (
     AnalysisConflictError,
     AnalysisJobRepository,
 )
+from redacted_backend.db.repositories.documents import DocumentRepository
 from redacted_backend.db.repositories.passages import PassageRepository
 from redacted_backend.db.repositories.visible_examples import VisibleExampleRepository
 from redacted_backend.domain.analysis import AnalysisBlocker, AnalysisJobRecord
-from redacted_backend.domain.passages import PassageStatus
 from redacted_backend.jobs.queue import AnalysisDispatcher
 
 
@@ -59,8 +59,8 @@ def create_analysis_router(
             )
         try:
             with ready_database.session_factory() as session, session.begin():
-                passage = PassageRepository(session).get(passage_id)
-                if passage is None or passage.status == PassageStatus.DELETED:
+                passage = PassageRepository(session).get_live(passage_id)
+                if passage is None:
                     raise _not_found()
                 if passage.revision != body.expected_revision:
                     raise HTTPException(
@@ -120,7 +120,12 @@ def create_analysis_router(
         ready_database = _require_database(database)
         with ready_database.session_factory() as session:
             record = AnalysisJobRepository(session).get(job_id)
-        if record is None:
+            document = (
+                DocumentRepository(session).get_live(record.document_id)
+                if record is not None
+                else None
+            )
+        if record is None or document is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "analysis_job_not_found"},
@@ -133,6 +138,12 @@ def create_analysis_router(
         last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
     ) -> StreamingResponse:
         ready_database = _require_database(database)
+        with ready_database.session_factory() as session:
+            if DocumentRepository(session).get_live(document_id) is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"code": "document_not_found"},
+                )
         after = _last_event_id(last_event_id)
         return StreamingResponse(
             _event_stream(ready_database, document_id, after),
@@ -180,6 +191,8 @@ def _event_stream(
     last_output = time.monotonic()
     while True:
         with database.session_factory() as session:
+            if DocumentRepository(session).get_live(document_id) is None:
+                return
             repository = AnalysisJobRepository(session)
             events = repository.events_after(document_id, cursor)
             terminal = repository.document_is_terminal(document_id)

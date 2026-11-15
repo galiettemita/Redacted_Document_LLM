@@ -176,3 +176,24 @@ def test_delete_tombstones_the_record_and_removes_unreferenced_bytes(
         record = session.scalar(select(Document).where(Document.id == body["id"]))
         assert record is not None
         assert record.status == "deleted"
+        assert record.deletion_reason == "user_deleted"
+        assert record.storage_deleted_at is not None
+
+
+def test_deleting_the_same_document_twice_is_idempotent(tmp_path: Path) -> None:
+    app = create_test_app(tmp_path)
+    upload = asyncio.run(
+        request(
+            app,
+            "POST",
+            "/v1/documents",
+            files={"file": ("bulletin.pdf", make_pdf(), "application/pdf")},
+        )
+    )
+    document_id = upload.json()["id"]
+
+    first = asyncio.run(request(app, "DELETE", f"/v1/documents/{document_id}"))
+    second = asyncio.run(request(app, "DELETE", f"/v1/documents/{document_id}"))
+
+    assert first.status_code == 204
+    assert second.status_code == 204

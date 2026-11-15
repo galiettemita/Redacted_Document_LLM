@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { SAMPLE_PASSAGES, SAMPLE_PREDICTIONS } from '../../data/sampleDocument'
 import type { BackendDocumentState } from '../../hooks/useBackendDocument'
-import { usePredictionSimulation } from '../../hooks/usePredictionSimulation'
 import { usePredictionStream } from '../../hooks/usePredictionStream'
 import {
   BackendApiError,
@@ -12,7 +10,6 @@ import {
   type VisibleContextSummary,
 } from '../../services/backendApi'
 import { createHttpPredictionService } from '../../services/httpPredictionService'
-import { createMockPredictionService } from '../../services/mockPredictionService'
 import type { PredictionService } from '../../services/predictionService'
 import type { DocumentDescriptor, Passage, PassageRect } from '../../types'
 import { PredictionSidebar } from '../predictions/PredictionSidebar'
@@ -23,7 +20,6 @@ import { initialWorkspaceState, workspaceReducer } from './workspaceReducer'
 interface DocumentWorkspaceProps {
   document: DocumentDescriptor
   onReplace: () => void
-  onViewSample: () => void
   backendDocument?: BackendDocumentState
   backendApi?: BackendApi
   predictionService?: PredictionService
@@ -43,7 +39,6 @@ interface DetectionTask {
 export function DocumentWorkspace({
   document,
   onReplace,
-  onViewSample,
   backendDocument,
   backendApi = defaultBackendApi,
   predictionService,
@@ -71,17 +66,12 @@ export function DocumentWorkspace({
   const passageRemovalRequest = useRef<AbortController | null>(null)
   const analysisRequest = useRef<AbortController | null>(null)
   const analysisRunId = useRef<string | null>(null)
-  const sampleService = useMemo(() => createMockPredictionService({
-    predictionsByDocument: { [document.id]: document.mode === 'sample' ? SAMPLE_PREDICTIONS : [] },
-    delayMs: 650,
-  }), [document.id, document.mode])
-  const simulation = usePredictionSimulation(document.mode === 'sample' ? document : null, sampleService)
   const uploadedPredictionService = useMemo(
     () => predictionService ?? createHttpPredictionService(),
     [predictionService],
   )
   const modelStream = usePredictionStream(
-    document.mode === 'uploaded' && predictionRunKey > 0 ? document : null,
+    predictionRunKey > 0 ? document : null,
     uploadedPredictionService,
     predictionRunKey,
     predictionJobIds,
@@ -136,14 +126,11 @@ export function DocumentWorkspace({
     target?.focus({ preventScroll: true })
   }, [state.page, state.pinnedId])
 
-  const passages = document.mode === 'sample' ? SAMPLE_PASSAGES : state.passages
-  const predictions = document.mode === 'sample' ? simulation.predictions : modelStream.predictions
-  const phase = document.mode === 'sample'
-    ? simulation.phase
-    : modelStream.phase
+  const passages = state.passages
+  const predictions = modelStream.predictions
+  const phase = modelStream.phase
   const activePassageId = getEffectivePassageId(state.hoveredId, state.pinnedId)
-  const backendReady = document.mode === 'uploaded'
-    && backendDocument?.status === 'ready'
+  const backendReady = backendDocument?.status === 'ready'
     && Boolean(document.backendDocumentId)
   const deletionInProgress = backendDocument?.status === 'deleting'
   const markingUnavailable = !backendReady
@@ -462,7 +449,6 @@ export function DocumentWorkspace({
           <span className="workspace-brand">Redacted Document LLM</span>
           <span className="header-divider" aria-hidden="true" />
           <span className="filename" title={document.filename}>{document.filename}</span>
-          {document.label ? <span className="fictional-badge">{document.label}</span> : null}
         </div>
         <button
           className="secondary-button"
@@ -603,34 +589,30 @@ export function DocumentWorkspace({
             passages={passages}
             predictions={predictions}
             phase={phase}
-            error={document.mode === 'sample'
-              ? simulation.error
-              : analysisError
-                ?? modelStream.error
-                ?? passageError
-                ?? detectionError
-                ?? contextError
-                ?? backendDocumentError(backendDocument)}
+            error={analysisError
+              ?? modelStream.error
+              ?? passageError
+              ?? detectionError
+              ?? contextError
+              ?? backendDocumentError(backendDocument)}
             activePassageId={activePassageId}
             onSelectPassage={handleSelectPassage}
             onDismissSelection={() => dispatch({ type: 'dismiss' })}
-            missingPredictionMessage={document.mode === 'uploaded'
-              ? passageSaveStatus === 'saving'
-                ? 'Saving this passage to the backend…'
-                : detectionStatus === 'detecting'
-                  ? 'Scanning every page for hidden passages…'
-                  : detectionStatus === 'failed'
-                    ? 'Automatic detection needs review before predictions can begin.'
-                    : contextStatus === 'preparing'
-                      ? 'Preparing visible-only context automatically for every passage…'
-                      : contextStatus === 'ready'
-                        ? analysisScheduleStatus === 'running'
-                          ? 'The real retrieval and model job is running for this passage.'
-                          : 'Visible-only context and a search query are ready for this passage.'
-                        : passages.length
-                          ? 'Automatic visible-only context preparation has not finished.'
-                          : 'No hidden passages are available for prediction.'
-              : undefined}
+            missingPredictionMessage={passageSaveStatus === 'saving'
+              ? 'Saving this passage to the backend…'
+              : detectionStatus === 'detecting'
+                ? 'Scanning every page for hidden passages…'
+                : detectionStatus === 'failed'
+                  ? 'Automatic detection needs review before predictions can begin.'
+                  : contextStatus === 'preparing'
+                    ? 'Preparing visible-only context automatically for every passage…'
+                    : contextStatus === 'ready'
+                      ? analysisScheduleStatus === 'running'
+                        ? 'The real retrieval and model job is running for this passage.'
+                        : 'Visible-only context and a search query are ready for this passage.'
+                      : passages.length
+                        ? 'Automatic visible-only context preparation has not finished.'
+                        : 'No hidden passages are available for prediction.'}
           >
             {document.mode === 'uploaded' ? (
               <div className="uploaded-document-note">
@@ -697,14 +679,6 @@ export function DocumentWorkspace({
                           : `Predict ${passages.length === 1 ? 'passage' : 'all passages'}`}
                   </button>
                 ) : null}
-                <button
-                  className="text-button"
-                  type="button"
-                  disabled={deletionInProgress}
-                  onClick={onViewSample}
-                >
-                  View interactive sample
-                </button>
               </div>
             ) : null}
           </PredictionSidebar>

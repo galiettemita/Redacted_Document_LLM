@@ -76,6 +76,19 @@ class PassageRepository:
         model = self._session.get(Passage, str(passage_id))
         return _to_record(model) if model is not None else None
 
+    def get_live(self, passage_id: UUID | str) -> PassageRecord | None:
+        model = self._session.scalar(
+            select(Passage)
+            .join(Document, Passage.document_id == Document.id)
+            .where(
+                Passage.id == str(passage_id),
+                Passage.status != PassageStatus.DELETED.value,
+                Document.status != DocumentStatus.DELETED.value,
+                Document.expires_at > datetime.now(UTC),
+            )
+        )
+        return _to_record(model) if model is not None else None
+
     def list_live_for_document(
         self,
         document_id: UUID | str,
@@ -98,7 +111,7 @@ class PassageRepository:
         document = self._session.scalar(
             select(Document).where(Document.id == str(document_id)).with_for_update()
         )
-        if document is None or document.status == DocumentStatus.DELETED.value:
+        if not _document_is_live(document):
             raise PassageNotFoundError("document not found")
         initial_mask_set_revision = document.mask_set_revision
         all_models = self._session.scalars(
@@ -222,6 +235,8 @@ class PassageRepository:
         passage = self._session.get(Passage, record.resource_id)
         if passage is None:
             raise PassageConflictError("idempotent resource no longer exists")
+        if self.get_live(passage.id) is None:
+            raise PassageNotFoundError("document not found")
         return _to_record(passage)
 
     def save_idempotency(
@@ -413,8 +428,17 @@ class PassageRepository:
         self._session.flush()
 
     def _get_live(self, passage_id: UUID | str) -> Passage:
-        model = self._session.get(Passage, str(passage_id))
-        if model is None or model.status == PassageStatus.DELETED.value:
+        model = self._session.scalar(
+            select(Passage)
+            .join(Document, Passage.document_id == Document.id)
+            .where(
+                Passage.id == str(passage_id),
+                Passage.status != PassageStatus.DELETED.value,
+                Document.status != DocumentStatus.DELETED.value,
+                Document.expires_at > datetime.now(UTC),
+            )
+        )
+        if model is None:
             raise PassageNotFoundError("passage not found")
         return model
 
@@ -425,7 +449,7 @@ class PassageRepository:
         document = self._session.scalar(
             select(Document).where(Document.id == str(document_id)).with_for_update()
         )
-        if document is None or document.status == DocumentStatus.DELETED.value:
+        if not _document_is_live(document):
             raise PassageNotFoundError("document not found")
         return document
 
@@ -546,3 +570,12 @@ def _next_passage_label_number(models: list[Passage]) -> int:
 def _passage_label_number(label: str) -> int | None:
     suffix = label.removeprefix("Passage ")
     return int(suffix) if suffix.isdigit() else None
+
+
+def _document_is_live(document: Document | None) -> bool:
+    if document is None or document.status == DocumentStatus.DELETED.value:
+        return False
+    expires_at = document.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    return expires_at > datetime.now(UTC)

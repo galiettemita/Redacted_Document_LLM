@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Any
 
-from pydantic import SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,12 +26,25 @@ class Settings(BaseSettings):
     worker_heartbeat_key: str = "redacted:analysis-worker:heartbeat"
     worker_heartbeat_ttl_seconds: int = 30
     document_storage_root: Path = Path("/var/lib/redacted/documents")
-    document_retention_hours: int = 24
-    pdf_max_file_bytes: int = 100 * 1024 * 1024
-    pdf_max_pages: int = 500
-    pdf_max_decompressed_bytes: int = 512 * 1024 * 1024
-    pdf_max_rendered_page_pixels: int = 25_000_000
-    pdf_parser_timeout_seconds: float = 10.0
+    document_retention_hours: int = Field(default=24, ge=1, le=24)
+    document_retention_sweep_seconds: int = Field(default=300, ge=10, le=3_600)
+    pdf_max_file_bytes: int = Field(
+        default=100 * 1024 * 1024,
+        ge=1,
+        le=100 * 1024 * 1024,
+    )
+    pdf_max_pages: int = Field(default=500, ge=1, le=500)
+    pdf_max_decompressed_bytes: int = Field(
+        default=512 * 1024 * 1024,
+        ge=1,
+        le=512 * 1024 * 1024,
+    )
+    pdf_max_rendered_page_pixels: int = Field(
+        default=25_000_000,
+        ge=1,
+        le=25_000_000,
+    )
+    pdf_parser_timeout_seconds: float = Field(default=10.0, gt=0, le=10.0)
 
     @field_validator("openai_api_key", mode="before")
     @classmethod

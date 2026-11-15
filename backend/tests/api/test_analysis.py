@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import func, select
 
 import redacted_backend.api.analysis as analysis_api
-from redacted_backend.db.models import AnalysisEvent, AnalysisJob
+from redacted_backend.db.models import AnalysisEvent, AnalysisJob, Document
 from tests.api.test_context import (
     create_test_app_and_passage,
     install_fake_preparation,
@@ -94,6 +95,36 @@ def test_analysis_request_requires_the_exact_prepared_passage_revision(
 
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "passage_revision_changed"
+
+
+def test_analysis_request_rejects_a_document_at_its_expiry_deadline(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app, document, passage = create_test_app_and_passage(tmp_path)
+    install_fake_preparation(monkeypatch, calls=[])
+    assert (
+        asyncio.run(
+            request(app, "POST", f"/v1/passages/{passage.id}:prepare-context")
+        ).status_code
+        == 200
+    )
+    with app.state.database.session_factory() as session, session.begin():
+        model = session.get(Document, str(document.id))
+        model.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+
+    response = asyncio.run(
+        request(
+            app,
+            "POST",
+            f"/v1/passages/{passage.id}/analysis",
+            headers={"Idempotency-Key": "expired-document"},
+            json={"expected_revision": passage.revision},
+        )
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "passage_not_found"
 
 
 def test_document_events_are_ordered_sse_and_resume_after_last_event_id(

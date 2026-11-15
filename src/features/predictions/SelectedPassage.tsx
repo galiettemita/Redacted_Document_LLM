@@ -40,9 +40,7 @@ export function SelectedPassage({
                   ${prediction.usage.estimatedCostUsd.toFixed(4)} estimated
                 </p>
               ) : null}
-              <p className="simulated-label">
-                {prediction.provenance === 'model' ? 'Model prediction' : 'Simulated prediction'}
-              </p>
+              <p className="prediction-provenance">Model prediction</p>
             </>
           ) : (
             <p className="selected-empty">{missingPredictionMessage}</p>

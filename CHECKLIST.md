@@ -132,3 +132,12 @@
     - [x] Select the next passage in document order and rebuild only the remaining visible-only contexts.
     - [x] Cancel stale context/removal requests and reject an unconfirmed backend tombstone.
     - [x] Cover transport, state transition, confirmation, overlay removal, and context rebuilding with frontend tests.
+  - [x] Task 13A: Remove production simulation and harden the real prediction path.
+    - [x] Remove the fictional PDF, sample predictions, simulation hook, mock production service, and interactive sample route.
+    - [x] Label every reachable provider result **Model prediction** and keep deterministic fixtures test-only.
+    - [x] Enforce non-overridable 24-hour/PDF resource ceilings in runtime configuration.
+    - [x] Reject access at expiry, drain every cleanup batch, retry storage failures durably, clear derived sensitive text, record deletion reasons, and preserve shared bytes until their final live reference expires.
+    - [x] Coordinate upload/unlink decisions across API processes with a PostgreSQL advisory lock.
+    - [x] Make user deletion idempotent and redact PDF text, prompt/evidence fields, authorization values, and provider-style secrets from normal logs.
+    - [x] Recheck the official History Lab source and local storage without substituting capped hosted search for Andrew's four-list retrieval.
+    - [ ] Run the first full retrieval/model browser trace after a complete export path, at least 150 GiB free storage, model access, and explicit paid-call approval are available.

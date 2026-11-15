@@ -23,7 +23,8 @@ describe('upload screen', () => {
       screen.getByText('Upload a redacted PDF to explore AI predictions for its hidden passages.'),
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Choose PDF' })).toBeInTheDocument()
-    expect(screen.getByText('Demo — predictions are simulated')).toBeInTheDocument()
+    expect(screen.getByText('Production pipeline — real predictions only')).toBeInTheDocument()
+    expect(screen.queryByText(/simulated/i)).not.toBeInTheDocument()
     expect(screen.queryByText('View interactive sample')).not.toBeInTheDocument()
   })
 })

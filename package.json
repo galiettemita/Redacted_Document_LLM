@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "generate:sample": "node scripts/generate-sample-pdf.mjs",
     "preview": "vite preview",
     "test": "vitest",
     "typecheck": "tsc -b --pretty false"

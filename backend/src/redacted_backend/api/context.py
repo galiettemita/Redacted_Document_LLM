@@ -27,7 +27,6 @@ from redacted_backend.documents.preparation import (
     prepare_visible_context,
     prepare_visible_contexts,
 )
-from redacted_backend.domain.documents import DocumentStatus
 from redacted_backend.domain.passages import PassageRecord, PassageStatus
 from redacted_backend.domain.visible_examples import VisibleExample
 from redacted_backend.retrieval.context_query import (
@@ -91,8 +90,8 @@ def create_context_router(
         ready_database, ready_store = _require_services(database, document_store)
         try:
             with ready_database.session_factory() as session, session.begin():
-                document = DocumentRepository(session).get(document_id)
-                if document is None or document.status == DocumentStatus.DELETED:
+                document = DocumentRepository(session).get_live(document_id)
+                if document is None:
                     raise _not_found()
                 passages = PassageRepository(session).list_live_for_document(
                     document.id
@@ -153,10 +152,9 @@ def create_context_router(
         try:
             with ready_database.session_factory() as session, session.begin():
                 documents = DocumentRepository(session)
-                current_document = documents.get_for_update(document.id)
+                current_document = documents.get_live_for_update(document.id)
                 if (
                     current_document is None
-                    or current_document.status == DocumentStatus.DELETED
                     or current_document.sha256 != document.sha256
                     or current_document.storage_key != document.storage_key
                 ):
@@ -240,10 +238,9 @@ def create_context_router(
                 try:
                     with ready_database.session_factory() as session, session.begin():
                         documents = DocumentRepository(session)
-                        current_document = documents.get_for_update(document.id)
+                        current_document = documents.get_live_for_update(document.id)
                         if (
                             current_document is None
-                            or current_document.status == DocumentStatus.DELETED
                             or current_document.sha256 != document.sha256
                             or current_document.storage_key != document.storage_key
                         ):
@@ -328,8 +325,8 @@ def create_context_router(
                 passage = passages.get(passage_id)
                 if passage is None or passage.status == PassageStatus.DELETED:
                     raise _not_found()
-                document = DocumentRepository(session).get(passage.document_id)
-                if document is None or document.status == DocumentStatus.DELETED:
+                document = DocumentRepository(session).get_live(passage.document_id)
+                if document is None:
                     raise _not_found()
                 artifacts = VisibleExampleRepository(session)
                 existing = artifacts.get_current(
@@ -371,10 +368,9 @@ def create_context_router(
                         "passage revision changed during preparation"
                     )
                 documents = DocumentRepository(session)
-                current_document = documents.get_for_update(current.document_id)
+                current_document = documents.get_live_for_update(current.document_id)
                 if (
                     current_document is None
-                    or current_document.status == DocumentStatus.DELETED
                     or current_document.sha256 != document.sha256
                     or current_document.storage_key != document.storage_key
                 ):
@@ -434,7 +430,7 @@ def create_context_router(
         except IntegrityError:
             with ready_database.session_factory() as session, session.begin():
                 documents = DocumentRepository(session)
-                current_document = documents.get_for_update(document.id)
+                current_document = documents.get_live_for_update(document.id)
                 if (
                     current_document is None
                     or current_document.mask_set_revision != expected_mask_set_revision
