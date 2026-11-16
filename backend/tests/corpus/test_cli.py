@@ -1,11 +1,27 @@
 from __future__ import annotations
 
+import gzip
+import hashlib
+import json
+from pathlib import Path
+
+import pytest
+
 from redacted_backend.corpus import cli
+from redacted_backend.corpus.bulk_export import (
+    BulkExportAudit,
+    BulkExportAuditError,
+    BulkExportCatalog,
+)
+from redacted_backend.corpus.historylab_export import CatalogEntry
 from redacted_backend.corpus.preflight import (
     PreflightReport,
     PreflightStatus,
     VolumeReport,
 )
+from redacted_backend.corpus.snapshot import SnapshotFile, SnapshotLock
+
+REVISION = "411cf6f86b38342683e27148be167c6094d1a10c"
 
 
 def _report(status: PreflightStatus) -> PreflightReport:
@@ -73,3 +89,166 @@ def test_preflight_enforcement_accepts_recommended_capacity(monkeypatch) -> None
     )
 
     assert exit_code == 0
+
+
+def _audit_inputs(
+    tmp_path: Path,
+    *,
+    row: dict[str, object] | None = None,
+    raw_row: bytes | None = None,
+    catalog_counts: dict[str, int],
+) -> tuple[Path, Path, Path, Path]:
+    source = tmp_path / "source.json.gz"
+    with gzip.open(source, "wb") as target:
+        target.write(
+            raw_row
+            if raw_row is not None
+            else json.dumps(row, sort_keys=True).encode("utf-8") + b"\n"
+        )
+    item = SnapshotFile(
+        path=source.name,
+        size_bytes=source.stat().st_size,
+        sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+    )
+    snapshot = SnapshotLock(
+        repo_id="HistoryLab/foiarchive",
+        revision=REVISION,
+        license="cc-by-nc-4.0",
+        files=[item],
+    )
+    catalog = BulkExportCatalog(
+        schema_version="historylab-huggingface-catalog-v1",
+        repo_id="HistoryLab/foiarchive",
+        revision=REVISION,
+        release_url="https://lab.history.columbia.edu/news/foiarchive-hugging-face",
+        source=item,
+        document_count=sum(catalog_counts.values()),
+        collections=[
+            CatalogEntry(corpus=corpus, doc_cnt=count)
+            for corpus, count in sorted(catalog_counts.items())
+        ],
+    )
+    snapshot_path = tmp_path / "snapshot.json"
+    catalog_path = tmp_path / "catalog.json"
+    snapshot_path.write_text(snapshot.model_dump_json(), encoding="utf-8")
+    catalog_path.write_text(catalog.model_dump_json(), encoding="utf-8")
+    exclusions_path = (
+        Path(__file__).parents[2] / "corpus/exclusions/v1.yaml"
+    )
+    return source, snapshot_path, catalog_path, exclusions_path
+
+
+def _document_row(source: str | None) -> dict[str, object]:
+    return {
+        "doc_id": "doc-1",
+        "classification": "SECRET",
+        "authored": "1974-01-01",
+        "title": "A title",
+        "body": "Document body",
+        "source": source,
+        "pg_cnt": 1,
+        "char_cnt": 13,
+        "word_cnt": 2,
+    }
+
+
+def _audit_command(
+    *,
+    source: Path,
+    snapshot: Path,
+    catalog: Path,
+    exclusions: Path,
+    output: Path,
+) -> list[str]:
+    return [
+        "audit-bulk-export",
+        "--source",
+        str(source),
+        "--snapshot-lock",
+        str(snapshot),
+        "--catalog",
+        str(catalog),
+        "--exclusions",
+        str(exclusions),
+        "--output",
+        str(output),
+    ]
+
+
+def test_audit_bulk_export_writes_ready_report_atomically(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    source, snapshot, catalog, exclusions = _audit_inputs(
+        tmp_path,
+        row=_document_row("cables"),
+        catalog_counts={"cables": 1},
+    )
+    output = tmp_path / "reports/audit.json"
+
+    exit_code = cli.run(
+        _audit_command(
+            source=source,
+            snapshot=snapshot,
+            catalog=catalog,
+            exclusions=exclusions,
+            output=output,
+        )
+    )
+
+    report = BulkExportAudit.model_validate_json(output.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert report.ready_for_import is True
+    assert BulkExportAudit.model_validate_json(capsys.readouterr().out) == report
+    assert not list(output.parent.glob(".audit.json.*"))
+
+
+def test_audit_bulk_export_writes_unready_report_and_returns_two(
+    tmp_path: Path,
+) -> None:
+    source, snapshot, catalog, exclusions = _audit_inputs(
+        tmp_path,
+        row=_document_row("https://history.state.gov/example"),
+        catalog_counts={"cia": 1},
+    )
+    output = tmp_path / "audit.json"
+
+    exit_code = cli.run(
+        _audit_command(
+            source=source,
+            snapshot=snapshot,
+            catalog=catalog,
+            exclusions=exclusions,
+            output=output,
+        )
+    )
+
+    report = BulkExportAudit.model_validate_json(output.read_text(encoding="utf-8"))
+    assert exit_code == 2
+    assert report.ready_for_import is False
+    assert "unresolved_collection_labels" in report.reasons
+    assert "required_corpus_missing:cables" in report.reasons
+
+
+def test_audit_bulk_export_does_not_publish_report_after_parse_failure(
+    tmp_path: Path,
+) -> None:
+    source, snapshot, catalog, exclusions = _audit_inputs(
+        tmp_path,
+        raw_row=b"{not-json}\n",
+        catalog_counts={"cables": 1},
+    )
+    output = tmp_path / "audit.json"
+
+    with pytest.raises(BulkExportAuditError, match="invalid row"):
+        cli.run(
+            _audit_command(
+                source=source,
+                snapshot=snapshot,
+                catalog=catalog,
+                exclusions=exclusions,
+                output=output,
+            )
+        )
+
+    assert not output.exists()

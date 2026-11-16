@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
+from redacted_backend.corpus.bulk_export import (
+    BulkExportCatalog,
+    audit_historylab_bulk_export,
+)
 from redacted_backend.corpus.build_bm25 import build_bm25_from_files
 from redacted_backend.corpus.build_dense import build_dense_from_files
 from redacted_backend.corpus.exclusions import load_exclusion_manifest
@@ -20,7 +26,7 @@ from redacted_backend.corpus.historylab_export import (
 )
 from redacted_backend.corpus.manifest import build_chunk_file
 from redacted_backend.corpus.preflight import run_preflight
-from redacted_backend.corpus.snapshot import resolve_snapshot
+from redacted_backend.corpus.snapshot import SnapshotLock, resolve_snapshot
 from redacted_backend.scientific_config import ScientificConfig
 
 
@@ -36,6 +42,24 @@ def run(argv: Sequence[str] | None = None) -> int:
         _write_json(Path(args.output), lock.model_dump(mode="json"))
         print(json.dumps(lock.model_dump(mode="json"), sort_keys=True, indent=2))
         return 0
+    if args.command == "audit-bulk-export":
+        snapshot = SnapshotLock.model_validate_json(
+            Path(args.snapshot_lock).read_text(encoding="utf-8")
+        )
+        catalog = BulkExportCatalog.model_validate_json(
+            Path(args.catalog).read_text(encoding="utf-8")
+        )
+        exclusions = load_exclusion_manifest(Path(args.exclusions))
+        report = audit_historylab_bulk_export(
+            Path(args.source),
+            snapshot=snapshot,
+            catalog=catalog,
+            exclusions=exclusions,
+        )
+        payload = report.model_dump(mode="json")
+        _write_json(Path(args.output), payload)
+        print(json.dumps(payload, sort_keys=True, indent=2))
+        return 0 if report.ready_for_import else 2
     if args.command == "capture-api":
         manifest = capture_historylab_corpus(
             args.base_url,
@@ -136,6 +160,13 @@ def _parser() -> argparse.ArgumentParser:
     snapshot.add_argument("--revision", required=True)
     snapshot.add_argument("--output", required=True)
 
+    audit = subparsers.add_parser("audit-bulk-export")
+    audit.add_argument("--source", required=True)
+    audit.add_argument("--snapshot-lock", required=True)
+    audit.add_argument("--catalog", required=True)
+    audit.add_argument("--exclusions", required=True)
+    audit.add_argument("--output", required=True)
+
     capture = subparsers.add_parser("capture-api")
     capture.add_argument("--base-url", default="https://api.foiarchive.org")
     capture.add_argument("--output-root", required=True)
@@ -185,7 +216,22 @@ def _parser() -> argparse.ArgumentParser:
 
 def _write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(value, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            delete=False,
+        ) as destination:
+            temporary_path = Path(destination.name)
+            json.dump(value, destination, sort_keys=True, indent=2)
+            destination.write("\n")
+            destination.flush()
+            os.fsync(destination.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
