@@ -252,3 +252,29 @@ def test_audit_bulk_export_does_not_publish_report_after_parse_failure(
         )
 
     assert not output.exists()
+
+
+def test_failed_audit_rerun_preserves_the_previous_atomic_report(
+    tmp_path: Path,
+) -> None:
+    source, snapshot, catalog, exclusions = _audit_inputs(
+        tmp_path,
+        raw_row=b"{not-json}\n",
+        catalog_counts={"cables": 1},
+    )
+    output = tmp_path / "audit.json"
+    previous_report = b'{"previous_verified_report": true}\n'
+    output.write_bytes(previous_report)
+
+    with pytest.raises(BulkExportAuditError, match="invalid row"):
+        cli.run(
+            _audit_command(
+                source=source,
+                snapshot=snapshot,
+                catalog=catalog,
+                exclusions=exclusions,
+                output=output,
+            )
+        )
+
+    assert output.read_bytes() == previous_report

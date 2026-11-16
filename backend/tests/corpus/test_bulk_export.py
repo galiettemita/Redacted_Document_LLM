@@ -140,6 +140,12 @@ def test_audit_counts_canonical_source_without_expanding_gzip(
     assert audit.document_count == 2
     assert audit.corpus_counts == {"cables": 1, "cia": 1}
     assert audit.unresolved_collection_count == 0
+    assert audit.unresolved_value_counts == {
+        "blank": 0,
+        "http_url": 0,
+        "null": 0,
+        "unknown": 0,
+    }
     assert audit.ready_for_import is True
     assert audit.reasons == []
     assert sorted(path.name for path in tmp_path.iterdir()) == names_before
@@ -217,6 +223,12 @@ def test_unresolved_sources_are_counted_capped_sorted_and_unready(
     )
 
     assert audit.unresolved_collection_count == 25
+    assert audit.unresolved_value_counts == {
+        "blank": 0,
+        "http_url": 1,
+        "null": 1,
+        "unknown": 23,
+    }
     assert len(audit.unresolved_collection_samples) == 20
     assert audit.unresolved_collection_samples == sorted(
         {str(value) if value is not None else "null" for value in values[:20]}

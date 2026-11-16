@@ -6,6 +6,7 @@ import json
 from collections import Counter
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import (
     BaseModel,
@@ -26,8 +27,9 @@ from redacted_backend.corpus.snapshot import (
 )
 
 CATALOG_SCHEMA_VERSION = "historylab-huggingface-catalog-v1"
-AUDIT_SCHEMA_VERSION = "historylab-huggingface-audit-v1"
+AUDIT_SCHEMA_VERSION = "historylab-huggingface-audit-v2"
 _UNRESOLVED_SAMPLE_LIMIT = 20
+_UNRESOLVED_CATEGORIES = ("blank", "http_url", "null", "unknown")
 
 
 class BulkExportAuditError(ValueError):
@@ -75,7 +77,7 @@ class BulkExportCatalog(BaseModel):
 class BulkExportAudit(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: Literal["historylab-huggingface-audit-v1"]
+    schema_version: Literal["historylab-huggingface-audit-v2"]
     repo_id: str
     revision: str = Field(pattern=r"^[0-9a-f]{40}$")
     source_path: str
@@ -89,11 +91,24 @@ class BulkExportAudit(BaseModel):
     corpus_counts: dict[str, int]
     catalog_corpus_counts: dict[str, int]
     unresolved_collection_count: int = Field(ge=0)
+    unresolved_value_counts: dict[str, int]
     unresolved_collection_samples: list[str] = Field(
         max_length=_UNRESOLVED_SAMPLE_LIMIT
     )
     ready_for_import: bool
     reasons: list[str]
+
+    @model_validator(mode="after")
+    def validate_unresolved_counts(self) -> BulkExportAudit:
+        if set(self.unresolved_value_counts) != set(_UNRESOLVED_CATEGORIES):
+            raise ValueError("unresolved value counts must contain every category")
+        if any(count < 0 for count in self.unresolved_value_counts.values()):
+            raise ValueError("unresolved value counts cannot be negative")
+        if sum(self.unresolved_value_counts.values()) != self.unresolved_collection_count:
+            raise ValueError(
+                "unresolved value counts must equal unresolved collection count"
+            )
+        return self
 
     def manifest_hash(self) -> str:
         return _manifest_hash(self.model_dump(mode="json"))
@@ -126,6 +141,9 @@ def audit_historylab_bulk_export(
     counts: Counter[str] = Counter()
     unresolved_count = 0
     unresolved_samples: set[str] = set()
+    unresolved_value_counts: Counter[str] = Counter(
+        {category: 0 for category in _UNRESOLVED_CATEGORIES}
+    )
     document_count = 0
 
     try:
@@ -139,7 +157,7 @@ def audit_historylab_bulk_export(
                     raise BulkExportAuditError(
                         f"invalid row at line {line_number}: {exc.errors()[0]['type']}"
                     ) from None
-                corpus, unresolved_sample = _resolve_corpus(
+                corpus, unresolved_sample, unresolved_category = _resolve_corpus(
                     row,
                     exclusions.known_corpora,
                     line_number=line_number,
@@ -147,6 +165,9 @@ def audit_historylab_bulk_export(
                 document_count += 1
                 if corpus is None:
                     unresolved_count += 1
+                    if unresolved_category is None:
+                        raise AssertionError("unresolved values require a category")
+                    unresolved_value_counts[unresolved_category] += 1
                     if len(unresolved_samples) < _UNRESOLVED_SAMPLE_LIMIT:
                         unresolved_samples.add(unresolved_sample)
                 else:
@@ -188,6 +209,7 @@ def audit_historylab_bulk_export(
         corpus_counts=corpus_counts,
         catalog_corpus_counts=catalog_counts,
         unresolved_collection_count=unresolved_count,
+        unresolved_value_counts=dict(sorted(unresolved_value_counts.items())),
         unresolved_collection_samples=sorted(unresolved_samples)[
             :_UNRESOLVED_SAMPLE_LIMIT
         ],
@@ -229,7 +251,7 @@ def _resolve_corpus(
     known_corpora: set[str],
     *,
     line_number: int,
-) -> tuple[str | None, str]:
+) -> tuple[str | None, str, str | None]:
     canonical_source = _canonical_label(row.source, known_corpora)
     if row.corpus is not None:
         canonical_corpus = _canonical_label(row.corpus, known_corpora)
@@ -242,11 +264,13 @@ def _resolve_corpus(
                 f"conflicting canonical labels at line {line_number}"
             )
         if canonical_corpus is not None:
-            return canonical_corpus, ""
-        return None, _sample(row.corpus)
+            return canonical_corpus, "", None
+        sample, category = _describe_unresolved(row.corpus)
+        return None, sample, category
     if canonical_source is not None:
-        return canonical_source, ""
-    return None, _sample(row.source)
+        return canonical_source, "", None
+    sample, category = _describe_unresolved(row.source)
+    return None, sample, category
 
 
 def _canonical_label(value: str | None, known_corpora: set[str]) -> str | None:
@@ -256,11 +280,16 @@ def _canonical_label(value: str | None, known_corpora: set[str]) -> str | None:
     return normalized if normalized in known_corpora else None
 
 
-def _sample(value: str | None) -> str:
+def _describe_unresolved(value: str | None) -> tuple[str, str]:
     if value is None:
-        return "null"
+        return "null", "null"
     normalized = value.strip()
-    return normalized if normalized else "blank"
+    if not normalized:
+        return "blank", "blank"
+    parsed = urlsplit(normalized)
+    if parsed.scheme.lower() in {"http", "https"} and parsed.netloc:
+        return normalized, "http_url"
+    return normalized, "unknown"
 
 
 def _manifest_hash(payload: object) -> str:

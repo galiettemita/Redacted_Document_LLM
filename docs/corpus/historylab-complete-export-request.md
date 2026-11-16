@@ -31,7 +31,7 @@ For context, we authenticated and audited the official Hugging Face artifact at 
 - dataset-card catalog total: 4,949,871 documents across 11 collections;
 - streamed row count: 4,889,089, a difference of 60,782 from the card total;
 - usable canonical collection labels: zero;
-- unresolved collection labels: 4,889,089, observed as origin URLs or null;
+- unresolved collection labels: 4,889,089 total—1,304,229 HTTP(S) origin URLs and 3,584,860 nulls, with zero blank or unknown values;
 - `cables`: absent; and
 - audit result: not ready for import.
 
