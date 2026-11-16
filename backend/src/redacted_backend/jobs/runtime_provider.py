@@ -29,6 +29,6 @@ class AnalysisRuntimeProvider:
             try:
                 runtime = self._builder()
             except Exception as error:
-                raise RuntimeInitializationError(type(error).__name__) from error
+                raise RuntimeInitializationError(type(error).__name__) from None
             self._runtime = runtime
             return runtime

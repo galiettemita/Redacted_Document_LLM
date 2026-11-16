@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from dramatiq import Message
+from dramatiq.middleware import Retries
 
 from redacted_backend.jobs.execution import execute_analysis_job
 from redacted_backend.jobs.orchestrator import AnalysisOrchestrator
-from redacted_backend.jobs.runtime_provider import AnalysisRuntimeProvider
+from redacted_backend.jobs.runtime_provider import (
+    AnalysisRuntimeProvider,
+    RuntimeInitializationError,
+)
 from redacted_backend.models.openai_gateway import ModelGatewayError
 from redacted_backend.retrieval.service import RetrievalError
 
@@ -107,3 +113,48 @@ def test_transient_model_failure_retries_then_retains_its_code() -> None:
             "provider_unavailable: temporary outage",
         )
     ]
+
+
+def test_dramatiq_retry_payload_omits_initialization_secret() -> None:
+    class RecordingBroker:
+        def __init__(self) -> None:
+            self.enqueued: list[Message] = []
+
+        def get_actor(self, _actor_name: str) -> SimpleNamespace:
+            return SimpleNamespace(options={"max_retries": 5})
+
+        def enqueue(self, message: Message, *, delay: int) -> Message:
+            del delay
+            self.enqueued.append(message)
+            return message
+
+    def build() -> AnalysisOrchestrator:
+        raise RuntimeError("secret-provider-token")
+
+    broker = RecordingBroker()
+    message = Message(
+        queue_name="default",
+        actor_name="analyze_passage",
+        args=("job-5",),
+        kwargs={},
+        options={},
+    )
+    try:
+        execute_analysis_job(
+            "job-5",
+            AnalysisRuntimeProvider(build),
+            last_attempt=False,
+            fail=lambda *_value: None,
+        )
+    except RuntimeInitializationError as error:
+        Retries(min_backoff=1, max_backoff=1).after_process_message(
+            broker,
+            message,
+            exception=error,
+        )
+    else:
+        raise AssertionError("initialization failure should be retryable")
+
+    assert broker.enqueued == [message]
+    assert "secret-provider-token" not in message.options["traceback"]
+    assert "RuntimeInitializationError: RuntimeError" in message.options["traceback"]

@@ -37,7 +37,7 @@ docker compose run --rm backend alembic upgrade head
 docker compose up -d backend worker
 ```
 
-Then open `http://127.0.0.1:8000/v1/readiness`. The real worker starts and publishes its Redis heartbeat even when corpus artifacts, OpenSearch, and model approval are absent. Its prediction runtime is constructed lazily only after the API's independent scheduling gates pass; there is no fallback runtime. HTTP, database, worker, corpus/retrieval, and model readiness remain separate, and `prediction_ready` stays false until every real dependency is operational. Docker publishes the database, Redis, and API on `127.0.0.1` only; the worker publishes no port.
+Then open `http://127.0.0.1:8000/v1/readiness`. The real worker starts and publishes its Redis heartbeat even when corpus artifacts, OpenSearch, and model approval are absent. Its prediction runtime is constructed lazily only after the API's independent scheduling gates pass; there is no fallback runtime. HTTP, database, worker, corpus/retrieval, and model readiness remain separate, and `prediction_ready` stays false until every real dependency is operational. Docker's dependency-free liveness probe uses `/v1/health`, so an unavailable retrieval service cannot mark the HTTP process dead while `/v1/readiness` reports the closed gate. Docker publishes the database, Redis, and API on `127.0.0.1` only; the worker publishes no port.
 
 After complete corpus artifacts exist and the one-passage paid-call gate has been approved, start the retrieval profile:
 

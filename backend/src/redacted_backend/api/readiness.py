@@ -31,6 +31,10 @@ def create_readiness_router(
 ) -> APIRouter:
     router = APIRouter()
 
+    @router.get("/health", response_model=ComponentReadiness)
+    def health() -> ComponentReadiness:
+        return ComponentReadiness(ready=True, detail="ready")
+
     @router.get("/readiness", response_model=ReadinessResponse)
     def readiness() -> ReadinessResponse:
         database_readiness = resolve_database_readiness(database)

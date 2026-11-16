@@ -50,6 +50,26 @@ def test_readiness_never_equates_http_health_with_prediction_readiness() -> None
     }
 
 
+def test_http_health_does_not_probe_prediction_dependencies(monkeypatch) -> None:
+    def unexpected_probe(_settings: Settings):
+        raise AssertionError("liveness must not probe prediction dependencies")
+
+    monkeypatch.setattr(
+        "redacted_backend.api.readiness.resolve_corpus_readiness",
+        unexpected_probe,
+    )
+
+    async def request_health():
+        transport = ASGITransport(app=create_app(Settings()))
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.get("/v1/health")
+
+    response = asyncio.run(request_health())
+
+    assert response.status_code == 200
+    assert response.json() == {"ready": True, "detail": "ready"}
+
+
 def test_database_readiness_probes_the_configured_database(tmp_path: Path) -> None:
     settings = Settings(
         database_url=f"sqlite:///{tmp_path / 'readiness.db'}",
