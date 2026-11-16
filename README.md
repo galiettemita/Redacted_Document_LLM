@@ -28,16 +28,16 @@ Start the stateful dependencies first:
 docker compose up -d postgres redis
 ```
 
-Build the backend image and apply migrations before starting the API. This order
+Build the API and real worker images and apply migrations before starting them. This order
 ensures the retention service never runs against an older schema:
 
 ```bash
-docker compose build backend
+docker compose build backend worker
 docker compose run --rm backend alembic upgrade head
-docker compose up -d backend
+docker compose up -d backend worker
 ```
 
-Then open `http://127.0.0.1:8000/v1/readiness`. HTTP readiness is independent from database, worker, corpus, and model readiness, so prediction readiness remains false until every real dependency is connected. Docker publishes the database, Redis, and API on `127.0.0.1` only.
+Then open `http://127.0.0.1:8000/v1/readiness`. The real worker starts and publishes its Redis heartbeat even when corpus artifacts, OpenSearch, and model approval are absent. Its prediction runtime is constructed lazily only after the API's independent scheduling gates pass; there is no fallback runtime. HTTP, database, worker, corpus/retrieval, and model readiness remain separate, and `prediction_ready` stays false until every real dependency is operational. Docker publishes the database, Redis, and API on `127.0.0.1` only; the worker publishes no port.
 
 After complete corpus artifacts exist and the one-passage paid-call gate has been approved, start the retrieval profile:
 
@@ -46,7 +46,7 @@ REDACTED_CORPUS_ROOT=/absolute/path/to/corpus \
 docker compose --profile retrieval up --build backend opensearch worker
 ```
 
-`REDACTED_CORPUS_ROOT` must be the directory containing `manifest.json`, `bm25-manifest.json`, `dense-manifest.json`, and the `dense/` artifact directory; Compose mounts it read-only into the API and worker while OpenSearch keeps its own writable subdirectory there. The worker image installs the locked BGE/FAISS retrieval group; the web API image remains small. The worker publishes no port, and readiness stays false unless its expiring Redis heartbeat is current.
+`REDACTED_CORPUS_ROOT` must be the directory containing `manifest.json`, `bm25-manifest.json`, `dense-manifest.json`, and the `dense/` artifact directory; Compose mounts it read-only into the API and worker while OpenSearch keeps its own writable subdirectory there. The worker image installs the locked BGE/FAISS retrieval group; the web API image remains small. Corpus readiness also requires all dense files and a reachable OpenSearch index whose live chunk count matches the verified BM25 manifest. Full dense checksums and search probes run once when the worker constructs the real runtime.
 
 The upload screen sends PDFs to the local backend for validation and temporary content-addressed persistence while rendering a local object URL immediately. The backend scans every page, persists detected redactions under stable passage IDs, and prepares a separate hidden-answer-free context and `context-query-v1` retrieval input for every passage in one extraction/render pass. Structural target/redaction markers and the frozen stop-word list are removed from each query; query text, SHA-256, term count, query version, and stop-word version stay bound to the exact passage revision. The browser shows only simple preparation/prediction states and final provider results, not transcript, query, evidence, or research diagnostics.
 
@@ -61,7 +61,7 @@ PDF size, page, decompression, render-pixel, parser-timeout, or retention ceilin
 Normal Python logs globally redact structured PDF text, prompt/evidence fields,
 authorization values, and OpenAI-style secret tokens.
 
-Users can redraw, add, or remove passages, then choose **Predict passage** or **Predict all passages**. A blocked run displays the exact corpus, model, and worker gates. A ready run executes outside the request, resumes from durable query/retrieval checkpoints, filters replayed events to the newly scheduled jobs, and renders provider output as **Model prediction** with recorded token usage and estimated cost in the sidebar—never over the PDF. The worker uses an expiring Redis heartbeat and a PostgreSQL advisory lock per job. Provider results are stored on the owning job before the next stage advances; passage changes or deletion cancel active work before another external stage is allowed.
+Users can redraw, add, or remove passages, then choose **Predict passage** or **Predict all passages**. A blocked run shows a concise unavailable state while the backend records the exact gates. A ready run executes outside the request, resumes from durable query/retrieval checkpoints, filters replayed events to the newly scheduled jobs, and renders provider output as **Model prediction** in the sidebar—never over the PDF. The worker uses an expiring Redis heartbeat and a PostgreSQL advisory lock per job. Provider results are stored on the owning job before the next stage advances; passage changes or deletion cancel active work before another external stage is allowed.
 
 ## Corpus preparation
 
@@ -175,8 +175,8 @@ To create a production bundle, run `npm run build`. The output is written to `di
 ## Important limitations
 
 - Visible-only context preparation runs automatically for all detected passages. Because the paper requires a date but does not prescribe a parser, `visible-date-v1` accepts only one agreeing ISO or English month-name date that occupies a complete line in the top 20% of page one. OCR date words must each have at least 0.75 confidence. It fails closed when that date is missing, ambiguous, low-confidence, inside any automatic or manually marked redaction, mask coverage is uncertain, OCR is unavailable, or nearby visible geometry cannot support a length cue. Browser-supplied dates, PDF metadata alone, corpus results, models, and hidden passages cannot supply the date.
-- The production worker, retrieval, model boundary, and website control are connected, but live prediction readiness remains false until the complete corpus/index manifests, worker heartbeat, model key, and explicit paid-call approval all pass. The current loopback instance therefore creates a durable blocked job and makes no retrieval, token-count, or model request.
-- History Lab's replacement public MCP was healthy on November 15, 2026 and reports the expected multi-million-document collections, but its capped hosted search tools are not a bulk export and cannot replace Andrew's locally reproduced BM25/BGE indexes. The older document API still returns HTTP 502, the inspected Hugging Face snapshot remains scientifically incomplete, and this Mac has 115 GiB free versus the capture preflight's 150 GiB minimum. Full source acquisition still needs a complete export path and additional storage.
+- The production worker is now independently live in the default stack. A verified November 16, 2026 loopback run reported a current worker heartbeat while corpus and model readiness remained false; it constructed no prediction runtime and made no retrieval, token-count, or model request. Full prediction readiness still requires complete operational corpus indexes, the worker heartbeat, model access, and explicit paid-call approval.
+- History Lab's replacement public MCP was healthy on November 15, 2026 and reports the expected multi-million-document collections, but its capped hosted search tools are not a bulk export and cannot replace Andrew's locally reproduced BM25/BGE indexes. The older document API still returns HTTP 502 and the inspected Hugging Face snapshot remains scientifically incomplete. Full source acquisition still needs a complete enumerable export path.
 - Appendix F prints `{hint}` but does not publish its substitution code or a generation token cap. The implementation records the evidence-supported rendering `It is {bucket} long.` (matching the paper's examples) and a 4,096-token provider reservation as versioned engineering choices rather than attributing either to Andrew's method.
 - Stored documents become unavailable after at most 24 hours; the production retention scheduler and replacement flow retry unreferenced-byte cleanup and remove derived sensitive artifacts while retaining an auditable tombstone.
 - The fictional demo is a dedicated presentation layer. Only `FictionalDemoWorkspace` imports its invented document and deterministic mock service; the real `DocumentWorkspace` remains connected exclusively to the backend HTTP/SSE prediction service.

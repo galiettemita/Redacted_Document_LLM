@@ -67,7 +67,6 @@ services:
       - ${REDACTED_CORPUS_ROOT:-./var/corpus}:/artifacts/corpus:ro
 
   worker:
-    profiles: ["retrieval"]
     build:
       context: .
       dockerfile: backend/Dockerfile.worker
@@ -75,8 +74,6 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      opensearch:
         condition: service_healthy
     environment:
       REDACTED_ENVIRONMENT: development

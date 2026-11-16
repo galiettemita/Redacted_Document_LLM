@@ -156,7 +156,8 @@
     - [x] Boot the real task module with PostgreSQL and Redis alone, retry runtime initialization, and durably sanitize final initialization failures.
     - [x] Keep prediction dispatch closed until dense artifacts exist and the live OpenSearch index count matches its verified manifest.
     - [x] Set the design policy that fixed free-space estimates are advisory while source completeness, checksums, and coverage remain mandatory.
-    - [ ] Implement and verify the lazy runtime provider, durable initialization failure, default worker lifecycle, and operational retrieval gates.
+    - [x] Implement and verify the lazy runtime provider, durable initialization failure, default worker lifecycle, and operational retrieval gates.
+    - [x] Prove the loopback worker heartbeat remains live with corpus/model gates closed and no retrieval or model request.
     - [ ] Make the corpus preflight advisory by default and preserve resumable checkpoints on an actual out-of-space write.
     - [ ] Implement a streaming audit/import path for the pinned official nine-field gzip without creating a second uncompressed raw copy.
     - [ ] Acquire or capture one complete official source with explicit collection labels and a non-empty `cables` collection, then pass the existing coverage gate.
