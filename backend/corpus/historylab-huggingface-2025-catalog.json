@@ -1,0 +1,58 @@
+{
+  "schema_version": "historylab-huggingface-catalog-v1",
+  "repo_id": "HistoryLab/foiarchive",
+  "revision": "411cf6f86b38342683e27148be167c6094d1a10c",
+  "release_url": "https://lab.history.columbia.edu/news/foiarchive-hugging-face",
+  "source": {
+    "path": "foiarchive-202409.json.gz",
+    "size_bytes": 7976348471,
+    "sha256": "dd73e590134f3a0cd1e22f81ffd3732054fd469b09c56d78cd25e1cc90b5e5e4"
+  },
+  "document_count": 4949871,
+  "collections": [
+    {
+      "corpus": "briefing",
+      "doc_cnt": 9680
+    },
+    {
+      "corpus": "cabinet",
+      "doc_cnt": 42539
+    },
+    {
+      "corpus": "cfpf",
+      "doc_cnt": 3214293
+    },
+    {
+      "corpus": "cia",
+      "doc_cnt": 935716
+    },
+    {
+      "corpus": "clinton",
+      "doc_cnt": 54149
+    },
+    {
+      "corpus": "cpdoc",
+      "doc_cnt": 10279
+    },
+    {
+      "corpus": "frus",
+      "doc_cnt": 311866
+    },
+    {
+      "corpus": "kissinger",
+      "doc_cnt": 4552
+    },
+    {
+      "corpus": "nato",
+      "doc_cnt": 46002
+    },
+    {
+      "corpus": "un",
+      "doc_cnt": 192541
+    },
+    {
+      "corpus": "worldbank",
+      "doc_cnt": 128254
+    }
+  ]
+}
