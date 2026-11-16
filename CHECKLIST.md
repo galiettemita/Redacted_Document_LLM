@@ -152,6 +152,7 @@
     - [x] Trace the worker boot failure to eager real-runtime construction before heartbeat startup.
     - [x] Recheck the official MCP, PostgREST API, and frozen Hugging Face artifact; record that the live MCP corpus call still surfaces the API 502 and the frozen 11-collection snapshot predates the separate `cables` collection.
     - [x] Design an always-on worker that lazily constructs only the real orchestrator and never falls back to a mock runtime.
+    - [x] Add a thread-safe runtime provider that caches one successful real orchestrator, retries failed initialization, and exposes no secret-bearing error text.
     - [x] Set the design policy that fixed free-space estimates are advisory while source completeness, checksums, and coverage remain mandatory.
     - [ ] Implement and verify the lazy runtime provider, durable initialization failure, default worker lifecycle, and operational retrieval gates.
     - [ ] Make the corpus preflight advisory by default and preserve resumable checkpoints on an actual out-of-space write.
