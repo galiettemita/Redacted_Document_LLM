@@ -20,8 +20,12 @@ from redacted_backend.retrieval.types import Bm25IndexManifest, DenseIndexManife
 from redacted_backend.scientific_config import ScientificConfig
 
 
-def build_analysis_orchestrator(settings: Settings) -> AnalysisOrchestrator:
-    if settings.database_url is None:
+def build_analysis_orchestrator(
+    settings: Settings,
+    *,
+    database: Database | None = None,
+) -> AnalysisOrchestrator:
+    if settings.database_url is None and database is None:
         raise RuntimeError("Analysis worker database is not configured")
     if settings.opensearch_url is None:
         raise RuntimeError("Analysis worker OpenSearch is not configured")
@@ -60,7 +64,9 @@ def build_analysis_orchestrator(settings: Settings) -> AnalysisOrchestrator:
     )
     bm25.search("worker readiness probe", limit=1, query_kind="context")
     dense.search("worker readiness probe", limit=1, query_kind="context")
-    database = Database.connect(settings.database_url)
+    if database is None:
+        assert settings.database_url is not None
+        database = Database.connect(settings.database_url)
     gateway = OpenAIGateway(
         transport=OpenAIHttpTransport(
             settings.openai_api_key.get_secret_value(),
