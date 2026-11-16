@@ -17,7 +17,7 @@ export interface Prediction {
   page: number
   model: string
   text: string
-  provenance?: 'model'
+  provenance?: 'simulated' | 'model'
   usage?: {
     inputTokens: number
     outputTokens: number
@@ -28,7 +28,7 @@ export interface Prediction {
   }
 }
 
-export type DocumentMode = 'uploaded'
+export type DocumentMode = 'sample' | 'uploaded'
 
 export interface DocumentDescriptor {
   id: string
@@ -36,6 +36,7 @@ export interface DocumentDescriptor {
   source: string
   mode: DocumentMode
   pageCount?: number
+  label?: string
   backendDocumentId?: string
 }
 

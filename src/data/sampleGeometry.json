@@ -1,0 +1,38 @@
+[
+  {
+    "id": "passage-1",
+    "label": "Passage 1",
+    "page": 1,
+    "rects": [{ "x": 0.167, "y": 0.399, "width": 0.498, "height": 0.027 }]
+  },
+  {
+    "id": "passage-2",
+    "label": "Passage 2",
+    "page": 1,
+    "rects": [
+      { "x": 0.167, "y": 0.609, "width": 0.649, "height": 0.026 },
+      { "x": 0.167, "y": 0.645, "width": 0.452, "height": 0.026 }
+    ]
+  },
+  {
+    "id": "passage-3",
+    "label": "Passage 3",
+    "page": 2,
+    "rects": [{ "x": 0.167, "y": 0.348, "width": 0.596, "height": 0.027 }]
+  },
+  {
+    "id": "passage-4",
+    "label": "Passage 4",
+    "page": 2,
+    "rects": [
+      { "x": 0.167, "y": 0.584, "width": 0.665, "height": 0.026 },
+      { "x": 0.167, "y": 0.62, "width": 0.372, "height": 0.026 }
+    ]
+  },
+  {
+    "id": "passage-5",
+    "label": "Passage 5",
+    "page": 3,
+    "rects": [{ "x": 0.167, "y": 0.49, "width": 0.564, "height": 0.027 }]
+  }
+]

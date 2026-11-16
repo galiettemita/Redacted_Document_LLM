@@ -27,7 +27,11 @@ export function PredictionCard({ passage, prediction, onSelect }: PredictionCard
           ${prediction.usage.estimatedCostUsd.toFixed(4)} estimated
         </span>
       ) : null}
-      <span className="prediction-provenance">Model prediction</span>
+      <span className="prediction-provenance">
+        {prediction.provenance === 'simulated'
+          ? 'Simulated prediction'
+          : 'Model prediction'}
+      </span>
     </button>
   )
 }
