@@ -31,15 +31,7 @@ export function SelectedPassage({
           </div>
           {prediction ? (
             <>
-              <p className="prediction-model">{prediction.model}</p>
               <p className="prediction-text">{prediction.text}</p>
-              {prediction.usage ? (
-                <p className="prediction-usage">
-                  {prediction.usage.totalTokens.toLocaleString()} tokens
-                  {' · '}
-                  ${prediction.usage.estimatedCostUsd.toFixed(4)} estimated
-                </p>
-              ) : null}
               <p className="prediction-provenance">
                 {prediction.provenance === 'simulated'
                   ? 'Simulated prediction'

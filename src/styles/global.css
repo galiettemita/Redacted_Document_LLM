@@ -744,24 +744,9 @@ input:focus-visible {
 }
 
 .page-label,
-.prediction-model,
 .prediction-provenance {
   color: var(--muted);
   font-size: 0.7rem;
-}
-
-.prediction-model {
-  display: block;
-  margin: 10px 0 0;
-  font-weight: 650;
-}
-
-.prediction-usage {
-  display: block;
-  margin: 10px 0 0;
-  color: var(--muted);
-  font-size: 0.7rem;
-  font-variant-numeric: tabular-nums;
 }
 
 .prediction-text {

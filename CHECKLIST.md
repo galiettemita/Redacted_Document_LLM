@@ -112,7 +112,7 @@
     - [x] Persist query and prediction provider results at the job boundary so retries resume from the last durable stage.
     - [x] Connect replayable SSE prediction events to real passage-linked sidebar cards and filter out events from older runs.
     - [x] Add **Predict passage/all passages** to the uploaded-document frontend and label provider output **Model prediction**.
-    - [x] Show the recorded total-token usage and estimated call cost on each real prediction card.
+    - [x] Preserve recorded token usage and estimated cost in service/backend records without exposing implementation metrics in the customer prediction cards.
     - [x] Verify the rebuilt loopback API through real upload, two-passage detection, all-context preparation, blocked scheduling, ordered SSE, and cleanup without a paid call.
     - [ ] After complete corpus evidence exists, show exact token cost and obtain explicit approval before the first paid model call.
   - [x] Task 12A: Correct automatic multi-line mask geometry and passage-length estimation.
@@ -147,3 +147,4 @@
     - [x] Preserve the mounted real document, prevent backend deletion, and restore opener focus after button or Escape close.
     - [x] Label the experience **Fictional interactive demo** and every invented output **Simulated prediction**.
     - [x] Replace real-workspace research diagnostics with concise preparation, ready, and unavailable states while preserving Andrew-method backend fields and gates.
+    - [ ] Repeat the demo/real-document click-through visually when the in-app browser connector is available; automated interaction tests and live loopback endpoint checks are complete, but no visual run is claimed for this increment.

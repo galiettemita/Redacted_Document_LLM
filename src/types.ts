@@ -17,7 +17,7 @@ export interface Prediction {
   page: number
   model: string
   text: string
-  provenance?: 'simulated' | 'model'
+  provenance: 'simulated' | 'model'
   usage?: {
     inputTokens: number
     outputTokens: number

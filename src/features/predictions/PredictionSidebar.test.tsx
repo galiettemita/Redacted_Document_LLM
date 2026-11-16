@@ -65,7 +65,7 @@ describe('PredictionSidebar', () => {
     expect(onDismissSelection).toHaveBeenCalledOnce()
   })
 
-  it('labels provider output as a model prediction and never as simulated', () => {
+  it('labels provider output without exposing its model, token, or cost metadata', () => {
     render(
       <PredictionSidebar
         passages={TEST_PASSAGES}
@@ -91,17 +91,19 @@ describe('PredictionSidebar', () => {
     )
 
     expect(screen.getByText('Model prediction')).toBeInTheDocument()
-    expect(screen.getByText('2,120 tokens · $0.0260 estimated')).toBeInTheDocument()
+    expect(screen.queryByText('GPT-6 Astra')).not.toBeInTheDocument()
+    expect(screen.queryByText(/2,120 tokens/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\$0\.0260 estimated/i)).not.toBeInTheDocument()
     expect(screen.queryByText('Simulated prediction')).not.toBeInTheDocument()
   })
 
-  it('never renders a simulated provenance label in the production sidebar', () => {
+  it('labels invented output as simulated and never as a model result', () => {
     render(
       <PredictionSidebar
         passages={TEST_PASSAGES}
         predictions={[{
           ...TEST_PREDICTIONS[0],
-          provenance: undefined,
+          provenance: 'simulated',
         }]}
         phase="complete"
         error={null}
@@ -111,7 +113,7 @@ describe('PredictionSidebar', () => {
       />,
     )
 
-    expect(screen.getByText('Model prediction')).toBeInTheDocument()
-    expect(screen.queryByText('Simulated prediction')).not.toBeInTheDocument()
+    expect(screen.getByText('Simulated prediction')).toBeInTheDocument()
+    expect(screen.queryByText('Model prediction')).not.toBeInTheDocument()
   })
 })

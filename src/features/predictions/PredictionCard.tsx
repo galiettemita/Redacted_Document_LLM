@@ -18,15 +18,7 @@ export function PredictionCard({ passage, prediction, onSelect }: PredictionCard
         <span className="prediction-label">{passage.label}</span>
         <span className="page-label">Page {passage.page}</span>
       </span>
-      <span className="prediction-model">{prediction.model}</span>
       <span className="prediction-text">{prediction.text}</span>
-      {prediction.usage ? (
-        <span className="prediction-usage">
-          {prediction.usage.totalTokens.toLocaleString()} tokens
-          {' · '}
-          ${prediction.usage.estimatedCostUsd.toFixed(4)} estimated
-        </span>
-      ) : null}
       <span className="prediction-provenance">
         {prediction.provenance === 'simulated'
           ? 'Simulated prediction'

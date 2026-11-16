@@ -79,7 +79,7 @@ export function App() {
         <div className="demo-layer">
           <FictionalDemoWorkspace
             onClose={() => setDemoOpen(false)}
-            returnLabel={connectedDocument ? 'Return to document' : 'Back to upload'}
+            returnLabel={connectedDocument ? 'Return to your document' : 'Return to upload'}
           />
         </div>
       ) : null}
