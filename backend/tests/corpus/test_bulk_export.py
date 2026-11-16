@@ -198,7 +198,7 @@ def test_unresolved_sources_are_counted_capped_sorted_and_unready(
 ) -> None:
     source = tmp_path / "unresolved.json.gz"
     values: list[str | None] = [None, "https://history.state.gov"] + [
-        f"unknown-{index:02d}" for index in range(23)
+        f"unknown-{index:02d}" for index in reversed(range(23))
     ]
     _write_rows(
         source,
@@ -219,7 +219,7 @@ def test_unresolved_sources_are_counted_capped_sorted_and_unready(
     assert audit.unresolved_collection_count == 25
     assert len(audit.unresolved_collection_samples) == 20
     assert audit.unresolved_collection_samples == sorted(
-        audit.unresolved_collection_samples
+        {str(value) if value is not None else "null" for value in values[:20]}
     )
     assert audit.ready_for_import is False
     assert "unresolved_collection_labels" in audit.reasons

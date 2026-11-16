@@ -147,7 +147,8 @@ def audit_historylab_bulk_export(
                 document_count += 1
                 if corpus is None:
                     unresolved_count += 1
-                    unresolved_samples.add(unresolved_sample)
+                    if len(unresolved_samples) < _UNRESOLVED_SAMPLE_LIMIT:
+                        unresolved_samples.add(unresolved_sample)
                 else:
                     counts[corpus] += 1
     except BulkExportAuditError:

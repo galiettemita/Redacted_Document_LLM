@@ -65,9 +65,9 @@ Users can redraw, add, or remove passages, then choose **Predict passage** or **
 
 ## Corpus preparation
 
-The backend includes a resumable corpus capture, fail-closed coverage gate, deterministic chunker, and BM25 retriever for the paper's public-document collection. The authenticated `HistoryLab/foiarchive` Hugging Face snapshot is retained as a checksummed audit artifact, but inspection proved it is not the complete paper corpus: it lacks the separate `cables` collection, and its `source` field contains origin URLs or null rather than the archive collection labels required for Andrew's exclusions. It is therefore never accepted as the finished retrieval source.
+The backend includes a resumable corpus capture, fail-closed coverage gate, deterministic chunker, and BM25 retriever for the paper's public-document collection. The authenticated `HistoryLab/foiarchive` Hugging Face snapshot is retained as a checksummed audit artifact, but a full streaming audit proved it is not the complete paper corpus: it lacks the separate `cables` collection, and every parsed `source` value is an origin URL or null rather than an archive collection label required for Andrew's exclusions. It is therefore never accepted as the finished retrieval source.
 
-The finished source must be a frozen local capture of the public History Lab document API. The capture stores collection labels separately from origin URLs, uses crash-safe keyset pagination, verifies exact counts before and after every collection, and checksums every collection file. Interrupted work resumes after the last committed document without duplicating evidence.
+The finished source must be either a frozen local capture of the public History Lab document API or an immutable official bulk export that passes the same coverage contract. The API capture stores collection labels separately from origin URLs, uses crash-safe keyset pagination, verifies exact counts before and after every collection, and checksums every collection file. Interrupted work resumes after the last committed document without duplicating evidence.
 
 Run the read-only storage preflight before acquiring any corpus files:
 
@@ -81,6 +81,29 @@ The report retains the conservative 150 GiB minimum and 250 GiB recommendation, 
 Run this command on the host against the exact intended storage path. A Docker Desktop container's virtual filesystem capacity is not evidence that the Mac has enough physical free space.
 
 Run the preflight again immediately before a large capture or index build. Source JSONL, checkpoints, chunks, and indexes remain outside Git. A capture that is interrupted, encounters an actual out-of-space write, or sees the upstream count change stays visibly incomplete and cannot pass readiness; resume truncates bytes beyond the last fsynced checkpoint before continuing.
+
+Audit the pinned official Hugging Face bundle without expanding it to a second raw file:
+
+```bash
+huggingface-cli download HistoryLab/foiarchive foiarchive-202409.json.gz \
+  --repo-type dataset \
+  --revision 411cf6f86b38342683e27148be167c6094d1a10c
+
+cd backend
+uv run corpus lock-snapshot \
+  --repo-id HistoryLab/foiarchive \
+  --revision 411cf6f86b38342683e27148be167c6094d1a10c \
+  --output ~/.cache/redacted-document-llm/corpus-audit/historylab-411cf6f-snapshot-lock.json
+
+uv run corpus audit-bulk-export \
+  --source ~/.cache/huggingface/hub/datasets--HistoryLab--foiarchive/snapshots/411cf6f86b38342683e27148be167c6094d1a10c/foiarchive-202409.json.gz \
+  --snapshot-lock ~/.cache/redacted-document-llm/corpus-audit/historylab-411cf6f-snapshot-lock.json \
+  --catalog corpus/historylab-huggingface-2025-catalog.json \
+  --exclusions corpus/exclusions/v1.yaml \
+  --output ~/.cache/redacted-document-llm/corpus-audit/historylab-411cf6f-audit.json
+```
+
+The audit verifies the locked 7,976,348,471-byte SHA-256 before streaming gzip rows and writes its small report atomically outside Git. A ready source exits 0; a valid but scientifically incomplete source still writes its evidence and exits 2. The November 16, 2026 run parsed 4,889,089 rows, 60,782 fewer than the frozen card total of 4,949,871. All 4,889,089 rows had unresolved collection identity, computed canonical collection counts were empty, and `cables` was absent. The exact external requirement is recorded in [`docs/corpus/historylab-complete-export-request.md`](docs/corpus/historylab-complete-export-request.md); that request has not been sent.
 
 Freeze a downloaded copy of the Office of the Historian's official FRUS metadata:
 
@@ -176,7 +199,7 @@ To create a production bundle, run `npm run build`. The output is written to `di
 
 - Visible-only context preparation runs automatically for all detected passages. Because the paper requires a date but does not prescribe a parser, `visible-date-v1` accepts only one agreeing ISO or English month-name date that occupies a complete line in the top 20% of page one. OCR date words must each have at least 0.75 confidence. It fails closed when that date is missing, ambiguous, low-confidence, inside any automatic or manually marked redaction, mask coverage is uncertain, OCR is unavailable, or nearby visible geometry cannot support a length cue. Browser-supplied dates, PDF metadata alone, corpus results, models, and hidden passages cannot supply the date.
 - The production worker is now independently live in the default stack. A verified November 16, 2026 loopback run reported a current worker heartbeat while corpus and model readiness remained false; it constructed no prediction runtime and made no retrieval, token-count, or model request. Full prediction readiness still requires complete operational corpus indexes, the worker heartbeat, model access, and explicit paid-call approval.
-- History Lab's replacement public MCP was healthy on November 15, 2026 and reports the expected multi-million-document collections, but its capped hosted search tools are not a bulk export and cannot replace Andrew's locally reproduced BM25/BGE indexes. The older document API still returns HTTP 502 and the inspected Hugging Face snapshot remains scientifically incomplete. Full source acquisition still needs a complete enumerable export path.
+- History Lab's replacement public MCP was healthy on November 15, 2026 and reports the expected multi-million-document collections, but its capped hosted search tools are not a bulk export and cannot replace Andrew's locally reproduced BM25/BGE indexes. The older document API still returns HTTP 502. The November 16 full audit of the immutable Hugging Face gzip verified its size and SHA-256, then found 4,889,089 unresolved rows, no canonical collection counts, and no `cables`; it remains scientifically incomplete. Full source acquisition still needs a complete enumerable export path.
 - Appendix F prints `{hint}` but does not publish its substitution code or a generation token cap. The implementation records the evidence-supported rendering `It is {bucket} long.` (matching the paper's examples) and a 4,096-token provider reservation as versioned engineering choices rather than attributing either to Andrew's method.
 - Stored documents become unavailable after at most 24 hours; the production retention scheduler and replacement flow retry unreferenced-byte cleanup and remove derived sensitive artifacts while retaining an auditable tombstone.
 - The fictional demo is a dedicated presentation layer. Only `FictionalDemoWorkspace` imports its invented document and deterministic mock service; the real `DocumentWorkspace` remains connected exclusively to the backend HTTP/SSE prediction service.

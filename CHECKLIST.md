@@ -160,5 +160,6 @@
     - [x] Prove the loopback worker heartbeat remains live with corpus/model gates closed and no retrieval or model request.
     - [x] Keep original initialization errors out of Dramatiq retry payloads and use a dependency-free container liveness endpoint.
     - [x] Make the corpus preflight advisory by default and preserve resumable checkpoints on an actual out-of-space write.
-    - [ ] Implement a streaming audit/import path for the pinned official nine-field gzip without creating a second uncompressed raw copy.
+    - [x] Implement and run a bounded-memory streaming audit for the pinned official nine-field gzip without creating a second uncompressed raw copy.
+    - [ ] Convert a future official bundle into normalized import artifacts only after its audit passes the complete-source contract.
     - [ ] Acquire or capture one complete official source with explicit collection labels and a non-empty `cables` collection, then pass the existing coverage gate.
