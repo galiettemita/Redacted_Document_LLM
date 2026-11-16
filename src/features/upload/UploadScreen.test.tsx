@@ -2,6 +2,15 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { UploadScreen } from './UploadScreen'
 
 describe('UploadScreen', () => {
+  it('offers the fictional demo without selecting a file', () => {
+    const onViewDemo = vi.fn()
+    render(<UploadScreen onFileAccepted={vi.fn()} onViewDemo={onViewDemo} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'View fictional demo' }))
+
+    expect(onViewDemo).toHaveBeenCalledOnce()
+  })
+
   it('shows drag feedback and an understandable invalid-file error', async () => {
     render(<UploadScreen onFileAccepted={vi.fn()} />)
     const dropZone = screen.getByTestId('pdf-drop-zone')

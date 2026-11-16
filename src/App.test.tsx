@@ -23,9 +23,24 @@ describe('upload screen', () => {
       screen.getByText('Upload a redacted PDF to explore AI predictions for its hidden passages.'),
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Choose PDF' })).toBeInTheDocument()
-    expect(screen.getByText('Production pipeline — real predictions only')).toBeInTheDocument()
-    expect(screen.queryByText(/simulated/i)).not.toBeInTheDocument()
-    expect(screen.queryByText('View interactive sample')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'View fictional demo' })).toBeInTheDocument()
+    expect(screen.queryByText('Simulated prediction')).not.toBeInTheDocument()
+  })
+
+  it('opens and closes the fictional demo without replacing the upload screen', () => {
+    render(<App />)
+
+    const opener = screen.getByRole('button', { name: 'View fictional demo' })
+    fireEvent.click(opener)
+
+    expect(screen.getByRole('dialog', { name: 'Fictional interactive demo' })).toBeInTheDocument()
+    expect(document.querySelector('.app-surface')).toHaveAttribute('aria-hidden', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to upload' }))
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Explore what’s behind the redactions' })).toBeInTheDocument()
+    expect(opener).toHaveFocus()
   })
 })
 
@@ -86,6 +101,28 @@ describe('document lifecycle', () => {
     expect(screen.getByText('pending-record.pdf')).toBeInTheDocument()
     expect(screen.getByLabelText('Local PDF renderer')).toBeInTheDocument()
     expect(screen.getAllByText(/Uploading to the loopback-only local backend/)).not.toHaveLength(0)
+  })
+
+  it('keeps the uploaded document mounted and never deletes it while the demo is open', async () => {
+    const file = new File(['%PDF-1.7'], 'preserved-record.pdf', { type: 'application/pdf' })
+    render(<App />)
+    fireEvent.change(screen.getByLabelText('Choose PDF'), { target: { files: [file] } })
+    expect(await screen.findByText('PDF upload complete')).toBeInTheDocument()
+
+    const opener = screen.getByRole('button', { name: 'View fictional demo' })
+    fireEvent.click(opener)
+
+    const appSurface = document.querySelector('.app-surface')
+    expect(appSurface).toHaveTextContent('preserved-record.pdf')
+    expect(appSurface).toHaveAttribute('aria-hidden', 'true')
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(0)
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByText('preserved-record.pdf')).toBeInTheDocument()
+    expect(opener).toHaveFocus()
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(0)
   })
 
   it('keeps the workspace open when backend deletion fails', async () => {

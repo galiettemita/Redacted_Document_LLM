@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { FictionalDemoWorkspace } from './features/demo/FictionalDemoWorkspace'
 import { UploadScreen } from './features/upload/UploadScreen'
 import { DocumentWorkspace } from './features/workspace/DocumentWorkspace'
 import { useLocalPdf } from './hooks/useLocalPdf'
@@ -9,6 +10,9 @@ export function App() {
   const localPdf = useLocalPdf()
   const [document, setDocument] = useState<DocumentDescriptor | null>(null)
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
+  const [demoOpen, setDemoOpen] = useState(false)
+  const demoOpener = useRef<HTMLElement | null>(null)
+  const wasDemoOpen = useRef(false)
   const backendDocument = useBackendDocument(uploadedFile)
 
   const connectedDocument = useMemo(() => {
@@ -31,14 +35,21 @@ export function App() {
     })
   }
 
-  if (!connectedDocument) {
-    return <UploadScreen onFileAccepted={openUploadedFile} />
+  function openDemo(opener: HTMLButtonElement) {
+    demoOpener.current = opener
+    setDemoOpen(true)
   }
 
-  return (
+  useEffect(() => {
+    if (!demoOpen && wasDemoOpen.current) demoOpener.current?.focus()
+    wasDemoOpen.current = demoOpen
+  }, [demoOpen])
+
+  const realScreen = connectedDocument ? (
     <DocumentWorkspace
       document={connectedDocument}
       backendDocument={backendDocument}
+      onViewDemo={openDemo}
       onReplace={async () => {
         try {
           await backendDocument.remove()
@@ -50,5 +61,27 @@ export function App() {
         setDocument(null)
       }}
     />
+  ) : (
+    <UploadScreen onFileAccepted={openUploadedFile} onViewDemo={openDemo} />
+  )
+
+  return (
+    <>
+      <div
+        className="app-surface"
+        aria-hidden={demoOpen ? 'true' : undefined}
+        inert={demoOpen ? true : undefined}
+      >
+        {realScreen}
+      </div>
+      {demoOpen ? (
+        <div className="demo-layer">
+          <FictionalDemoWorkspace
+            onClose={() => setDemoOpen(false)}
+            returnLabel={connectedDocument ? 'Return to document' : 'Back to upload'}
+          />
+        </div>
+      ) : null}
+    </>
   )
 }

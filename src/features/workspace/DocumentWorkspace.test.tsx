@@ -192,13 +192,15 @@ describe('DocumentWorkspace', () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
-  it('is honest about uploaded files and exposes no simulated sample route', async () => {
+  it('keeps the fictional demo available without changing the real document', async () => {
     vi.useRealTimers()
-    render(<DocumentWorkspace document={uploadedDocument} backendDocument={readyBackendDocument} backendApi={apiWithCreate()} onReplace={vi.fn()} />)
+    const onViewDemo = vi.fn()
+    render(<DocumentWorkspace document={uploadedDocument} backendDocument={readyBackendDocument} backendApi={apiWithCreate()} onReplace={vi.fn()} onViewDemo={onViewDemo} />)
 
     expect(await screen.findByRole('heading', { name: 'No redactions detected' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Prepare visible context' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'View interactive sample' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'View fictional demo' }))
+    expect(onViewDemo).toHaveBeenCalledOnce()
   })
 
   it('automatically detects and displays every passage without manual highlighting', async () => {

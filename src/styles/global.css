@@ -158,20 +158,26 @@ input:focus-visible {
   font-size: 0.86rem;
 }
 
-.demo-note {
-  display: inline-flex;
+.demo-entry {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  margin: 20px 0 0;
-  color: var(--muted);
-  font-size: 0.78rem;
+  gap: 7px;
 }
 
-.demo-note span {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--blue);
+.demo-entry .text-button {
+  min-height: 36px;
+  padding: 0 14px;
+  color: var(--blue-dark);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.demo-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
 }
 
 .pdf-viewer {
@@ -346,6 +352,55 @@ input:focus-visible {
   border-bottom: 1px solid var(--line);
   background: #fff;
   z-index: 10;
+}
+
+.workspace-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fictional-badge {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border: 1px solid #c9d7e1;
+  border-radius: 999px;
+  background: var(--blue-soft);
+  color: var(--blue-dark);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.demo-disclosure {
+  margin: 0;
+  padding: 8px 18px;
+  border-bottom: 1px solid #c9d7e1;
+  background: var(--blue-soft);
+  color: var(--blue-dark);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.app-surface {
+  min-height: 100vh;
+}
+
+.app-surface[inert] {
+  pointer-events: none;
+  user-select: none;
+}
+
+.demo-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: var(--soft);
+}
+
+.fictional-demo-workspace {
+  height: 100%;
 }
 
 .workspace-identity {
@@ -877,6 +932,18 @@ input:focus-visible {
   .workspace-header {
     min-height: 56px;
     padding-inline: 12px;
+  }
+
+  .workspace-actions {
+    gap: 5px;
+  }
+
+  .workspace-actions .secondary-button {
+    padding-inline: 9px;
+  }
+
+  .fictional-badge {
+    display: none;
   }
 
   .workspace-brand,

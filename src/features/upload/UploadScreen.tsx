@@ -3,10 +3,11 @@ import { validatePdfFile, type PdfValidationResult } from './fileValidation'
 
 interface UploadScreenProps {
   onFileAccepted: (file: File) => void
+  onViewDemo?: (opener: HTMLButtonElement) => void
   validate?: (file: File) => PdfValidationResult
 }
 
-export function UploadScreen({ onFileAccepted, validate = validatePdfFile }: UploadScreenProps) {
+export function UploadScreen({ onFileAccepted, onViewDemo, validate = validatePdfFile }: UploadScreenProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -78,7 +79,18 @@ export function UploadScreen({ onFileAccepted, validate = validatePdfFile }: Upl
           </button>
           {error ? <p className="upload-error" role="alert">{error}</p> : null}
         </div>
-        <p className="demo-note"><span aria-hidden="true" />Production pipeline — real predictions only</p>
+        {onViewDemo ? (
+          <div className="demo-entry">
+            <button
+              className="text-button"
+              type="button"
+              onClick={(event) => onViewDemo(event.currentTarget)}
+            >
+              View fictional demo
+            </button>
+            <p className="demo-note">Invented document · simulated predictions</p>
+          </div>
+        ) : null}
       </section>
     </main>
   )

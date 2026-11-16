@@ -20,6 +20,7 @@ import { initialWorkspaceState, workspaceReducer } from './workspaceReducer'
 interface DocumentWorkspaceProps {
   document: DocumentDescriptor
   onReplace: () => void
+  onViewDemo?: (opener: HTMLButtonElement) => void
   backendDocument?: BackendDocumentState
   backendApi?: BackendApi
   predictionService?: PredictionService
@@ -39,6 +40,7 @@ interface DetectionTask {
 export function DocumentWorkspace({
   document,
   onReplace,
+  onViewDemo,
   backendDocument,
   backendApi = defaultBackendApi,
   predictionService,
@@ -450,15 +452,26 @@ export function DocumentWorkspace({
           <span className="header-divider" aria-hidden="true" />
           <span className="filename" title={document.filename}>{document.filename}</span>
         </div>
-        <button
-          className="secondary-button"
-          type="button"
-          aria-label={deletionInProgress ? 'Removing document…' : 'Replace document'}
-          disabled={deletionInProgress}
-          onClick={onReplace}
-        >
-          {deletionInProgress ? 'Removing document…' : 'Replace document'}
-        </button>
+        <div className="workspace-actions">
+          {onViewDemo ? (
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={(event) => onViewDemo(event.currentTarget)}
+            >
+              View fictional demo
+            </button>
+          ) : null}
+          <button
+            className="secondary-button"
+            type="button"
+            aria-label={deletionInProgress ? 'Removing document…' : 'Replace document'}
+            disabled={deletionInProgress}
+            onClick={onReplace}
+          >
+            {deletionInProgress ? 'Removing document…' : 'Replace document'}
+          </button>
+        </div>
       </header>
 
       <nav className="mobile-view-switch" aria-label="Workspace view">
