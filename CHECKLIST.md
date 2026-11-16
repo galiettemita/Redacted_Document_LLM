@@ -159,6 +159,6 @@
     - [x] Implement and verify the lazy runtime provider, durable initialization failure, default worker lifecycle, and operational retrieval gates.
     - [x] Prove the loopback worker heartbeat remains live with corpus/model gates closed and no retrieval or model request.
     - [x] Keep original initialization errors out of Dramatiq retry payloads and use a dependency-free container liveness endpoint.
-    - [ ] Make the corpus preflight advisory by default and preserve resumable checkpoints on an actual out-of-space write.
+    - [x] Make the corpus preflight advisory by default and preserve resumable checkpoints on an actual out-of-space write.
     - [ ] Implement a streaming audit/import path for the pinned official nine-field gzip without creating a second uncompressed raw copy.
     - [ ] Acquire or capture one complete official source with explicit collection labels and a non-empty `cables` collection, then pass the existing coverage gate.

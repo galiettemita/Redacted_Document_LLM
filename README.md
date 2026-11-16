@@ -76,11 +76,11 @@ cd backend
 uv run corpus preflight --path /absolute/path/to/external/volume
 ```
 
-The minimum is 150 GiB free and 250 GiB is recommended. An insufficient result exits with status 2 and does not create corpus data.
+The report retains the conservative 150 GiB minimum and 250 GiB recommendation, but capacity is advisory by default: an `insufficient` result still exits successfully and does not prevent source work. To make that estimate a hard gate for an unattended environment, add `--enforce-minimum`; only that explicit mode exits with status 2 below the minimum.
 
 Run this command on the host against the exact intended storage path. A Docker Desktop container's virtual filesystem capacity is not evidence that the Mac has enough physical free space.
 
-Run the preflight again immediately before a large capture or index build. Source JSONL, checkpoints, chunks, and indexes remain outside Git. A capture that is interrupted or sees the upstream count change stays visibly incomplete and cannot pass readiness.
+Run the preflight again immediately before a large capture or index build. Source JSONL, checkpoints, chunks, and indexes remain outside Git. A capture that is interrupted, encounters an actual out-of-space write, or sees the upstream count change stays visibly incomplete and cannot pass readiness; resume truncates bytes beyond the last fsynced checkpoint before continuing.
 
 Freeze a downloaded copy of the Office of the Historian's official FRUS metadata:
 

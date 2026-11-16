@@ -30,7 +30,7 @@ def run(argv: Sequence[str] | None = None) -> int:
     if args.command == "preflight":
         report = run_preflight([Path(path) for path in args.path])
         print(json.dumps(report.model_dump(mode="json"), sort_keys=True, indent=2))
-        return 0 if report.sufficient else 2
+        return 2 if args.enforce_minimum and not report.sufficient else 0
     if args.command == "lock-snapshot":
         lock = resolve_snapshot(revision=args.revision, repo_id=args.repo_id)
         _write_json(Path(args.output), lock.model_dump(mode="json"))
@@ -129,6 +129,7 @@ def _parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     preflight = subparsers.add_parser("preflight")
     preflight.add_argument("--path", action="append", required=True)
+    preflight.add_argument("--enforce-minimum", action="store_true")
 
     snapshot = subparsers.add_parser("lock-snapshot")
     snapshot.add_argument("--repo-id", default="HistoryLab/foiarchive")
