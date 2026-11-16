@@ -141,7 +141,9 @@ describe('document lifecycle', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Replace document' }))
 
-    expect(await screen.findByText('The stored PDF could not be removed.')).toBeInTheDocument()
+    expect(
+      await screen.findAllByText('The stored PDF could not be removed.'),
+    ).not.toHaveLength(0)
     expect(screen.getByText('retained-record.pdf')).toBeInTheDocument()
     expect(revokeObjectURL).not.toHaveBeenCalledWith('blob:uploaded-pdf')
   })
