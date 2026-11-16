@@ -203,6 +203,27 @@ describe('DocumentWorkspace', () => {
     expect(onViewDemo).toHaveBeenCalledOnce()
   })
 
+  it('does not clear the real selection when Escape closes an obscuring demo', async () => {
+    vi.useRealTimers()
+    render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={apiWithCreate(undefined, {
+          detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
+        })}
+        isInteractive={false}
+        onReplace={vi.fn()}
+      />,
+    )
+    await screen.findByRole('heading', { name: 'Ready to predict' })
+    expect(screen.getByRole('button', { name: 'Dismiss selected passage' })).toBeInTheDocument()
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    expect(screen.getByRole('button', { name: 'Dismiss selected passage' })).toBeInTheDocument()
+  })
+
   it('automatically detects and displays every passage without manual highlighting', async () => {
     vi.useRealTimers()
     const detectDocumentPassages = vi.fn().mockResolvedValue(detectedPassages)

@@ -49,6 +49,7 @@ export function App() {
     <DocumentWorkspace
       document={connectedDocument}
       backendDocument={backendDocument}
+      isInteractive={!demoOpen}
       onViewDemo={openDemo}
       onReplace={async () => {
         try {

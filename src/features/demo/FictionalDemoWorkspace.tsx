@@ -84,6 +84,7 @@ export function FictionalDemoWorkspace({
           <span className="fictional-badge">Simulated</span>
         </div>
         <button
+          autoFocus
           className="secondary-button"
           type="button"
           onClick={onClose}

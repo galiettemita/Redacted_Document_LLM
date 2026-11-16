@@ -35,6 +35,7 @@ describe('upload screen', () => {
 
     expect(screen.getByRole('dialog', { name: 'Fictional interactive demo' })).toBeInTheDocument()
     expect(document.querySelector('.app-surface')).toHaveAttribute('aria-hidden', 'true')
+    expect(screen.getByRole('button', { name: 'Back to upload' })).toHaveFocus()
 
     fireEvent.click(screen.getByRole('button', { name: 'Back to upload' }))
 
@@ -110,6 +111,8 @@ describe('document lifecycle', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Mark a passage' })).toBeEnabled())
 
     const opener = screen.getByRole('button', { name: 'View fictional demo' })
+    fireEvent.click(screen.getByRole('button', { name: 'Mark a passage' }))
+    expect(screen.getByText('Draw the passage area')).toBeInTheDocument()
     fireEvent.click(opener)
 
     const appSurface = document.querySelector('.app-surface')
@@ -121,6 +124,7 @@ describe('document lifecycle', () => {
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(screen.getByText('preserved-record.pdf')).toBeInTheDocument()
+    expect(screen.getByText('Draw the passage area')).toBeInTheDocument()
     expect(opener).toHaveFocus()
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(0)
   })

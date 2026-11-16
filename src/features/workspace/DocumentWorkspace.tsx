@@ -21,6 +21,7 @@ interface DocumentWorkspaceProps {
   document: DocumentDescriptor
   onReplace: () => void
   onViewDemo?: (opener: HTMLButtonElement) => void
+  isInteractive?: boolean
   backendDocument?: BackendDocumentState
   backendApi?: BackendApi
   predictionService?: PredictionService
@@ -41,6 +42,7 @@ export function DocumentWorkspace({
   document,
   onReplace,
   onViewDemo,
+  isInteractive = true,
   backendDocument,
   backendApi = defaultBackendApi,
   predictionService,
@@ -114,12 +116,13 @@ export function DocumentWorkspace({
   }, [])
 
   useEffect(() => {
+    if (!isInteractive) return
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') dispatch({ type: 'dismiss' })
     }
     window.addEventListener('keydown', handleEscape)
     return () => window.removeEventListener('keydown', handleEscape)
-  }, [])
+  }, [isInteractive])
 
   useEffect(() => {
     if (!state.pinnedId) return
