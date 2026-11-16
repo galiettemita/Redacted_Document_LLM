@@ -1,6 +1,6 @@
 # Redacted Document LLM
 
-The repository now contains a production, visible-only prediction path from uploaded PDF to passage-linked model output. PDF upload, automatic redaction detection, stable correction, visible-date detection, document-wide context preparation, deterministic queries, durable Dramatiq execution, four-list retrieval, immutable trace persistence, GPT-6 Astra generation, resumable SSE, and real sidebar cards are connected end to end. The path fails closed until the complete Andrew-method corpus indexes, a live worker, and separately approved model access are all ready; it never fabricates an uploaded-document result.
+The repository contains two deliberately separate experiences: an always-available fictional interactive demo with simulated predictions, and a production prediction path from an uploaded PDF to passage-linked model output. The real path connects PDF upload, automatic redaction detection, stable correction, visible-date detection, document-wide context preparation, deterministic queries, durable Dramatiq execution, four-list retrieval, immutable trace persistence, GPT-6 Astra generation, resumable SSE, and real sidebar cards. It fails closed until the complete Andrew-method corpus indexes, a live worker, and separately approved model access are all ready; it never fabricates an uploaded-document result.
 
 ## Backend foundation
 
@@ -48,7 +48,7 @@ docker compose --profile retrieval up --build backend opensearch worker
 
 `REDACTED_CORPUS_ROOT` must be the directory containing `manifest.json`, `bm25-manifest.json`, `dense-manifest.json`, and the `dense/` artifact directory; Compose mounts it read-only into the API and worker while OpenSearch keeps its own writable subdirectory there. The worker image installs the locked BGE/FAISS retrieval group; the web API image remains small. The worker publishes no port, and readiness stays false unless its expiring Redis heartbeat is current.
 
-The upload screen sends PDFs to the local backend for validation and temporary content-addressed persistence while rendering a local object URL immediately. The backend scans every page, persists detected redactions under stable passage IDs, and prepares a separate hidden-answer-free context and `context-query-v1` retrieval input for every passage in one extraction/render pass. Structural target/redaction markers and the frozen stop-word list are removed from each query; query text, SHA-256, term count, query version, and stop-word version stay bound to the exact passage revision. The browser receives only safe readiness summaries, not transcript, query, or evidence text.
+The upload screen sends PDFs to the local backend for validation and temporary content-addressed persistence while rendering a local object URL immediately. The backend scans every page, persists detected redactions under stable passage IDs, and prepares a separate hidden-answer-free context and `context-query-v1` retrieval input for every passage in one extraction/render pass. Structural target/redaction markers and the frozen stop-word list are removed from each query; query text, SHA-256, term count, query version, and stop-word version stay bound to the exact passage revision. The browser shows only simple preparation/prediction states and final provider results, not transcript, query, evidence, or research diagnostics.
 
 Uploaded PDFs become inaccessible at their 24-hour deadline. A background
 retention sweep marks expired records with the auditable `retention_expired`
@@ -164,14 +164,13 @@ Vite binds to loopback and proxies only `/v1` to the loopback backend. This loca
 
 To create a production bundle, run `npm run build`. The output is written to `dist/`.
 
-## Demo flow
+## Product flow
 
-1. Upload a PDF. The browser opens it immediately and the local backend validates and stores a temporary copy.
-2. The backend scans every page automatically, groups multi-line redactions, and displays each detected passage with a stable PDF highlight.
-3. It automatically detects the date from uncovered visible text in the first-page header and prepares a separate visible-only context and deterministic search query for every passage. The selected passage summary shows the date, geometry-derived length cue, estimated words, visible-word count, confirmed-mask count, and visible-query-term count. Transcript and query text are not exposed as predictions or placed over the PDF.
-4. Review the highlights. Use **Correct selected area** to redraw one, **Add missed passage** for an omission, or **Remove selected passage** to confirm a false-positive removal. Remaining contexts rebuild automatically after every correction.
-5. Choose **Predict passage** or **Predict all passages**. If readiness is incomplete, the sidebar lists the exact blockers and makes no retrieval or model call. If ready, the worker streams each real result into its passage-linked sidebar card.
-6. Hover, focus, or select a passage to link its PDF geometry with the selected-passage area in the sidebar. Every prediction card comes only from the real provider event stream and is labeled **Model prediction**.
+1. Choose **View fictional demo** from either the upload screen or an open real document. The demo is explicitly labeled **Fictional interactive demo**, and every invented result is labeled **Simulated prediction**.
+2. Close the demo with its return button or Escape. Any uploaded document remains mounted and unchanged underneath; opening the demo never invokes replacement or deletion.
+3. For the real path, upload a PDF. The backend scans every page, highlights stable detected passages, and prepares each one automatically while the sidebar shows only concise product states.
+4. Review the highlights. Use **Correct selected area** to redraw one, **Add missed passage** for an omission, or **Remove selected passage** to confirm a false-positive removal.
+5. Choose **Predict passage** or **Predict all passages**. If the real services are unavailable, the UI fails closed with a concise unavailable state and makes no model call. If ready, the worker streams provider results labeled **Model prediction**.
 
 ## Important limitations
 
@@ -180,15 +179,16 @@ To create a production bundle, run `npm run build`. The output is written to `di
 - History Lab's replacement public MCP was healthy on November 15, 2026 and reports the expected multi-million-document collections, but its capped hosted search tools are not a bulk export and cannot replace Andrew's locally reproduced BM25/BGE indexes. The older document API still returns HTTP 502, the inspected Hugging Face snapshot remains scientifically incomplete, and this Mac has 115 GiB free versus the capture preflight's 150 GiB minimum. Full source acquisition still needs a complete export path and additional storage.
 - Appendix F prints `{hint}` but does not publish its substitution code or a generation token cap. The implementation records the evidence-supported rendering `It is {bucket} long.` (matching the paper's examples) and a 4,096-token provider reservation as versioned engineering choices rather than attributing either to Andrew's method.
 - Stored documents become unavailable after at most 24 hours; the production retention scheduler and replacement flow retry unreferenced-byte cleanup and remove derived sensitive artifacts while retaining an auditable tombstone.
-- The production frontend contains no fictional document, fixture prediction, mock prediction service, or simulated-result route. Deterministic fixtures remain test-only.
+- The fictional demo is a dedicated presentation layer. Only `FictionalDemoWorkspace` imports its invented document and deterministic mock service; the real `DocumentWorkspace` remains connected exclusively to the backend HTTP/SSE prediction service.
 
 ## Project structure
 
 - `src/features/upload/` — file validation and upload interaction.
 - `src/features/viewer/` — PDF rendering, controls, overlays, and rectangle drawing.
 - `src/features/predictions/` — selected passage area and ordered prediction cards.
+- `src/features/demo/` — isolated fictional demo workspace.
 - `src/features/workspace/` — integrated document state and responsive navigation.
-- `src/services/` — typed backend transport and the real HTTP/SSE prediction adapter.
+- `src/services/` — typed backend transport, the real HTTP/SSE prediction adapter, and the demo-only mock adapter.
 - `src/test/` — deterministic fixtures imported only by automated tests.
 - `backend/src/redacted_backend/jobs/retention.py` — scheduled expiry, sensitive-artifact cleanup, and reference-safe storage deletion.
 - `backend/src/redacted_backend/observability.py` — process-wide structured log redaction.

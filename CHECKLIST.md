@@ -132,12 +132,18 @@
     - [x] Select the next passage in document order and rebuild only the remaining visible-only contexts.
     - [x] Cancel stale context/removal requests and reject an unconfirmed backend tombstone.
     - [x] Cover transport, state transition, confirmation, overlay removal, and context rebuilding with frontend tests.
-  - [x] Task 13A: Remove production simulation and harden the real prediction path.
-    - [x] Remove the fictional PDF, sample predictions, simulation hook, mock production service, and interactive sample route.
-    - [x] Label every reachable provider result **Model prediction** and keep deterministic fixtures test-only.
+  - [x] Task 13A: Isolate simulation and harden the real prediction path.
+    - [x] Remove fictional data and mock services from the uploaded-document prediction path.
+    - [x] Label every reachable provider result **Model prediction**.
     - [x] Enforce non-overridable 24-hour/PDF resource ceilings in runtime configuration.
     - [x] Reject access at expiry, drain every cleanup batch, retry storage failures durably, clear derived sensitive text, record deletion reasons, and preserve shared bytes until their final live reference expires.
     - [x] Coordinate upload/unlink decisions across API processes with a PostgreSQL advisory lock.
     - [x] Make user deletion idempotent and redact PDF text, prompt/evidence fields, authorization values, and provider-style secrets from normal logs.
     - [x] Recheck the official History Lab source and local storage without substituting capped hosted search for Andrew's four-list retrieval.
     - [ ] Run the first full retrieval/model browser trace after a complete export path, at least 150 GiB free storage, model access, and explicit paid-call approval are available.
+  - [x] Task 13B: Restore a permanent, non-destructive fictional demonstration.
+    - [x] Restore the fictional PDF and progressive simulated predictions in a dedicated demo-only workspace.
+    - [x] Keep **View fictional demo** available from both the upload screen and a real uploaded-document workspace.
+    - [x] Preserve the mounted real document, prevent backend deletion, and restore opener focus after button or Escape close.
+    - [x] Label the experience **Fictional interactive demo** and every invented output **Simulated prediction**.
+    - [x] Replace real-workspace research diagnostics with concise preparation, ready, and unavailable states while preserving Andrew-method backend fields and gates.

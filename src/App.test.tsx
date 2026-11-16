@@ -84,7 +84,7 @@ describe('document lifecycle', () => {
     expect(screen.queryByText('Checking PDF…')).not.toBeInTheDocument()
     expect(await screen.findByText('local-record.pdf')).toBeInTheDocument()
     expect(validatePdfFileMock).toHaveBeenCalledOnce()
-    expect(screen.getByText(/stored temporarily by the local backend/i)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Mark a passage' })).toBeEnabled())
 
     fireEvent.click(screen.getByRole('button', { name: 'Replace document' }))
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Explore what’s behind the redactions' })).toBeInTheDocument())
@@ -107,7 +107,7 @@ describe('document lifecycle', () => {
     const file = new File(['%PDF-1.7'], 'preserved-record.pdf', { type: 'application/pdf' })
     render(<App />)
     fireEvent.change(screen.getByLabelText('Choose PDF'), { target: { files: [file] } })
-    expect(await screen.findByText('PDF upload complete')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Mark a passage' })).toBeEnabled())
 
     const opener = screen.getByRole('button', { name: 'View fictional demo' })
     fireEvent.click(opener)
@@ -129,14 +129,14 @@ describe('document lifecycle', () => {
     const file = new File(['%PDF-1.7'], 'retained-record.pdf', { type: 'application/pdf' })
     render(<App />)
     fireEvent.change(screen.getByLabelText('Choose PDF'), { target: { files: [file] } })
-    expect(await screen.findByText('PDF upload complete')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Mark a passage' })).toBeEnabled())
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
       detail: { code: 'delete_failed', message: 'The stored PDF could not be removed.' },
     }), { status: 500, headers: { 'Content-Type': 'application/json' } }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Replace document' }))
 
-    expect(await screen.findByText('PDF upload failed')).toBeInTheDocument()
+    expect(await screen.findByText('The stored PDF could not be removed.')).toBeInTheDocument()
     expect(screen.getByText('retained-record.pdf')).toBeInTheDocument()
     expect(revokeObjectURL).not.toHaveBeenCalledWith('blob:uploaded-pdf')
   })

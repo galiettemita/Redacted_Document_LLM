@@ -219,7 +219,7 @@ describe('DocumentWorkspace', () => {
     )
 
     expect(await screen.findByRole('heading', {
-      name: '2 passages ready for retrieval',
+      name: 'Ready to predict',
     })).toBeInTheDocument()
     expect(detectDocumentPassages).toHaveBeenCalledWith(
       uploadedDocument.backendDocumentId,
@@ -227,7 +227,12 @@ describe('DocumentWorkspace', () => {
     )
     expect(detectDocumentPassages).toHaveBeenCalledOnce()
     expect(container.querySelectorAll('[data-passage-id]')).toHaveLength(2)
-    expect(screen.getByText(/every detected passage now has visible-only context/i)).toBeInTheDocument()
+    expect(screen.getByText('2 hidden passages are ready.')).toBeInTheDocument()
+    expect(screen.queryByText(/visible-only context/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/search query/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/four-list retrieval/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/GPT-6 Astra/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/readiness gate/i)).not.toBeInTheDocument()
     expect(screen.queryByText('Predicted hidden passage')).not.toBeInTheDocument()
   })
 
@@ -248,7 +253,7 @@ describe('DocumentWorkspace', () => {
     )
 
     expect(await screen.findByRole('heading', {
-      name: '2 passages ready for retrieval',
+      name: 'Ready to predict',
     })).toBeInTheDocument()
     expect(prepareDocumentContexts).toHaveBeenCalledOnce()
     expect(prepareDocumentContexts).toHaveBeenCalledWith(
@@ -256,9 +261,7 @@ describe('DocumentWorkspace', () => {
       expect.any(AbortSignal),
     )
     expect(screen.queryByRole('button', { name: 'Prepare visible context' })).not.toBeInTheDocument()
-    expect(screen.getAllByText(
-      /retrieval, worker, and approved model are not connected yet/i,
-    )).not.toHaveLength(0)
+    expect(screen.getByRole('button', { name: 'Predict all passages' })).toBeInTheDocument()
   })
 
   it('adds a missed passage without replacing an automatic detection', async () => {
@@ -288,7 +291,7 @@ describe('DocumentWorkspace', () => {
         onReplace={vi.fn()}
       />,
     )
-    await screen.findByRole('heading', { name: '1 passage ready for retrieval' })
+    await screen.findByRole('heading', { name: 'Ready to predict' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Add missed passage' }))
     fireEvent.click(screen.getByRole('button', { name: 'Complete marked rectangle' }))
@@ -320,7 +323,7 @@ describe('DocumentWorkspace', () => {
         onReplace={vi.fn()}
       />,
     )
-    await screen.findByRole('heading', { name: '2 passages ready for retrieval' })
+    await screen.findByRole('heading', { name: 'Ready to predict' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Correct selected area' }))
     fireEvent.click(screen.getByRole('button', { name: 'Complete marked rectangle' }))
@@ -357,7 +360,7 @@ describe('DocumentWorkspace', () => {
         onReplace={vi.fn()}
       />,
     )
-    await screen.findByRole('heading', { name: '2 passages ready for retrieval' })
+    await screen.findByRole('heading', { name: 'Ready to predict' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove selected passage' }))
     expect(screen.getByRole('alertdialog', { name: 'Remove Passage 1?' })).toBeInTheDocument()
@@ -378,7 +381,7 @@ describe('DocumentWorkspace', () => {
       expect.any(AbortSignal),
     ))
     expect(await screen.findByRole('heading', {
-      name: '1 passage ready for retrieval',
+      name: 'Ready to predict',
     })).toBeInTheDocument()
     expect(container.querySelectorAll('[data-passage-id]')).toHaveLength(1)
     expect(container.querySelector('[data-passage-id]')).toHaveAttribute(
@@ -407,7 +410,7 @@ describe('DocumentWorkspace', () => {
         onReplace={vi.fn()}
       />,
     )
-    await screen.findByRole('heading', { name: '2 passages ready for retrieval' })
+    await screen.findByRole('heading', { name: 'Ready to predict' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove selected passage' }))
     fireEvent.click(screen.getByRole('button', { name: 'Confirm removal' }))
@@ -416,10 +419,8 @@ describe('DocumentWorkspace', () => {
       'The local backend could not remove this passage.',
     )).toBeInTheDocument()
     expect(container.querySelectorAll('[data-passage-id]')).toHaveLength(2)
-    expect(screen.getByRole('heading', { name: 'Visible-only context ready' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', {
-      name: '2 passages ready for retrieval',
-    })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Ready to predict' })).toBeInTheDocument()
+    expect(screen.queryByText(/visible-only context/i)).not.toBeInTheDocument()
     expect(prepareDocumentContexts).toHaveBeenCalledOnce()
   })
 
@@ -442,13 +443,13 @@ describe('DocumentWorkspace', () => {
       },
       expect.objectContaining({ idempotencyKey: expect.any(String) }),
     ))
-    expect(await screen.findByRole('heading', { name: '1 passage ready for retrieval' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Ready to predict' })).toBeInTheDocument()
     expect(screen.queryByText(/sample prediction/i)).not.toBeInTheDocument()
     expect(screen.queryByText('Simulated prediction')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'View interactive sample' })).not.toBeInTheDocument()
   })
 
-  it('shows the visible date after automatic document context preparation', async () => {
+  it('keeps preparation metadata out of the customer-facing prediction UI', async () => {
     vi.useRealTimers()
     const prepareDocumentContexts = vi.fn().mockResolvedValue(contextsFor(savedPassage))
     const api = apiWithCreate(undefined, {
@@ -470,21 +471,18 @@ describe('DocumentWorkspace', () => {
     expect(screen.queryByLabelText('Document date shown on PDF')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Save visible date' })).not.toBeInTheDocument()
 
-    expect(await screen.findByRole('heading', {
-      name: 'Visible-only context ready',
-    })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Ready to predict' })).toBeInTheDocument()
     expect(prepareDocumentContexts).toHaveBeenCalledWith(
       uploadedDocument.backendDocumentId,
       expect.any(AbortSignal),
     )
-    expect(screen.getByText('part of a sentence')).toBeInTheDocument()
-    expect(screen.getByText('1945-05-08')).toBeInTheDocument()
-    expect(screen.getByText('8 estimated words')).toBeInTheDocument()
-    expect(screen.getByText('37 visible words')).toBeInTheDocument()
-    expect(screen.getByText('2 confirmed masks')).toBeInTheDocument()
-    expect(screen.getByText('4 visible query terms')).toBeInTheDocument()
-    expect(screen.getByText('Context query ready')).toBeInTheDocument()
-    expect(screen.getAllByText(/approved model are not connected yet/i)).not.toHaveLength(0)
+    expect(screen.queryByText('part of a sentence')).not.toBeInTheDocument()
+    expect(screen.queryByText('1945-05-08')).not.toBeInTheDocument()
+    expect(screen.queryByText(/estimated words/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/visible words/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/confirmed masks/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/query terms/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/context query/i)).not.toBeInTheDocument()
     expect(screen.queryByText('visible before visible after')).not.toBeInTheDocument()
     expect(screen.queryByText(/search results/i)).not.toBeInTheDocument()
     expect(container.querySelector('.pdf-page-shell')).toHaveTextContent('')
@@ -522,7 +520,7 @@ describe('DocumentWorkspace', () => {
     )
 
     expect(await screen.findByRole('heading', {
-      name: '2 passages ready for retrieval',
+      name: 'Ready to predict',
     })).toBeInTheDocument()
     expect(schedulePassageAnalysis).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'Predict all passages' })).toBeInTheDocument()
@@ -559,7 +557,7 @@ describe('DocumentWorkspace', () => {
         onReplace={vi.fn()}
       />,
     )
-    await screen.findByRole('heading', { name: '2 passages ready for retrieval' })
+    await screen.findByRole('heading', { name: 'Ready to predict' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Predict all passages' }))
 
@@ -581,7 +579,7 @@ describe('DocumentWorkspace', () => {
     )
   })
 
-  it('shows durable readiness blockers without opening a fake prediction stream', async () => {
+  it('shows a concise unavailable state without exposing infrastructure blockers', async () => {
     vi.useRealTimers()
     const schedulePassageAnalysis = vi.fn(async (passageId: string) => (
       analysisJob(passageId, 'blocked')
@@ -600,13 +598,15 @@ describe('DocumentWorkspace', () => {
         onReplace={vi.fn()}
       />,
     )
-    await screen.findByRole('heading', { name: '2 passages ready for retrieval' })
+    await screen.findByRole('heading', { name: 'Ready to predict' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Predict all passages' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'corpus — complete corpus indexes are not available',
+      'Predictions are not available yet. Please try again later.',
     )
+    expect(screen.getByRole('heading', { name: 'Predictions unavailable' })).toBeInTheDocument()
+    expect(screen.queryByText(/corpus indexes/i)).not.toBeInTheDocument()
     expect(predictionService.stream).not.toHaveBeenCalled()
   })
 
@@ -637,7 +637,7 @@ describe('DocumentWorkspace', () => {
         onReplace={vi.fn()}
       />,
     )
-    await screen.findByRole('heading', { name: '2 passages ready for retrieval' })
+    await screen.findByRole('heading', { name: 'Ready to predict' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Predict all passages' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('The response was interrupted.')
@@ -670,7 +670,7 @@ describe('DocumentWorkspace', () => {
     )
 
     expect(await screen.findByText(
-      'The backend returned contexts for the wrong passages.',
+      'We couldn’t prepare this document for prediction. Please try again.',
     )).toBeInTheDocument()
     expect(screen.queryByText('Context query ready')).not.toBeInTheDocument()
   })
@@ -699,6 +699,6 @@ describe('DocumentWorkspace', () => {
 
     expect(screen.getByRole('button', { name: 'Removing document…' })).toBeDisabled()
     expect(screen.queryByRole('button', { name: 'View interactive sample' })).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Removing stored PDF' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Removing document…' })).toBeInTheDocument()
   })
 })

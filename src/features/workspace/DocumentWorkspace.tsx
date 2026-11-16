@@ -142,12 +142,6 @@ export function DocumentWorkspace({
   const selectedPassage = state.passages.find((passage) => passage.id === state.pinnedId)
     ?? state.passages[0]
     ?? null
-  const stablePassageId = selectedPassage?.id.startsWith('pending-')
-    ? null
-    : selectedPassage?.id ?? null
-  const contextSummary = stablePassageId
-    ? contextSummaries[stablePassageId] ?? null
-    : null
   const passageRemovalTarget = state.passages.find(
     (passage) => passage.id === passageRemovalId,
   ) ?? null
@@ -422,7 +416,7 @@ export function DocumentWorkspace({
       if (blockers.length > 0) {
         analysisRunId.current = null
         setAnalysisScheduleStatus('blocked')
-        setAnalysisError(formatAnalysisBlockers(blockers))
+        setAnalysisError('Predictions are not available yet. Please try again later.')
         return
       }
       setAnalysisScheduleStatus('running')
@@ -605,73 +599,47 @@ export function DocumentWorkspace({
             error={analysisError
               ?? modelStream.error
               ?? passageError
-              ?? detectionError
-              ?? contextError
+              ?? (detectionError || contextError
+                ? 'We couldn’t prepare this document for prediction. Please try again.'
+                : null)
               ?? backendDocumentError(backendDocument)}
             activePassageId={activePassageId}
             onSelectPassage={handleSelectPassage}
             onDismissSelection={() => dispatch({ type: 'dismiss' })}
             missingPredictionMessage={passageSaveStatus === 'saving'
-              ? 'Saving this passage to the backend…'
+              ? 'Preparing this passage…'
               : detectionStatus === 'detecting'
-                ? 'Scanning every page for hidden passages…'
-                : detectionStatus === 'failed'
-                  ? 'Automatic detection needs review before predictions can begin.'
+                ? 'Preparing this passage…'
+                : detectionStatus === 'failed' || contextStatus === 'failed'
+                  ? 'Predictions are unavailable for this passage.'
                   : contextStatus === 'preparing'
-                    ? 'Preparing visible-only context automatically for every passage…'
+                    ? 'Preparing this passage…'
                     : contextStatus === 'ready'
                       ? analysisScheduleStatus === 'running'
-                        ? 'The real retrieval and model job is running for this passage.'
-                        : 'Visible-only context and a search query are ready for this passage.'
+                        ? 'Prediction is running…'
+                        : 'Select Predict to generate this result.'
                       : passages.length
-                        ? 'Automatic visible-only context preparation has not finished.'
+                        ? 'Preparing this passage…'
                         : 'No hidden passages are available for prediction.'}
           >
             {document.mode === 'uploaded' ? (
               <div className="uploaded-document-note">
-                <h3>{backendNoteTitle(
+                <h3>{predictionStatusTitle(
                   backendDocument,
                   passageSaveStatus,
                   contextStatus,
                   detectionStatus,
+                  analysisScheduleStatus,
                   passages.length,
                 )}</h3>
-                <p>{backendNoteMessage(
+                <p>{predictionStatusMessage(
                   backendDocument,
                   passageSaveStatus,
                   contextStatus,
                   detectionStatus,
-                  detectionResult,
+                  analysisScheduleStatus,
                   passages.length,
                 )}</p>
-                <div className="visible-context-controls">
-                  <p>
-                    The backend automatically reads only visible PDF content, detects its
-                    visible date, and builds a separate passage-linked search query for every
-                    detected area.
-                  </p>
-                  {contextStatus === 'preparing' ? (
-                    <p role="status">Preparing every passage automatically…</p>
-                  ) : null}
-                  {contextSummary ? (
-                    <section className="visible-context-summary" aria-live="polite">
-                      <h4>Visible-only context ready</h4>
-                      <p>
-                        <span>{contextSummary.document_date}</span>
-                        <span>{contextSummary.length_cue}</span>
-                        <span>{contextSummary.estimated_words} estimated words</span>
-                        <span>{contextSummary.visible_word_count} visible words</span>
-                        <span>{contextSummary.confirmed_mask_count} confirmed masks</span>
-                        <span>{contextSummary.context_query_term_count} visible query terms</span>
-                      </p>
-                      <p><strong>Context query ready</strong></p>
-                      <p>
-                        The production prediction path uses four-list retrieval and GPT-6
-                        Astra only after every readiness gate passes.
-                      </p>
-                    </section>
-                  ) : null}
-                </div>
                 {contextStatus === 'ready' && passages.length > 0 ? (
                   <button
                     className="primary-button"
@@ -773,78 +741,54 @@ function markingToolbarMessage(
       : ' Use this only if the automatic scan missed a hidden passage.'
 }
 
-function backendNoteTitle(
+function predictionStatusTitle(
   backendDocument: BackendDocumentState | undefined,
   passageSaveStatus: PassageSaveStatus,
   contextStatus: ContextPreparationStatus,
   detectionStatus: PassageDetectionStatus,
+  analysisScheduleStatus: AnalysisScheduleStatus,
   passageCount: number,
 ): string {
-  if (backendDocument?.status === 'uploading') return 'Backend upload in progress'
-  if (backendDocument?.status === 'deleting') return 'Removing stored PDF'
-  if (backendDocument?.status === 'unavailable') return 'Local backend unavailable'
-  if (backendDocument?.status === 'failed') return 'PDF upload failed'
-  if (passageSaveStatus === 'saving') return 'Saving Passage 1'
-  if (contextStatus === 'preparing') return 'Preparing every passage'
-  if (contextStatus === 'ready') {
-    return `${passageCount} ${passageCount === 1 ? 'passage' : 'passages'} ready for retrieval`
-  }
-  if (contextStatus === 'failed') return 'Automatic context preparation needs review'
-  if (passageSaveStatus === 'saved') return 'Passage saved'
-  if (passageSaveStatus === 'failed') return 'Passage save failed'
-  if (detectionStatus === 'detecting') return 'Scanning every page'
-  if (detectionStatus === 'failed') return 'Automatic detection needs review'
-  if (detectionStatus === 'ready' && passageCount > 0) {
-    return `${passageCount} ${passageCount === 1 ? 'passage' : 'passages'} detected`
-  }
+  if (backendDocument?.status === 'deleting') return 'Removing document…'
+  if (
+    backendDocument?.status === 'unavailable'
+    || backendDocument?.status === 'failed'
+    || passageSaveStatus === 'failed'
+    || contextStatus === 'failed'
+    || detectionStatus === 'failed'
+    || analysisScheduleStatus === 'blocked'
+  ) return 'Predictions unavailable'
+  if (contextStatus === 'ready' && passageCount > 0) return 'Ready to predict'
   if (detectionStatus === 'ready') return 'No redactions detected'
-  return 'PDF upload complete'
+  return 'Preparing document…'
 }
 
-function backendNoteMessage(
+function predictionStatusMessage(
   backendDocument: BackendDocumentState | undefined,
   passageSaveStatus: PassageSaveStatus,
   contextStatus: ContextPreparationStatus,
   detectionStatus: PassageDetectionStatus,
-  detectionResult: PassageDetectionResult | null,
+  analysisScheduleStatus: AnalysisScheduleStatus,
   passageCount: number,
 ): string {
-  if (backendDocument?.status === 'uploading') {
-    return 'Uploading to the loopback-only local backend while the browser displays its local copy.'
-  }
   if (backendDocument?.status === 'deleting') {
-    return 'The app will return to the upload screen after the backend confirms deletion.'
+    return 'The app will return to the upload screen when removal is complete.'
   }
-  if (backendDocument?.status === 'unavailable') {
-    return 'The PDF is displayed locally, but the backend copy and passage coordinates have not been saved.'
+  if (
+    backendDocument?.status === 'unavailable'
+    || backendDocument?.status === 'failed'
+    || passageSaveStatus === 'failed'
+    || contextStatus === 'failed'
+    || detectionStatus === 'failed'
+    || analysisScheduleStatus === 'blocked'
+  ) return 'Predictions are not available right now. Your PDF remains open.'
+  if (contextStatus === 'ready' && passageCount > 0) {
+    return `${passageCount} hidden ${passageCount === 1 ? 'passage is' : 'passages are'} ready.`
   }
-  if (backendDocument?.status === 'failed') {
-    return backendDocument.error ?? 'The backend rejected this PDF.'
+  if (detectionStatus === 'ready') {
+    return 'No hidden passages were detected. You can mark one manually.'
   }
-  if (contextStatus === 'ready') {
-    return 'Every detected passage now has visible-only context and its own search query. Retrieval, worker, and approved model are not connected yet.'
-  }
-  if (contextStatus === 'preparing') {
-    return 'Every detected passage is being prepared automatically from visible PDF content and redaction geometry.'
-  }
-  if (passageSaveStatus === 'saved') {
-    return 'The passage is saved. Automatic visible-only context preparation is starting now.'
-  }
-  if (passageSaveStatus === 'failed') {
-    return 'The rectangle remains visible locally, but it was not saved. Try marking the passage again.'
-  }
-  if (detectionStatus === 'detecting') {
-    return 'The PDF is stored temporarily by the local backend. Every page is being scanned for hidden passages.'
-  }
-  if (detectionStatus === 'failed') {
-    return 'No passage was silently guessed. Review the detection error, then use manual correction only if the PDF needs it.'
-  }
-  if (detectionStatus === 'ready' && detectionResult) {
-    return passageCount
-      ? `All ${detectionResult.pages_scanned} pages were scanned automatically. Each detected area now has a stable passage record and PDF highlight; manual marking is only for corrections or a missed-area fallback.`
-      : `All ${detectionResult.pages_scanned} pages were scanned automatically, but no reliable hidden passages were found. Manual marking remains available for a missed passage.`
-  }
-  return 'The PDF is stored temporarily by the local backend. Automatic all-page passage detection will begin now.'
+  return 'Finding hidden passages and preparing them for prediction.'
 }
 
 function backendDocumentError(backendDocument: BackendDocumentState | undefined): string | null {
@@ -858,14 +802,4 @@ function nextPassageLabel(passages: Passage[]): string {
     return match ? [Number(match[1])] : []
   })
   return `Passage ${Math.max(0, ...numbers) + 1}`
-}
-
-function formatAnalysisBlockers(
-  blockers: Array<{ component: string; detail: string }>,
-): string {
-  const unique = new Map<string, string>()
-  for (const blocker of blockers) unique.set(blocker.component, blocker.detail)
-  return `Prediction is blocked: ${[...unique.entries()]
-    .map(([component, detail]) => `${component} — ${detail}`)
-    .join('; ')}.`
 }
