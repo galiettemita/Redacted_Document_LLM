@@ -140,7 +140,7 @@
     - [x] Coordinate upload/unlink decisions across API processes with a PostgreSQL advisory lock.
     - [x] Make user deletion idempotent and redact PDF text, prompt/evidence fields, authorization values, and provider-style secrets from normal logs.
     - [x] Recheck the official History Lab source and local storage without substituting capped hosted search for Andrew's four-list retrieval.
-    - [ ] Run the first full retrieval/model browser trace after a complete export path, at least 150 GiB free storage, model access, and explicit paid-call approval are available.
+    - [ ] Run the first full retrieval/model browser trace after a complete export path, model access, and explicit paid-call approval are available; report storage but continue until an actual write fails.
   - [x] Task 13B: Restore a permanent, non-destructive fictional demonstration.
     - [x] Restore the fictional PDF and progressive simulated predictions in a dedicated demo-only workspace.
     - [x] Keep **View fictional demo** available from both the upload screen and a real uploaded-document workspace.
@@ -148,3 +148,12 @@
     - [x] Label the experience **Fictional interactive demo** and every invented output **Simulated prediction**.
     - [x] Replace real-workspace research diagnostics with concise preparation, ready, and unavailable states while preserving Andrew-method backend fields and gates.
     - [ ] Repeat the demo/real-document click-through visually when the in-app browser connector is available; automated interaction tests and live loopback endpoint checks are complete, but no visual run is claimed for this increment.
+  - [ ] Task 14: Operate the real worker independently and unblock the complete corpus source.
+    - [x] Trace the worker boot failure to eager real-runtime construction before heartbeat startup.
+    - [x] Recheck the official MCP, PostgREST API, and frozen Hugging Face artifact; record that the live MCP corpus call still surfaces the API 502 and the frozen 11-collection snapshot predates the separate `cables` collection.
+    - [x] Design an always-on worker that lazily constructs only the real orchestrator and never falls back to a mock runtime.
+    - [x] Set the design policy that fixed free-space estimates are advisory while source completeness, checksums, and coverage remain mandatory.
+    - [ ] Implement and verify the lazy runtime provider, durable initialization failure, default worker lifecycle, and operational retrieval gates.
+    - [ ] Make the corpus preflight advisory by default and preserve resumable checkpoints on an actual out-of-space write.
+    - [ ] Implement a streaming audit/import path for the pinned official nine-field gzip without creating a second uncompressed raw copy.
+    - [ ] Acquire or capture one complete official source with explicit collection labels and a non-empty `cables` collection, then pass the existing coverage gate.
