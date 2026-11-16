@@ -4,7 +4,10 @@ from pathlib import Path
 
 from httpx import ASGITransport, AsyncClient
 
-from redacted_backend.api.readiness import resolve_worker_readiness
+from redacted_backend.api.readiness import (
+    resolve_corpus_readiness,
+    resolve_worker_readiness,
+)
 from redacted_backend.config import Settings
 from redacted_backend.corpus.manifest import CorpusManifest
 from redacted_backend.domain.readiness import verify_corpus_readiness
@@ -116,9 +119,108 @@ def test_model_readiness_requires_access_and_explicit_paid_call_approval() -> No
     assert empty["model"] == {"ready": False, "detail": "not configured"}
 
 
-def test_corpus_readiness_requires_matching_corpus_and_bm25_manifests(
+def test_corpus_readiness_requires_dense_artifact_files(
     tmp_path: Path,
 ) -> None:
+    settings, _ = _compatible_readiness_settings(tmp_path)
+
+    readiness = resolve_corpus_readiness(
+        settings,
+        index_counter=lambda _url, _index: 1,
+    )
+
+    assert readiness.model_dump() == {
+        "ready": False,
+        "detail": "dense artifacts not available",
+    }
+
+
+def test_corpus_readiness_requires_a_configured_retrieval_service(
+    tmp_path: Path,
+) -> None:
+    settings, _ = _compatible_readiness_settings(tmp_path, create_dense=True)
+
+    readiness = resolve_corpus_readiness(
+        settings,
+        index_counter=lambda _url, _index: 1,
+    )
+
+    assert readiness.model_dump() == {
+        "ready": False,
+        "detail": "retrieval service not configured",
+    }
+
+
+def test_corpus_readiness_fails_closed_when_the_live_index_probe_fails(
+    tmp_path: Path,
+) -> None:
+    settings, _ = _compatible_readiness_settings(
+        tmp_path,
+        create_dense=True,
+        opensearch_url="http://search.test:9200",
+    )
+
+    def unavailable(_url: str, _index: str) -> int:
+        raise RuntimeError("credential-or-host-detail")
+
+    readiness = resolve_corpus_readiness(settings, index_counter=unavailable)
+
+    assert readiness.model_dump() == {
+        "ready": False,
+        "detail": "retrieval index probe failed",
+    }
+
+
+def test_corpus_readiness_rejects_a_live_index_count_mismatch(
+    tmp_path: Path,
+) -> None:
+    settings, _ = _compatible_readiness_settings(
+        tmp_path,
+        create_dense=True,
+        opensearch_url="http://search.test:9200",
+    )
+
+    readiness = resolve_corpus_readiness(
+        settings,
+        index_counter=lambda _url, _index: 2,
+    )
+
+    assert readiness.model_dump() == {
+        "ready": False,
+        "detail": "BM25 live index count mismatch",
+    }
+
+
+def test_corpus_readiness_requires_matching_manifests_artifacts_and_live_index(
+    tmp_path: Path,
+) -> None:
+    settings, index = _compatible_readiness_settings(
+        tmp_path,
+        create_dense=True,
+        opensearch_url="http://search.test:9200",
+    )
+
+    readiness = resolve_corpus_readiness(
+        settings,
+        index_counter=lambda url, name: (
+            index.chunk_count
+            if (url, name) == ("http://search.test:9200", index.index_name)
+            else -1
+        ),
+    )
+
+    assert readiness.model_dump() == {
+        "ready": True,
+        "detail": "corpus and retrieval indexes operational",
+    }
+
+
+def _compatible_readiness_settings(
+    tmp_path: Path,
+    *,
+    create_dense: bool = False,
+    opensearch_url: str | None = None,
+) -> tuple[Settings, Bm25IndexManifest]:
     scientific = ScientificConfig()
     corpus = CorpusManifest(
         schema_version="historylab-normalized-v1",
@@ -150,30 +252,25 @@ def test_corpus_readiness_requires_matching_corpus_and_bm25_manifests(
     corpus_path = tmp_path / "corpus.json"
     index_path = tmp_path / "bm25.json"
     dense_path = tmp_path / "dense.json"
+    dense_directory = tmp_path / "dense"
     corpus_path.write_text(json.dumps(corpus.model_dump(mode="json")), encoding="utf-8")
     index_path.write_text(json.dumps(index.model_dump(mode="json")), encoding="utf-8")
     dense_path.write_text(json.dumps(dense.model_dump(mode="json")), encoding="utf-8")
+    if create_dense:
+        dense_directory.mkdir()
+        for name in ("embeddings.f16", "metadata.jsonl", "candidate.faiss"):
+            (dense_directory / name).write_bytes(b"fixture")
     settings = Settings(
         database_url=None,
         redis_url=None,
         corpus_manifest_path=corpus_path,
         bm25_manifest_path=index_path,
         dense_manifest_path=dense_path,
+        dense_artifact_directory=dense_directory,
+        opensearch_url=opensearch_url,
         openai_api_key=None,
     )
-
-    async def request_readiness():
-        transport = ASGITransport(app=create_app(settings))
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            return await client.get("/v1/readiness")
-
-    body = asyncio.run(request_readiness()).json()
-
-    assert body["corpus"] == {
-        "ready": True,
-        "detail": "BM25 and dense indexes verified",
-    }
-    assert body["prediction_ready"] is False
+    return settings, index
 
 
 def test_corpus_readiness_rejects_an_incompatible_bm25_definition_or_count() -> None:

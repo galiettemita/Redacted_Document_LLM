@@ -154,6 +154,7 @@
     - [x] Design an always-on worker that lazily constructs only the real orchestrator and never falls back to a mock runtime.
     - [x] Add a thread-safe runtime provider that caches one successful real orchestrator, retries failed initialization, and exposes no secret-bearing error text.
     - [x] Boot the real task module with PostgreSQL and Redis alone, retry runtime initialization, and durably sanitize final initialization failures.
+    - [x] Keep prediction dispatch closed until dense artifacts exist and the live OpenSearch index count matches its verified manifest.
     - [x] Set the design policy that fixed free-space estimates are advisory while source completeness, checksums, and coverage remain mandatory.
     - [ ] Implement and verify the lazy runtime provider, durable initialization failure, default worker lifecycle, and operational retrieval gates.
     - [ ] Make the corpus preflight advisory by default and preserve resumable checkpoints on an actual out-of-space write.

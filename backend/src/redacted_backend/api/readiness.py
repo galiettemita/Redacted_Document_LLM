@@ -16,6 +16,7 @@ from redacted_backend.domain.readiness import (
     ReadinessResponse,
     verify_corpus_readiness,
 )
+from redacted_backend.retrieval.bm25 import OpenSearchHttpTransport
 from redacted_backend.retrieval.types import Bm25IndexManifest, DenseIndexManifest
 from redacted_backend.scientific_config import ScientificConfig
 
@@ -92,7 +93,11 @@ def resolve_database_readiness(database: Database | None) -> ComponentReadiness:
     return ComponentReadiness(ready=True, detail="ready")
 
 
-def resolve_corpus_readiness(settings: Settings) -> ComponentReadiness:
+def resolve_corpus_readiness(
+    settings: Settings,
+    *,
+    index_counter: Callable[[str, str], int] | None = None,
+) -> ComponentReadiness:
     if (
         settings.corpus_manifest_path is None
         or settings.bm25_manifest_path is None
@@ -117,4 +122,45 @@ def resolve_corpus_readiness(settings: Settings) -> ComponentReadiness:
         )
     except (OSError, ValidationError, ValueError):
         return ComponentReadiness(ready=False, detail="manifest invalid")
-    return verify_corpus_readiness(corpus, index, dense, ScientificConfig())
+    manifest_readiness = verify_corpus_readiness(
+        corpus,
+        index,
+        dense,
+        ScientificConfig(),
+    )
+    if not manifest_readiness.ready:
+        return manifest_readiness
+    if settings.dense_artifact_directory is None or any(
+        not (settings.dense_artifact_directory / name).is_file()
+        for name in ("embeddings.f16", "metadata.jsonl", "candidate.faiss")
+    ):
+        return ComponentReadiness(
+            ready=False,
+            detail="dense artifacts not available",
+        )
+    if settings.opensearch_url is None:
+        return ComponentReadiness(
+            ready=False,
+            detail="retrieval service not configured",
+        )
+    counter = index_counter or _count_opensearch_chunks
+    try:
+        live_count = counter(settings.opensearch_url, index.index_name)
+    except Exception:
+        return ComponentReadiness(
+            ready=False,
+            detail="retrieval index probe failed",
+        )
+    if live_count != index.chunk_count:
+        return ComponentReadiness(
+            ready=False,
+            detail="BM25 live index count mismatch",
+        )
+    return ComponentReadiness(
+        ready=True,
+        detail="corpus and retrieval indexes operational",
+    )
+
+
+def _count_opensearch_chunks(base_url: str, index_name: str) -> int:
+    return OpenSearchHttpTransport(base_url, timeout_seconds=2.0).count(index_name)

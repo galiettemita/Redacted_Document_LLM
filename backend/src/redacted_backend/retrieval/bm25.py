@@ -317,6 +317,13 @@ class OpenSearchHttpTransport:
     def refresh(self, index_name: str) -> None:
         self._request("POST", f"/{quote(index_name)}/_refresh")
 
+    def count(self, index_name: str) -> int:
+        response = self._request("GET", f"/{quote(index_name)}/_count")
+        count = response.get("count")
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise RuntimeError("OpenSearch count response is invalid")
+        return count
+
     def _request(
         self,
         method: str,

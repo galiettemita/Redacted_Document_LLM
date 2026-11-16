@@ -11,6 +11,7 @@ from redacted_backend.corpus.manifest import CorpusManifest
 from redacted_backend.retrieval.bm25 import (
     Bm25Index,
     IncompatibleIndexManifestError,
+    OpenSearchHttpTransport,
 )
 from redacted_backend.scientific_config import ScientificConfig
 
@@ -39,6 +40,17 @@ class RecordingTransport:
     def search(self, index_name: str, request: dict[str, Any]) -> list[dict[str, Any]]:
         self.search_request = request
         return self.hits
+
+
+class CountTransport(OpenSearchHttpTransport):
+    def __init__(self, response: dict[str, Any]) -> None:
+        super().__init__("http://search.test:9200")
+        self.response = response
+        self.requests: list[tuple[str, str]] = []
+
+    def _request(self, method: str, path: str, **_kwargs: Any) -> dict[str, Any]:
+        self.requests.append((method, path))
+        return self.response
 
 
 def chunk(ordinal: int = 0) -> CorpusChunk:
@@ -220,3 +232,20 @@ def test_search_rejects_a_loaded_index_with_an_incompatible_definition() -> None
 
     with pytest.raises(IncompatibleIndexManifestError, match="index definition"):
         index.search("visible context")
+
+
+def test_count_reads_the_exact_quoted_index_count() -> None:
+    transport = CountTransport({"count": 17})
+
+    count = transport.count("redacted chunks")
+
+    assert count == 17
+    assert transport.requests == [("GET", "/redacted%20chunks/_count")]
+
+
+@pytest.mark.parametrize("value", [True, -1, "17", None])
+def test_count_rejects_invalid_opensearch_count_payloads(value: object) -> None:
+    transport = CountTransport({"count": value})
+
+    with pytest.raises(RuntimeError, match="count response is invalid"):
+        transport.count("redacted-chunks-v1")
