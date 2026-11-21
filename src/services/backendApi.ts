@@ -83,11 +83,11 @@ export interface VisibleContextSummary {
   visible_word_count: number
   confirmed_mask_count: number
   serialization_version: 'visible-transcript-v1'
-  context_query_status: 'ready'
+  context_query_status: 'ready' | 'unavailable'
   context_query_term_count: number
-  context_query_sha256: string
-  context_query_version: 'context-query-v1'
-  context_stopwords_version: string
+  context_query_sha256: string | null
+  context_query_version: 'context-query-v1' | null
+  context_stopwords_version: string | null
 }
 
 export interface DocumentVisibleContextsSummary {

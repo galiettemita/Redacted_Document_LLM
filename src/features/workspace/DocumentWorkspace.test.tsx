@@ -559,8 +559,8 @@ describe('DocumentWorkspace', () => {
       detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
       schedulePassageAnalysis,
     })
-    const predictionService: PredictionService = {
-      async stream(_document, _signal, onPrediction) {
+    const stream = vi.fn<PredictionService['stream']>(
+      async (_document, _signal, onPrediction) => {
         onPrediction({
           passageId: savedPassage.id,
           page: 1,
@@ -570,7 +570,8 @@ describe('DocumentWorkspace', () => {
           predictionBasis: 'model_only_v1',
         })
       },
-    }
+    )
+    const predictionService: PredictionService = { stream }
     const { container } = render(
       <DocumentWorkspace
         document={uploadedDocument}
@@ -585,6 +586,17 @@ describe('DocumentWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Predict all passages' }))
 
     await waitFor(() => expect(schedulePassageAnalysis).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(stream).toHaveBeenCalledWith(
+      uploadedDocument,
+      expect.any(AbortSignal),
+      expect.any(Function),
+      {
+        jobBases: {
+          [`job-${savedPassage.id}`]: 'model_only_v1',
+          [`job-${detectedSecondPassage.id}`]: 'model_only_v1',
+        },
+      },
+    ))
     expect(schedulePassageAnalysis).toHaveBeenNthCalledWith(
       1,
       savedPassage.id,

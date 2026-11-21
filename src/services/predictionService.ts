@@ -1,10 +1,10 @@
-import type { DocumentDescriptor, Prediction } from '../types'
+import type { DocumentDescriptor, Prediction, PredictionBasis } from '../types'
 
 export interface PredictionService {
   stream(
     document: DocumentDescriptor,
     signal: AbortSignal,
     onPrediction: (prediction: Prediction) => void,
-    options?: { jobIds?: readonly string[] },
+    options?: { jobBases?: Readonly<Record<string, PredictionBasis>> },
   ): Promise<void>
 }

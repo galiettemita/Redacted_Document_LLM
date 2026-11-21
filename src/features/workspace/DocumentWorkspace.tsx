@@ -11,7 +11,12 @@ import {
 } from '../../services/backendApi'
 import { createHttpPredictionService } from '../../services/httpPredictionService'
 import type { PredictionService } from '../../services/predictionService'
-import type { DocumentDescriptor, Passage, PassageRect } from '../../types'
+import type {
+  DocumentDescriptor,
+  Passage,
+  PassageRect,
+  PredictionBasis,
+} from '../../types'
 import { PredictionSidebar } from '../predictions/PredictionSidebar'
 import { PdfViewer } from '../viewer/PdfViewer'
 import { getEffectivePassageId } from './selectionState'
@@ -61,7 +66,9 @@ export function DocumentWorkspace({
   const [analysisScheduleStatus, setAnalysisScheduleStatus] = useState<AnalysisScheduleStatus>('idle')
   const [analysisError, setAnalysisError] = useState<string | null>(null)
   const [predictionRunKey, setPredictionRunKey] = useState(0)
-  const [predictionJobIds, setPredictionJobIds] = useState<string[]>([])
+  const [predictionJobBases, setPredictionJobBases] = useState<
+    Record<string, PredictionBasis>
+  >({})
   const passageTargets = useRef(new Map<string, HTMLElement>())
   const passageRemovalTrigger = useRef<HTMLButtonElement | null>(null)
   const detectionTask = useRef<DetectionTask | null>(null)
@@ -78,7 +85,7 @@ export function DocumentWorkspace({
     predictionRunKey > 0 ? document : null,
     uploadedPredictionService,
     predictionRunKey,
-    predictionJobIds,
+    predictionJobBases,
   )
 
   useEffect(() => {
@@ -96,7 +103,7 @@ export function DocumentWorkspace({
     setAnalysisScheduleStatus('idle')
     setAnalysisError(null)
     setPredictionRunKey(0)
-    setPredictionJobIds([])
+    setPredictionJobBases({})
     passageRequest.current?.abort()
     passageRequest.current = null
     contextRequest.current?.abort()
@@ -159,7 +166,7 @@ export function DocumentWorkspace({
     setAnalysisScheduleStatus('idle')
     setAnalysisError(null)
     setPredictionRunKey(0)
-    setPredictionJobIds([])
+    setPredictionJobBases({})
     contextRequest.current?.abort()
     const controller = new AbortController()
     contextRequest.current = controller
@@ -423,7 +430,9 @@ export function DocumentWorkspace({
         return
       }
       setAnalysisScheduleStatus('running')
-      setPredictionJobIds(jobs.map((job) => job.id))
+      setPredictionJobBases(Object.fromEntries(
+        jobs.map((job) => [job.id, job.prediction_basis]),
+      ))
       setPredictionRunKey((current) => current + 1)
       analysisRunId.current = null
     } catch (error) {

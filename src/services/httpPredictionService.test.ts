@@ -30,7 +30,7 @@ describe('createHttpPredictionService', () => {
       },
       new AbortController().signal,
       (prediction) => predictions.push(prediction),
-      { jobIds: ['job-1'] },
+      { jobBases: { 'job-1': 'model_only_v1' } },
     )
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -80,7 +80,7 @@ describe('createHttpPredictionService', () => {
       },
       new AbortController().signal,
       (prediction) => results.push(prediction.text),
-      { jobIds: ['new-job'] },
+      { jobBases: { 'new-job': 'paper_exact_v1' } },
     )
 
     expect(results).toEqual(['Current result.'])
@@ -128,6 +128,33 @@ describe('createHttpPredictionService', () => {
     )).rejects.toThrow('invalid prediction event')
   })
 
+  it('rejects a recognized basis that differs from the scheduled job', async () => {
+    const event = [
+      'event: passage.prediction',
+      'data: {"job_id":"job-1","passage_id":"passage-1","page_number":1,"model":"gpt-6-astra","prediction_basis":"paper_exact_v1","prediction":"Mismatched result.","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2,"reasoning_tokens":0},"estimated_cost_usd":0.001,"pricing_version":"test"}',
+      '',
+      '',
+    ].join('\n')
+    const service = createHttpPredictionService(
+      vi.fn(async () => new Response(event)) as typeof fetch,
+    )
+    const onPrediction = vi.fn()
+
+    await expect(service.stream(
+      {
+        id: 'uploaded-1',
+        filename: 'archive.pdf',
+        source: 'blob:test',
+        mode: 'uploaded',
+        backendDocumentId: 'document-1',
+      },
+      new AbortController().signal,
+      onPrediction,
+      { jobBases: { 'job-1': 'model_only_v1' } },
+    )).rejects.toThrow('prediction basis changed')
+    expect(onPrediction).not.toHaveBeenCalled()
+  })
+
   it('reports worker error events after consuming the terminal stream', async () => {
     const body = [
       'id: 8',
@@ -150,7 +177,7 @@ describe('createHttpPredictionService', () => {
       },
       new AbortController().signal,
       vi.fn(),
-      { jobIds: ['job-1'] },
+      { jobBases: { 'job-1': 'model_only_v1' } },
     )).rejects.toThrow('Provider retry budget was exhausted')
   })
 
@@ -195,7 +222,7 @@ describe('createHttpPredictionService', () => {
       },
       new AbortController().signal,
       (prediction) => results.push(prediction.text),
-      { jobIds: ['job-1'] },
+      { jobBases: { 'job-1': 'best_available_foiarchive_v1' } },
     )
 
     expect(fetchMock).toHaveBeenNthCalledWith(

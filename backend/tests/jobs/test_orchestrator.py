@@ -14,6 +14,7 @@ from redacted_backend.domain.predictions import (
     TokenUsage,
 )
 from redacted_backend.jobs.orchestrator import AnalysisOrchestrator
+from redacted_backend.models.openai_gateway import ModelGatewayError
 from tests.api.test_context import (
     create_test_app_and_passage,
     install_fake_preparation,
@@ -29,7 +30,15 @@ class RecordingGateway:
         self.model_only_calls: list[str] = []
         self.fail_prediction_once = fail_prediction_once
 
-    def generate_query(self, example, idempotency_key: str) -> QueryResult:
+    def generate_query(
+        self,
+        example,
+        idempotency_key: str,
+        *,
+        before_generation=None,
+    ) -> QueryResult:
+        if before_generation is not None and not before_generation():
+            raise ModelGatewayError("analysis_cancelled", "job is no longer current")
         self.query_calls.append(idempotency_key)
         return QueryResult(
             passage_id=example.passage_id,
@@ -45,8 +54,15 @@ class RecordingGateway:
         )
 
     def generate_prediction(
-        self, example, retrieval, idempotency_key: str
+        self,
+        example,
+        retrieval,
+        idempotency_key: str,
+        *,
+        before_generation=None,
     ) -> PredictionRecord:
+        if before_generation is not None and not before_generation():
+            raise ModelGatewayError("analysis_cancelled", "job is no longer current")
         self.prediction_calls.append(idempotency_key)
         if self.fail_prediction_once:
             self.fail_prediction_once = False
@@ -73,7 +89,11 @@ class RecordingGateway:
         self,
         example,
         idempotency_key: str,
+        *,
+        before_generation=None,
     ) -> PredictionRecord:
+        if before_generation is not None and not before_generation():
+            raise ModelGatewayError("analysis_cancelled", "job is no longer current")
         self.model_only_calls.append(idempotency_key)
         return PredictionRecord(
             passage_id=example.passage_id,
@@ -234,6 +254,55 @@ def test_deleted_passage_cancels_model_only_before_generation(
         job = session.get(AnalysisJob, job_id)
     assert job is not None
     assert job.status == "cancelled"
+    assert gateway.model_only_calls == []
+
+
+def test_model_only_rechecks_revision_immediately_before_generation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app, document, passage = create_test_app_and_passage(tmp_path)
+    install_fake_preparation(monkeypatch, calls=[])
+    _prepare(app, passage.id)
+    job_id = _schedule_ready(
+        app,
+        document.id,
+        passage.id,
+        passage.revision,
+        basis=PredictionBasis.MODEL_ONLY_V1,
+    )
+
+    class InvalidatingGateway(RecordingGateway):
+        def generate_model_only_prediction(
+            self,
+            example,
+            idempotency_key: str,
+            *,
+            before_generation=None,
+        ) -> PredictionRecord:
+            with app.state.database.session_factory() as session, session.begin():
+                model = session.get(Passage, str(passage.id))
+                assert model is not None
+                model.revision += 1
+            return super().generate_model_only_prediction(
+                example,
+                idempotency_key,
+                before_generation=before_generation,
+            )
+
+    gateway = InvalidatingGateway()
+
+    AnalysisOrchestrator(
+        database=app.state.database,
+        model=gateway,
+        retrieval=None,
+    ).run(job_id)
+
+    with app.state.database.session_factory() as session:
+        job = session.get(AnalysisJob, job_id)
+    assert job is not None
+    assert job.status == "cancelled"
+    assert job.error_code == "passage_revision_changed"
     assert gateway.model_only_calls == []
 
 

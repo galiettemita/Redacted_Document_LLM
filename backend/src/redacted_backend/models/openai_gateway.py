@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
+from threading import Lock
 from typing import Any, Literal, Protocol, TypeVar
 
 import httpx
@@ -61,11 +63,20 @@ class StoredGeneration(BaseModel):
 
     kind: Literal["query", "prediction"]
     request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    payload: dict[str, Any]
+    state: Literal["claimed", "complete"] = "complete"
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class GenerationStore(Protocol):
     def get(self, scope: str, key: str) -> StoredGeneration | None: ...
+
+    def claim(
+        self,
+        scope: str,
+        key: str,
+        request_sha256: str,
+        kind: Literal["query", "prediction"],
+    ) -> bool: ...
 
     def save(self, scope: str, key: str, value: StoredGeneration) -> None: ...
 
@@ -73,18 +84,52 @@ class GenerationStore(Protocol):
 class InMemoryGenerationStore:
     def __init__(self) -> None:
         self._values: dict[tuple[str, str], StoredGeneration] = {}
+        self._lock = Lock()
 
     def get(self, scope: str, key: str) -> StoredGeneration | None:
-        return self._values.get((scope, key))
+        with self._lock:
+            return self._values.get((scope, key))
+
+    def claim(
+        self,
+        scope: str,
+        key: str,
+        request_sha256: str,
+        kind: Literal["query", "prediction"],
+    ) -> bool:
+        with self._lock:
+            existing = self._values.get((scope, key))
+            if existing is not None:
+                if (
+                    existing.request_sha256 != request_sha256
+                    or existing.kind != kind
+                ):
+                    raise ModelGatewayError(
+                        "idempotency_conflict",
+                        "Idempotency key was reused for a different request",
+                    )
+                return False
+            self._values[(scope, key)] = StoredGeneration(
+                kind=kind,
+                request_sha256=request_sha256,
+                state="claimed",
+            )
+            return True
 
     def save(self, scope: str, key: str, value: StoredGeneration) -> None:
-        existing = self._values.get((scope, key))
-        if existing is not None and existing != value:
-            raise ModelGatewayError(
-                "idempotency_conflict",
-                "Idempotency key already belongs to a different result",
-            )
-        self._values[(scope, key)] = value
+        with self._lock:
+            existing = self._values.get((scope, key))
+            if existing is not None:
+                if (
+                    existing.request_sha256 != value.request_sha256
+                    or existing.kind != value.kind
+                    or (existing.state == "complete" and existing != value)
+                ):
+                    raise ModelGatewayError(
+                        "idempotency_conflict",
+                        "Idempotency key already belongs to a different result",
+                    )
+            self._values[(scope, key)] = value
 
 
 class OpenAIGateway:
@@ -103,6 +148,8 @@ class OpenAIGateway:
         self,
         example: VisibleExample,
         idempotency_key: str,
+        *,
+        before_generation: Callable[[], bool] | None = None,
     ) -> QueryResult:
         prompt = render_query_prompt(example)
         request = self._request(prompt)
@@ -120,6 +167,10 @@ class OpenAIGateway:
         input_tokens, response, output, usage = self._execute(
             request,
             idempotency_key,
+            scope=scope,
+            request_hash=request_hash,
+            kind="query",
+            before_generation=before_generation,
         )
         query = _validate_query(output)
         result = QueryResult(
@@ -142,6 +193,8 @@ class OpenAIGateway:
         example: VisibleExample,
         retrieval: RetrievalTrace,
         idempotency_key: str,
+        *,
+        before_generation: Callable[[], bool] | None = None,
     ) -> PredictionRecord:
         prompt = render_prediction_prompt(example, retrieval)
         request = self._request(prompt)
@@ -159,6 +212,10 @@ class OpenAIGateway:
         input_tokens, response, output, usage = self._execute(
             request,
             idempotency_key,
+            scope=scope,
+            request_hash=request_hash,
+            kind="prediction",
+            before_generation=before_generation,
         )
         prediction = output.strip()
         if not prediction:
@@ -186,6 +243,8 @@ class OpenAIGateway:
         self,
         example: VisibleExample,
         idempotency_key: str,
+        *,
+        before_generation: Callable[[], bool] | None = None,
     ) -> PredictionRecord:
         prompt = render_model_only_prediction_prompt(example)
         request = self._request(prompt)
@@ -203,6 +262,10 @@ class OpenAIGateway:
         input_tokens, response, output, usage = self._execute(
             request,
             idempotency_key,
+            scope=scope,
+            request_hash=request_hash,
+            kind="prediction",
+            before_generation=before_generation,
         )
         prediction = output.strip()
         if not prediction:
@@ -244,6 +307,11 @@ class OpenAIGateway:
         self,
         request: dict[str, object],
         idempotency_key: str,
+        *,
+        scope: str,
+        request_hash: str,
+        kind: Literal["query", "prediction"],
+        before_generation: Callable[[], bool] | None,
     ) -> tuple[int, ProviderHttpResponse, str, TokenUsage]:
         budget = check_token_budget(
             request,
@@ -251,15 +319,26 @@ class OpenAIGateway:
             context_window=self.scientific.model_context_window,
             max_output_tokens=self.scientific.model_max_output_tokens,
         )
+        if before_generation is not None and not before_generation():
+            raise ModelGatewayError(
+                "analysis_cancelled",
+                "Analysis changed before provider generation",
+            )
+        if not self.store.claim(scope, idempotency_key, request_hash, kind):
+            raise ModelGatewayError(
+                "provider_outcome_unknown",
+                "A provider attempt already exists for this generation",
+            )
         try:
             response = self.transport.create_response(
                 request,
                 client_request_id=idempotency_key,
             )
-        except ModelGatewayError:
-            raise
-        except TimeoutError as error:
-            raise ModelGatewayError("provider_timeout", str(error)) from error
+        except Exception as error:
+            raise ModelGatewayError(
+                "provider_outcome_unknown",
+                "The provider attempt may have been accepted; it will not be resent",
+            ) from error
         body = response.body
         if body.get("status") != "completed":
             raise ModelGatewayError(
@@ -290,6 +369,11 @@ class OpenAIGateway:
             raise ModelGatewayError(
                 "idempotency_conflict",
                 "Idempotency key was reused for a different request",
+            )
+        if existing.state == "claimed":
+            raise ModelGatewayError(
+                "provider_outcome_unknown",
+                "A provider attempt exists without a durable response",
             )
         return result_type.model_validate(existing.payload)
 

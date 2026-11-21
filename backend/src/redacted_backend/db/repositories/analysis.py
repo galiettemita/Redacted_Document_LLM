@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from redacted_backend.db.models import AnalysisEvent, AnalysisJob
@@ -45,11 +46,7 @@ class AnalysisJobRepository:
             )
         )
         if existing is not None:
-            if existing.request_hash != request_hash:
-                raise AnalysisConflictError(
-                    "idempotency key was already used for a different passage revision"
-                )
-            return _job_record(existing)
+            return _replayed_job(existing, request_hash)
 
         status = AnalysisStatus.BLOCKED if blockers else AnalysisStatus.QUEUED
         stage = (
@@ -79,8 +76,23 @@ class AnalysisJobRepository:
             created_at=now,
             updated_at=now,
         )
-        self._session.add(model)
-        self._session.flush()
+        savepoint = self._session.begin_nested()
+        try:
+            self._session.add(model)
+            self._session.flush()
+            savepoint.commit()
+        except IntegrityError:
+            savepoint.rollback()
+            self._session.expire_all()
+            winner = self._session.scalar(
+                select(AnalysisJob).where(
+                    AnalysisJob.passage_id == str(passage_id),
+                    AnalysisJob.idempotency_key == idempotency_key,
+                )
+            )
+            if winner is None:
+                raise
+            return _replayed_job(winner, request_hash)
         record = _job_record(model)
         event_payload = record.model_dump(mode="json")
         event_payload["job_id"] = event_payload.pop("id")
@@ -370,6 +382,14 @@ def _request_hash(passage_id: UUID, revision: int) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
+
+
+def _replayed_job(model: AnalysisJob, request_hash: str) -> AnalysisJobRecord:
+    if model.request_hash != request_hash:
+        raise AnalysisConflictError(
+            "idempotency key was already used for a different passage revision"
+        )
+    return _job_record(model)
 
 
 def _job_record(model: AnalysisJob) -> AnalysisJobRecord:

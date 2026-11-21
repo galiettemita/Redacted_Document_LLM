@@ -176,5 +176,8 @@
       - [x] Keep the fictional demo unchanged and every invented result labelled **Simulated prediction**.
       - [x] Pass the full backend/frontend suites, migration round-trip, production build, and fake-transport upload-to-SSE loopback with zero retrieval.
       - [x] Pass the master and per-basis approval variables to both Compose services while defaulting every approval to `false`.
+      - [x] Durably claim each provider generation before dispatch and never resend a call whose provider outcome is uncertain.
+      - [x] Recheck passage validity immediately before generation, preserve basis provenance through migration round-trips, and reject concurrent or browser-side basis changes.
+      - [x] Allow honest model-only prediction from a valid visible example even when no retrieval query terms are available.
     - [ ] Write and execute the separate best-available FOIArchive import/index plan.
     - [ ] With a real key configured and generation still disabled, count the exact one-passage request, show expected and maximum cost, and obtain explicit approval before the first paid model call.

@@ -60,7 +60,13 @@ export function createHttpPredictionService(
             if (id !== null) lastEventId = id
             if (event === 'passage.prediction') {
               const payload = parsePrediction(data)
-              if (!belongsToRun(payload.job_id, options?.jobIds)) return
+              if (!belongsToRun(payload.job_id, options?.jobBases)) return
+              const expectedBasis = options?.jobBases?.[payload.job_id]
+              if (expectedBasis && payload.prediction_basis !== expectedBasis) {
+                throw new PredictionEventError(
+                  'The prediction basis changed after scheduling.',
+                )
+              }
               onPrediction({
                 passageId: payload.passage_id,
                 page: payload.page_number,
@@ -79,7 +85,7 @@ export function createHttpPredictionService(
               })
             } else if (event === 'passage.error') {
               const payload = parseError(data)
-              if (!belongsToRun(payload.job_id, options?.jobIds)) return
+              if (!belongsToRun(payload.job_id, options?.jobBases)) return
               failures.set(`${payload.job_id}:${payload.code}`, payload.detail)
             }
           })
@@ -233,8 +239,11 @@ function parseError(data: string): ErrorEventPayload {
   return value as ErrorEventPayload
 }
 
-function belongsToRun(jobId: string, allowed: readonly string[] | undefined): boolean {
-  return !allowed?.length || allowed.includes(jobId)
+function belongsToRun(
+  jobId: string,
+  allowed: Readonly<Record<string, PredictionBasis>> | undefined,
+): boolean {
+  return allowed === undefined || Object.prototype.hasOwnProperty.call(allowed, jobId)
 }
 
 function displayModelName(model: string): string {

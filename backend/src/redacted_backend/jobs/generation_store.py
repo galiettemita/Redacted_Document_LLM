@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from redacted_backend.db.base import Database
 from redacted_backend.db.models import AnalysisJob
 from redacted_backend.models.openai_gateway import (
     ModelGatewayError,
     StoredGeneration,
 )
+
+_CLAIM_STATE = "claimed"
 
 
 class AnalysisGenerationStore:
@@ -25,11 +29,59 @@ class AnalysisGenerationStore:
             payload = getattr(job, field)
         if payload is None:
             return None
+        if payload.get("_generation_state") == _CLAIM_STATE:
+            return StoredGeneration(
+                kind=kind,
+                request_sha256=str(payload["request_sha256"]),
+                state="claimed",
+            )
         return StoredGeneration(
             kind=kind,
             request_sha256=str(payload["request_sha256"]),
             payload=payload,
         )
+
+    def claim(
+        self,
+        scope: str,
+        key: str,
+        request_sha256: str,
+        kind: Literal["query", "prediction"],
+    ) -> bool:
+        job_id, key_kind = _identity(scope, key)
+        if kind != key_kind:
+            raise ModelGatewayError(
+                "idempotency_conflict",
+                "Generation kind does not match its durable job key",
+            )
+        field = _payload_field(kind)
+        with self.database.session_factory() as session, session.begin():
+            job = session.get(AnalysisJob, job_id, with_for_update=True)
+            if job is None:
+                raise ModelGatewayError(
+                    "analysis_job_missing",
+                    "Generation job no longer exists",
+                )
+            _validate_passage_scope(job, scope)
+            existing = getattr(job, field)
+            if existing is not None:
+                if str(existing.get("request_sha256")) != request_sha256:
+                    raise ModelGatewayError(
+                        "idempotency_conflict",
+                        "Idempotency key was reused for a different request",
+                    )
+                return False
+            setattr(
+                job,
+                field,
+                {
+                    "_generation_state": _CLAIM_STATE,
+                    "kind": kind,
+                    "request_sha256": request_sha256,
+                },
+            )
+            session.flush()
+            return True
 
     def save(self, scope: str, key: str, value: StoredGeneration) -> None:
         job_id, kind = _identity(scope, key)
@@ -48,12 +100,18 @@ class AnalysisGenerationStore:
                 )
             _validate_passage_scope(job, scope)
             existing = getattr(job, field)
-            if existing is not None and existing != value.payload:
-                raise ModelGatewayError(
-                    "idempotency_conflict",
-                    "Generation result is immutable once persisted",
+            if existing is not None:
+                is_matching_claim = (
+                    existing.get("_generation_state") == _CLAIM_STATE
+                    and existing.get("kind") == value.kind
+                    and existing.get("request_sha256") == value.request_sha256
                 )
-            if existing is None:
+                if not is_matching_claim and existing != value.payload:
+                    raise ModelGatewayError(
+                        "idempotency_conflict",
+                        "Generation result is immutable once persisted",
+                    )
+            if existing is None or existing.get("_generation_state") == _CLAIM_STATE:
                 setattr(job, field, value.payload)
                 session.flush()
 

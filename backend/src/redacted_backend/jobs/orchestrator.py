@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from collections.abc import Callable
 from typing import Protocol
 from uuid import UUID
 
@@ -21,6 +22,7 @@ from redacted_backend.domain.passages import PassageStatus
 from redacted_backend.domain.predictions import PredictionRecord, QueryResult
 from redacted_backend.domain.retrieval import RetrievalTrace
 from redacted_backend.domain.visible_examples import VisibleExample
+from redacted_backend.models.openai_gateway import ModelGatewayError
 from redacted_backend.scientific_config import ScientificConfig
 
 
@@ -29,6 +31,8 @@ class ModelGateway(Protocol):
         self,
         example: VisibleExample,
         idempotency_key: str,
+        *,
+        before_generation: Callable[[], bool] | None = None,
     ) -> QueryResult: ...
 
     def generate_prediction(
@@ -36,12 +40,16 @@ class ModelGateway(Protocol):
         example: VisibleExample,
         retrieval: RetrievalTrace,
         idempotency_key: str,
+        *,
+        before_generation: Callable[[], bool] | None = None,
     ) -> PredictionRecord: ...
 
     def generate_model_only_prediction(
         self,
         example: VisibleExample,
         idempotency_key: str,
+        *,
+        before_generation: Callable[[], bool] | None = None,
     ) -> PredictionRecord: ...
 
 
@@ -74,7 +82,12 @@ class AnalysisOrchestrator:
         with _execution_lock(self.database, job_key) as acquired:
             if not acquired:
                 return
-            self._run_locked(job_key)
+            try:
+                self._run_locked(job_key)
+            except ModelGatewayError as error:
+                if error.code == "analysis_cancelled":
+                    return
+                raise
 
     def _run_locked(self, job_key: str) -> None:
         with self.database.session_factory() as session, session.begin():
@@ -100,7 +113,11 @@ class AnalysisOrchestrator:
 
         query = self._stored_query(job_key)
         if query is None:
-            query = self.model.generate_query(example, f"{job_key}:query")
+            query = self.model.generate_query(
+                example,
+                f"{job_key}:query",
+                before_generation=lambda: self._still_current(job_key),
+            )
             if not self._still_current(job_key):
                 return
             with self.database.session_factory() as session, session.begin():
@@ -130,6 +147,7 @@ class AnalysisOrchestrator:
                 example,
                 trace,
                 f"{job_key}:prediction",
+                before_generation=lambda: self._still_current(job_key),
             )
         if not self._still_current(job_key):
             return
@@ -152,6 +170,7 @@ class AnalysisOrchestrator:
             prediction = self.model.generate_model_only_prediction(
                 example,
                 f"{job_key}:prediction",
+                before_generation=lambda: self._still_current(job_key),
             )
         if not self._still_current(job_key):
             return
@@ -238,7 +257,10 @@ class AnalysisOrchestrator:
             job = session.get(AnalysisJob, job_id)
             if job is None:
                 return None
-            return getattr(job, field)
+            payload = getattr(job, field)
+            if payload is not None and payload.get("_generation_state") == "claimed":
+                return None
+            return payload
 
 
 @contextmanager

@@ -1,12 +1,19 @@
 import { useEffect, useState } from 'react'
 import type { PredictionService } from '../services/predictionService'
-import type { DocumentDescriptor, Prediction, PredictionPhase } from '../types'
+import type {
+  DocumentDescriptor,
+  Prediction,
+  PredictionBasis,
+  PredictionPhase,
+} from '../types'
+
+const EMPTY_JOB_BASES: Readonly<Record<string, PredictionBasis>> = {}
 
 export function usePredictionStream(
   document: DocumentDescriptor | null,
   service: PredictionService,
   runKey: number,
-  jobIds: readonly string[] = [],
+  jobBases: Readonly<Record<string, PredictionBasis>> = EMPTY_JOB_BASES,
 ) {
   const [predictions, setPredictions] = useState<Prediction[]>([])
   const [phase, setPhase] = useState<PredictionPhase>('idle')
@@ -38,7 +45,7 @@ export function usePredictionStream(
         ))
       })
       setPhase('partial')
-    }, { jobIds }).then(() => {
+    }, { jobBases }).then(() => {
       if (controller.signal.aborted) return
       setPhase(completedCount > 0 ? 'complete' : 'empty')
     }).catch((reason: unknown) => {
@@ -48,7 +55,7 @@ export function usePredictionStream(
     })
 
     return () => controller.abort()
-  }, [document, jobIds, runKey, service])
+  }, [document, jobBases, runKey, service])
 
   return { predictions, phase, error }
 }

@@ -484,7 +484,7 @@ def test_prepare_backfills_query_metadata_on_a_same_revision_artifact(
         assert artifact.context_query_term_count == 4
 
 
-def test_prepare_rejects_context_without_visible_search_terms_before_persisting(
+def test_prepare_persists_context_without_visible_search_terms_for_model_only(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -500,14 +500,19 @@ def test_prepare_rejects_context_without_visible_search_terms_before_persisting(
         request(app, "POST", f"/v1/passages/{passage.id}:prepare-context")
     )
 
-    assert response.status_code == 422
-    assert response.json()["detail"]["code"] == "context_query_empty"
+    assert response.status_code == 200
+    assert response.json()["context_query_status"] == "unavailable"
+    assert response.json()["context_query_term_count"] == 0
+    assert response.json()["context_query_sha256"] is None
     assert calls == [1]
     with app.state.database.session_factory() as session:
-        assert session.scalar(select(VisibleExampleArtifact)) is None
+        artifact = session.scalar(select(VisibleExampleArtifact))
+        assert artifact is not None
+        assert artifact.context_query is None
+        assert artifact.context_query_sha256 is None
         persisted = DocumentRepository(session).get(document.id)
         assert persisted is not None
-        assert persisted.visible_date is None
+        assert persisted.visible_date == date(1945, 5, 8)
 
 
 def test_prepare_refuses_incomplete_query_metadata_instead_of_overwriting_it(

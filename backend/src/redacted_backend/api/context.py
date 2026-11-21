@@ -54,11 +54,14 @@ class VisibleContextSummary(BaseModel):
     visible_word_count: int = Field(ge=0)
     confirmed_mask_count: int = Field(ge=0)
     serialization_version: Literal["visible-transcript-v1"]
-    context_query_status: Literal["ready"] = "ready"
-    context_query_term_count: int = Field(ge=1)
-    context_query_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    context_query_version: Literal["context-query-v1"]
-    context_stopwords_version: str = Field(min_length=1)
+    context_query_status: Literal["ready", "unavailable"]
+    context_query_term_count: int = Field(ge=0)
+    context_query_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    context_query_version: Literal["context-query-v1"] | None = None
+    context_stopwords_version: str | None = Field(default=None, min_length=1)
 
 
 class DocumentVisibleContextsSummary(BaseModel):
@@ -109,7 +112,7 @@ def create_context_router(
                     if existing is None:
                         continue
                     query = _prepare_query(artifact_example(existing))
-                    artifacts.ensure_context_query(existing, query)
+                    _ensure_query_state(artifacts, existing, query)
                     existing_summaries[passage.id] = _summary(existing)
                 missing = [
                     passage
@@ -205,10 +208,12 @@ def create_context_router(
                             passage_revision=current.revision,
                         )
                     else:
-                        query = queries.get(current.id) or _prepare_query(
-                            artifact_example(artifact)
+                        query = (
+                            queries[current.id]
+                            if current.id in queries
+                            else _prepare_query(artifact_example(artifact))
                         )
-                        artifacts.ensure_context_query(artifact, query)
+                        _ensure_query_state(artifacts, artifact, query)
                     passage_repository.mark_context_ready(
                         current.id,
                         expected_revision=current.revision,
@@ -284,7 +289,7 @@ def create_context_router(
                                 )
                             else:
                                 query = _prepare_query(artifact_example(artifact))
-                                artifacts.ensure_context_query(artifact, query)
+                                _ensure_query_state(artifacts, artifact, query)
                             passage_repository.mark_context_ready(
                                 current.id,
                                 expected_revision=current.revision,
@@ -335,7 +340,7 @@ def create_context_router(
                 )
                 if existing is not None:
                     query = _prepare_query(artifact_example(existing))
-                    artifacts.ensure_context_query(existing, query)
+                    _ensure_query_state(artifacts, existing, query)
                     return _summary(existing)
                 all_passages = passages.list_live_for_document(document.id)
                 expected_revision = passage.revision
@@ -395,7 +400,7 @@ def create_context_router(
                 artifacts = VisibleExampleRepository(session)
                 existing = artifacts.get_current(current.id, current.revision)
                 if existing is not None:
-                    artifacts.ensure_context_query(existing, query)
+                    _ensure_query_state(artifacts, existing, query)
                     return _summary(existing)
                 artifact = artifacts.save(
                     prepared,
@@ -460,7 +465,7 @@ def create_context_router(
                         current.revision,
                     )
                     if existing is not None:
-                        artifacts.ensure_context_query(existing, query)
+                        _ensure_query_state(artifacts, existing, query)
                         return _summary(existing)
             raise
 
@@ -469,6 +474,23 @@ def create_context_router(
 
 def _summary(artifact) -> VisibleContextSummary:
     example = artifact_example(artifact)
+    query_values = (
+        artifact.context_query,
+        artifact.context_query_sha256,
+        artifact.context_query_term_count,
+        artifact.context_query_version,
+        artifact.context_stopwords_version,
+    )
+    if all(value is None for value in query_values):
+        query_status = "unavailable"
+        query_term_count = 0
+    elif any(value is None for value in query_values):
+        raise ContextQueryArtifactConflictError(
+            "stored context query metadata is incomplete"
+        )
+    else:
+        query_status = "ready"
+        query_term_count = artifact.context_query_term_count
     return VisibleContextSummary(
         passage_id=example.passage_id,
         passage_revision=artifact.passage_revision,
@@ -478,21 +500,30 @@ def _summary(artifact) -> VisibleContextSummary:
         visible_word_count=artifact.visible_word_count,
         confirmed_mask_count=artifact.confirmed_mask_count,
         serialization_version=example.serialization_version,
-        context_query_term_count=artifact.context_query_term_count,
+        context_query_status=query_status,
+        context_query_term_count=query_term_count,
         context_query_sha256=artifact.context_query_sha256,
         context_query_version=artifact.context_query_version,
         context_stopwords_version=artifact.context_stopwords_version,
     )
 
 
-def _prepare_query(example: VisibleExample) -> PreparedContextQuery:
+def _prepare_query(example: VisibleExample) -> PreparedContextQuery | None:
     try:
         return prepare_context_query(example)
-    except ContextQueryError as error:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "context_query_empty", "message": str(error)},
-        ) from error
+    except ContextQueryError:
+        return None
+
+
+def _ensure_query_state(
+    repository: VisibleExampleRepository,
+    artifact,
+    query: PreparedContextQuery | None,
+) -> None:
+    if query is None:
+        repository.ensure_context_query_unavailable(artifact)
+    else:
+        repository.ensure_context_query(artifact, query)
 
 
 def _query_conflict(error: ContextQueryArtifactConflictError) -> HTTPException:

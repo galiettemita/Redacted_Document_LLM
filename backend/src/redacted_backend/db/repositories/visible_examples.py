@@ -40,7 +40,7 @@ class VisibleExampleRepository:
     def save(
         self,
         prepared: PreparedVisibleContext,
-        context_query: PreparedContextQuery,
+        context_query: PreparedContextQuery | None,
         *,
         passage_revision: int,
     ) -> VisibleExampleArtifact:
@@ -52,16 +52,35 @@ class VisibleExampleRepository:
             payload=prepared.example.model_dump(mode="json"),
             visible_word_count=prepared.visible_word_count,
             confirmed_mask_count=prepared.confirmed_mask_count,
-            context_query=context_query.text,
-            context_query_sha256=context_query.sha256,
-            context_query_term_count=context_query.term_count,
-            context_query_version=context_query.query_version,
-            context_stopwords_version=context_query.stopwords_version,
+            context_query=context_query.text if context_query is not None else None,
+            context_query_sha256=(
+                context_query.sha256 if context_query is not None else None
+            ),
+            context_query_term_count=(
+                context_query.term_count if context_query is not None else None
+            ),
+            context_query_version=(
+                context_query.query_version if context_query is not None else None
+            ),
+            context_stopwords_version=(
+                context_query.stopwords_version if context_query is not None else None
+            ),
         )
         self._session.add(artifact)
         self._session.flush()
         self._session.refresh(artifact)
         return artifact
+
+    def ensure_context_query_unavailable(
+        self,
+        artifact: VisibleExampleArtifact,
+    ) -> VisibleExampleArtifact:
+        current = _context_query_values(artifact)
+        if all(value is None for value in current):
+            return artifact
+        raise ContextQueryArtifactConflictError(
+            "stored context query does not match the visible example"
+        )
 
     def ensure_context_query(
         self,
@@ -109,7 +128,7 @@ def artifact_example(artifact: VisibleExampleArtifact) -> VisibleExample:
         validate_context_query_example(example)
     except (ContextQueryError, ValidationError) as error:
         raise ContextQueryArtifactConflictError(
-            "stored visible example is not a valid context-query source"
+            "stored visible example is invalid"
         ) from error
     if (
         str(example.passage_id) != artifact.passage_id
@@ -119,3 +138,15 @@ def artifact_example(artifact: VisibleExampleArtifact) -> VisibleExample:
             "stored visible example identity does not match its artifact"
         )
     return example
+
+
+def _context_query_values(
+    artifact: VisibleExampleArtifact,
+) -> tuple[object | None, ...]:
+    return (
+        artifact.context_query,
+        artifact.context_query_sha256,
+        artifact.context_query_term_count,
+        artifact.context_query_version,
+        artifact.context_stopwords_version,
+    )

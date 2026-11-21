@@ -42,6 +42,20 @@ class RecordingTransport:
         )
 
 
+class AcceptThenTimeoutTransport(RecordingTransport):
+    def __init__(self) -> None:
+        super().__init__([])
+
+    def create_response(
+        self,
+        request: dict[str, object],
+        *,
+        client_request_id: str,
+    ) -> ProviderHttpResponse:
+        self.create_requests.append((request, client_request_id))
+        raise TimeoutError("response lost after provider acceptance")
+
+
 def test_gateway_sends_one_user_message_with_exact_frozen_settings() -> None:
     transport = RecordingTransport([_response("specific actors paris 1960 meeting")])
     gateway = OpenAIGateway(
@@ -122,6 +136,47 @@ def test_gateway_model_only_prediction_is_retrieval_free_and_idempotent() -> Non
     assert request["tools"] == []
     assert request["truncation"] == "disabled"
     assert request["max_output_tokens"] == 4096
+
+
+def test_model_only_gateway_never_resends_an_uncertain_generation() -> None:
+    transport = AcceptThenTimeoutTransport()
+    gateway = OpenAIGateway(
+        transport=transport,
+        store=InMemoryGenerationStore(),
+    )
+
+    with pytest.raises(ModelGatewayError, match="provider_outcome_unknown"):
+        gateway.generate_model_only_prediction(_example(), "uncertain-generation")
+    with pytest.raises(ModelGatewayError, match="provider_outcome_unknown"):
+        gateway.generate_model_only_prediction(_example(), "uncertain-generation")
+
+    assert len(transport.count_requests) == 1
+    assert len(transport.create_requests) == 1
+
+
+def test_model_only_gateway_rechecks_validity_after_token_count() -> None:
+    valid = [True]
+
+    class InvalidatingTransport(RecordingTransport):
+        def count_input_tokens(self, request: dict[str, object]) -> int:
+            valid[0] = False
+            return super().count_input_tokens(request)
+
+    transport = InvalidatingTransport([_response("must not be sent")])
+    gateway = OpenAIGateway(
+        transport=transport,
+        store=InMemoryGenerationStore(),
+    )
+
+    with pytest.raises(ModelGatewayError, match="analysis_cancelled"):
+        gateway.generate_model_only_prediction(
+            _example(),
+            "cancelled-after-count",
+            before_generation=lambda: valid[0],
+        )
+
+    assert len(transport.count_requests) == 1
+    assert transport.create_requests == []
 
 
 def test_model_only_gateway_rejects_empty_refused_and_incomplete_outputs() -> None:

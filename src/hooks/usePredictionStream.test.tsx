@@ -34,8 +34,10 @@ describe('usePredictionStream', () => {
       },
     }
 
-    const jobIds = ['job-1']
-    const { result } = renderHook(() => usePredictionStream(document, service, 1, jobIds))
+    const jobBases = { 'job-1': 'model_only_v1' } as const
+    const { result } = renderHook(() => (
+      usePredictionStream(document, service, 1, jobBases)
+    ))
 
     await waitFor(() => expect(result.current.phase).toBe('complete'))
     expect(result.current.predictions).toEqual([

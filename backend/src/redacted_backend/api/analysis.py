@@ -81,7 +81,7 @@ def create_analysis_router(
                     passage.id,
                     passage.revision,
                 )
-                if artifact is None or artifact.context_query is None:
+                if artifact is None:
                     raise HTTPException(
                         status_code=status.HTTP_409_CONFLICT,
                         detail={
@@ -89,7 +89,29 @@ def create_analysis_router(
                             "message": "Prepare visible-only context before analysis",
                         },
                     )
-                prediction_basis, blockers = _analysis_decision(settings)
+                query_fields = (
+                    artifact.context_query,
+                    artifact.context_query_sha256,
+                    artifact.context_query_term_count,
+                    artifact.context_query_version,
+                    artifact.context_stopwords_version,
+                )
+                if any(value is None for value in query_fields) and not all(
+                    value is None for value in query_fields
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "code": "visible_context_not_ready",
+                            "message": "Prepared context query metadata is incomplete",
+                        },
+                    )
+                prediction_basis, blockers = _analysis_decision(
+                    settings,
+                    context_query_ready=all(
+                        value is not None for value in query_fields
+                    ),
+                )
                 job = AnalysisJobRepository(session).schedule(
                     passage_id=passage.id,
                     document_id=passage.document_id,
@@ -168,6 +190,8 @@ def create_analysis_router(
 
 def _analysis_decision(
     settings: Settings,
+    *,
+    context_query_ready: bool = True,
 ) -> tuple[PredictionBasis, list[AnalysisBlocker]]:
     database = ComponentReadiness(ready=True, detail="ready")
     worker = resolve_worker_readiness(settings)
@@ -178,6 +202,18 @@ def _analysis_decision(
         worker=worker,
         corpus=corpus,
     )
+    if not context_query_ready:
+        for basis in (
+            PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
+            PredictionBasis.PAPER_EXACT_V1,
+        ):
+            bases[basis] = bases[basis].model_copy(
+                update={
+                    "operational": False,
+                    "ready": False,
+                    "detail": "visible context query is unavailable",
+                }
+            )
     selected = select_prediction_basis(bases)
     if selected is not None:
         return selected, []

@@ -26,7 +26,27 @@ def test_generation_store_survives_a_new_worker_process_boundary(
         payload={"request_sha256": "a" * 64, "query": "visible terms"},
     )
 
-    AnalysisGenerationStore(app.state.database).save(
+    store = AnalysisGenerationStore(app.state.database)
+    assert store.claim(
+        f"query:{passage.id}",
+        f"{job.id}:query",
+        "a" * 64,
+        "query",
+    )
+    claimed = AnalysisGenerationStore(app.state.database).get(
+        f"query:{passage.id}",
+        f"{job.id}:query",
+    )
+    assert claimed is not None
+    assert claimed.state == "claimed"
+    assert not AnalysisGenerationStore(app.state.database).claim(
+        f"query:{passage.id}",
+        f"{job.id}:query",
+        "a" * 64,
+        "query",
+    )
+
+    store.save(
         f"query:{passage.id}",
         f"{job.id}:query",
         value,
