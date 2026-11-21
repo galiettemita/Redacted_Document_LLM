@@ -411,7 +411,12 @@ class OpenAIHttpTransport:
         )
 
     def count_input_tokens(self, request: dict[str, object]) -> int:
-        response = self._post("/responses/input_tokens", request)
+        count_request = {
+            key: value
+            for key, value in request.items()
+            if key not in {"store", "max_output_tokens"}
+        }
+        response = self._post("/responses/input_tokens", count_request)
         value = response.json().get("input_tokens")
         if not isinstance(value, int):
             raise ModelGatewayError(

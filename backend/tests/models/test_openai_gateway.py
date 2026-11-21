@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from typing import Any
 
@@ -298,6 +299,54 @@ def test_http_transport_maps_rate_limits_without_retrying_or_falling_back() -> N
 
     assert len(requests) == 1
     assert requests[0].headers["X-Client-Request-Id"] == "client-request-1"
+
+
+def test_http_transport_excludes_generation_only_fields_from_token_count() -> None:
+    received: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        received.append(body)
+        if "store" in body or "max_output_tokens" in body:
+            return httpx.Response(
+                400,
+                request=request,
+                json={"error": {"code": "unknown_parameter"}},
+            )
+        return httpx.Response(
+            200,
+            request=request,
+            json={"object": "response.input_tokens", "input_tokens": 131},
+        )
+
+    client = httpx.Client(
+        base_url="https://api.openai.test/v1",
+        transport=httpx.MockTransport(handler),
+    )
+    transport = OpenAIHttpTransport("secret", client=client)
+
+    count = transport.count_input_tokens(
+        {
+            "model": "gpt-6-astra",
+            "reasoning": {"effort": "medium"},
+            "input": "visible-only prompt",
+            "store": False,
+            "tools": [],
+            "truncation": "disabled",
+            "max_output_tokens": 4096,
+        }
+    )
+
+    assert count == 131
+    assert received == [
+        {
+            "model": "gpt-6-astra",
+            "reasoning": {"effort": "medium"},
+            "input": "visible-only prompt",
+            "tools": [],
+            "truncation": "disabled",
+        }
+    ]
 
 
 def _response(text: str) -> dict[str, Any]:
