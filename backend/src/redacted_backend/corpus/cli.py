@@ -15,7 +15,10 @@ from redacted_backend.corpus.best_available import (
     build_best_available_chunks,
     load_best_available_source,
 )
-from redacted_backend.corpus.build_bm25 import build_bm25_from_files
+from redacted_backend.corpus.build_bm25 import (
+    build_best_available_bm25,
+    build_bm25_from_files,
+)
 from redacted_backend.corpus.build_dense import build_dense_from_files
 from redacted_backend.corpus.exclusions import load_exclusion_manifest
 from redacted_backend.corpus.frus_metadata import (
@@ -146,6 +149,17 @@ def run(argv: Sequence[str] | None = None) -> int:
         )
         print(json.dumps(report.model_dump(mode="json"), sort_keys=True, indent=2))
         return 0
+    if args.command == "build-best-available-bm25":
+        report = build_best_available_bm25(
+            Path(args.chunks),
+            Path(args.corpus_manifest),
+            Path(args.output_manifest),
+            Path(args.checkpoint),
+            opensearch_url=args.opensearch_url,
+            batch_size=args.batch_size,
+        )
+        print(json.dumps(report.model_dump(mode="json"), sort_keys=True, indent=2))
+        return 0
     if args.command == "build-dense":
         recall_queries = [
             line.strip()
@@ -236,6 +250,17 @@ def _parser() -> argparse.ArgumentParser:
     bm25.add_argument("--corpus-manifest", required=True)
     bm25.add_argument("--output-manifest", required=True)
     bm25.add_argument("--opensearch-url", default="http://127.0.0.1:59200")
+
+    best_bm25 = subparsers.add_parser("build-best-available-bm25")
+    best_bm25.add_argument("--chunks", required=True)
+    best_bm25.add_argument("--corpus-manifest", required=True)
+    best_bm25.add_argument("--output-manifest", required=True)
+    best_bm25.add_argument("--checkpoint", required=True)
+    best_bm25.add_argument(
+        "--opensearch-url",
+        default="http://127.0.0.1:59200",
+    )
+    best_bm25.add_argument("--batch-size", type=int, default=None)
 
     dense = subparsers.add_parser("build-dense")
     dense.add_argument("--chunks", required=True)

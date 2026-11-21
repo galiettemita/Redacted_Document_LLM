@@ -79,11 +79,11 @@
 - Consumes: `BestAvailableCorpusManifest` and chunk JSONL.
 - Produces: `build_best_available_bm25(...) -> Bm25BuildReport` and index `foiarchive-best-available-bm25-v1` with a resumable checkpoint tied to all manifest hashes.
 
-- [ ] **Step 1: Write failing tests** for separate index identity, idempotent batch resume, live-count reconciliation, incompatible checkpoint rejection, no premature manifest, and unchanged exact-paper behavior.
-- [ ] **Step 2: Run focused tests and verify failure.**
-- [ ] **Step 3: Generalize BM25 manifest validation** to an explicit retrieval-corpus protocol without allowing best-available to satisfy exact coverage.
-- [ ] **Step 4: Implement checkpointed idempotent bulk indexing** and atomic final manifest publication.
-- [ ] **Step 5: Run focused tests and commit/push with `feat: build resumable best-available bm25`.**
+- [x] **Step 1: Write failing tests** for separate index identity, idempotent batch resume, live-count reconciliation, incompatible checkpoint rejection, no premature manifest, and unchanged exact-paper behavior.
+- [x] **Step 2: Run focused tests and verify failure.**
+- [x] **Step 3: Generalize BM25 manifest validation** to an explicit retrieval-corpus protocol without allowing best-available to satisfy exact coverage.
+- [x] **Step 4: Implement checkpointed idempotent bulk indexing** and atomic final manifest publication.
+- [x] **Step 5: Run focused tests and commit/push with `feat: build resumable best-available bm25`.**
 
 ### Task 4: Build and query bounded sharded dense artifacts
 

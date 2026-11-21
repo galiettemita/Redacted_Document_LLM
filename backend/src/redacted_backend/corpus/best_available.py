@@ -40,6 +40,7 @@ _LIMITATIONS_SHA256 = (
     "e1148411dbd8e91378d8e6e926d88f68908327ab7e1f1c9f92b389cf5c5db2e5"
 )
 _CORPUS_LABEL = "historylab-unlabeled"
+BEST_AVAILABLE_BM25_INDEX_NAME = "foiarchive-best-available-bm25-v1"
 _EXPECTED_REASONS = (
     "catalog_collection_count_mismatch:briefing",
     "catalog_collection_count_mismatch:cabinet",

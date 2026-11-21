@@ -21,6 +21,10 @@ class Bm25IndexManifest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     index_name: str
+    retrieval_profile: Literal[
+        "paper_exact_v1",
+        "best_available_foiarchive_v1",
+    ] = "paper_exact_v1"
     opensearch_version: str
     corpus_manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     scientific_hash: str = Field(pattern=r"^[0-9a-f]{64}$")

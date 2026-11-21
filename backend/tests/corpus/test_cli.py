@@ -17,6 +17,7 @@ from redacted_backend.corpus.best_available import (
     BestAvailableCorpusManifest,
     BestAvailableSourceProfile,
 )
+from redacted_backend.corpus.build_bm25 import Bm25BuildReport
 from redacted_backend.corpus.historylab_export import CatalogEntry
 from redacted_backend.corpus.preflight import (
     PreflightReport,
@@ -24,6 +25,7 @@ from redacted_backend.corpus.preflight import (
     VolumeReport,
 )
 from redacted_backend.corpus.snapshot import SnapshotFile, SnapshotLock
+from redacted_backend.retrieval.types import Bm25IndexManifest
 
 REVISION = "411cf6f86b38342683e27148be167c6094d1a10c"
 
@@ -366,3 +368,49 @@ def test_build_best_available_chunks_cli_publishes_real_manifest(
         capsys.readouterr().out
     ) == published
     assert not checkpoint.exists()
+
+
+def test_build_best_available_bm25_cli_reports_verified_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    index_manifest = Bm25IndexManifest(
+        index_name="foiarchive-best-available-bm25-v1",
+        retrieval_profile="best_available_foiarchive_v1",
+        opensearch_version="3.9.0",
+        corpus_manifest_hash="1" * 64,
+        scientific_hash="2" * 64,
+        index_definition_hash="3" * 64,
+        stopwords_hash="4" * 64,
+        document_count=10,
+        chunk_count=12,
+    )
+    report = Bm25BuildReport(elapsed_seconds=1.5, index_manifest=index_manifest)
+    monkeypatch.setattr(
+        cli,
+        "build_best_available_bm25",
+        lambda *_args, **_kwargs: report,
+        raising=False,
+    )
+
+    exit_code = cli.run(
+        [
+            "build-best-available-bm25",
+            "--chunks",
+            str(tmp_path / "chunks.jsonl"),
+            "--corpus-manifest",
+            str(tmp_path / "corpus.json"),
+            "--output-manifest",
+            str(tmp_path / "bm25.json"),
+            "--checkpoint",
+            str(tmp_path / "checkpoint.json"),
+            "--opensearch-url",
+            "http://127.0.0.1:59200",
+            "--batch-size",
+            "500",
+        ]
+    )
+
+    assert exit_code == 0
+    assert Bm25BuildReport.model_validate_json(capsys.readouterr().out) == report

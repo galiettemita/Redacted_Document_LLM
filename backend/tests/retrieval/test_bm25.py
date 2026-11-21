@@ -7,6 +7,10 @@ from typing import Any
 import pytest
 
 from redacted_backend.corpus.chunker import CorpusChunk
+from redacted_backend.corpus.best_available import (
+    BEST_AVAILABLE_BM25_INDEX_NAME,
+    BestAvailableCorpusManifest,
+)
 from redacted_backend.corpus.manifest import CorpusManifest
 from redacted_backend.retrieval.bm25 import (
     Bm25Index,
@@ -40,6 +44,9 @@ class RecordingTransport:
     def search(self, index_name: str, request: dict[str, Any]) -> list[dict[str, Any]]:
         self.search_request = request
         return self.hits
+
+    def count(self, index_name: str) -> int:
+        return len(self.indexed_documents)
 
 
 class CountTransport(OpenSearchHttpTransport):
@@ -86,6 +93,31 @@ def corpus_manifest(scientific: ScientificConfig, chunk_count: int) -> CorpusMan
         exclusion_counts={},
         coverage_ready=True,
         chunks_sha256="3" * 64,
+    )
+
+
+def best_available_manifest(
+    scientific: ScientificConfig,
+    chunk_count: int,
+) -> BestAvailableCorpusManifest:
+    return BestAvailableCorpusManifest(
+        source_profile_hash="1" * 64,
+        source_sha256="2" * 64,
+        source_size_bytes=100,
+        audit_manifest_hash="3" * 64,
+        limitations_sha256="4" * 64,
+        scientific_hash=scientific.manifest_hash(),
+        chunker_version=scientific.corpus_chunker_version,
+        chunk_words=scientific.chunk_words,
+        chunk_overlap=scientific.chunk_overlap,
+        parsed_row_count=chunk_count,
+        included_row_count=chunk_count,
+        empty_body_count=0,
+        malformed_row_count=0,
+        document_count=chunk_count,
+        chunk_count=chunk_count,
+        corpus_counts={"historylab-unlabeled": chunk_count},
+        chunks_sha256="5" * 64,
     )
 
 
@@ -157,6 +189,30 @@ def test_build_pins_standard_unicode_analysis_stopwords_and_bm25() -> None:
     assert transport.refreshed_index_name == scientific.bm25_index_name
     assert manifest.chunk_count == 1
     assert manifest.scientific_hash == scientific.manifest_hash()
+    assert manifest.retrieval_profile == "paper_exact_v1"
+
+
+def test_best_available_build_requires_and_records_its_separate_index() -> None:
+    scientific = ScientificConfig()
+    item = chunk()
+    corpus = best_available_manifest(scientific, 1)
+
+    with pytest.raises(IncompatibleIndexManifestError, match="index name"):
+        Bm25Index(RecordingTransport(), scientific=scientific).build([item], corpus)
+
+    transport = RecordingTransport()
+    index = Bm25Index(
+        transport,
+        scientific=scientific,
+        index_name=BEST_AVAILABLE_BM25_INDEX_NAME,
+    )
+    manifest = index.build([item], corpus)
+
+    assert transport.refreshed_index_name == BEST_AVAILABLE_BM25_INDEX_NAME
+    assert BEST_AVAILABLE_BM25_INDEX_NAME == "foiarchive-best-available-bm25-v1"
+    assert manifest.index_name == BEST_AVAILABLE_BM25_INDEX_NAME
+    assert manifest.retrieval_profile == "best_available_foiarchive_v1"
+    assert manifest.corpus_manifest_hash == corpus.manifest_hash()
 
 
 def test_search_never_returns_more_than_the_exact_300_result_limit() -> None:

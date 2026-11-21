@@ -9,6 +9,10 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from redacted_backend.corpus.chunker import CorpusChunk
+from redacted_backend.corpus.best_available import (
+    BEST_AVAILABLE_BM25_INDEX_NAME,
+    BestAvailableCorpusManifest,
+)
 from redacted_backend.corpus.manifest import CorpusManifest
 from redacted_backend.retrieval.types import Bm25IndexManifest, RankedChunk
 from redacted_backend.scientific_config import ScientificConfig
@@ -35,6 +39,8 @@ class SearchTransport(Protocol):
         request: dict[str, Any],
     ) -> list[dict[str, Any]]: ...
 
+    def count(self, index_name: str) -> int: ...
+
 
 class Bm25Index:
     def __init__(
@@ -43,39 +49,52 @@ class Bm25Index:
         *,
         scientific: ScientificConfig | None = None,
         index_manifest: Bm25IndexManifest | None = None,
-        corpus_manifest: CorpusManifest | None = None,
+        corpus_manifest: CorpusManifest | BestAvailableCorpusManifest | None = None,
+        index_name: str | None = None,
     ) -> None:
         self.transport = transport
         self.scientific = scientific or ScientificConfig()
         self.index_manifest = index_manifest
         self.corpus_manifest = corpus_manifest
+        self.index_name = index_name or self.scientific.bm25_index_name
 
     def build(
         self,
         chunks: Iterable[CorpusChunk],
-        manifest: CorpusManifest,
+        manifest: CorpusManifest | BestAvailableCorpusManifest,
     ) -> Bm25IndexManifest:
         self._validate_corpus_manifest(manifest)
+        profile = _retrieval_profile(manifest)
+        expected_index_name = (
+            BEST_AVAILABLE_BM25_INDEX_NAME
+            if profile == "best_available_foiarchive_v1"
+            else self.scientific.bm25_index_name
+        )
+        if self.index_name != expected_index_name:
+            raise IncompatibleIndexManifestError(
+                "BM25 index name does not match the retrieval profile"
+            )
         definition = build_index_definition(self.scientific)
-        self.transport.replace_index(self.scientific.bm25_index_name, definition)
+        self.transport.replace_index(self.index_name, definition)
         indexed_count = 0
         batch: list[dict[str, Any]] = []
         for chunk in chunks:
             batch.append(_index_document(chunk))
             indexed_count += 1
             if len(batch) >= self.scientific.bm25_bulk_batch_size:
-                self.transport.bulk_index(self.scientific.bm25_index_name, batch)
+                self.transport.bulk_index(self.index_name, batch)
                 batch = []
         if batch:
-            self.transport.bulk_index(self.scientific.bm25_index_name, batch)
+            self.transport.bulk_index(self.index_name, batch)
         if indexed_count != manifest.chunk_count:
             raise IncompatibleIndexManifestError(
                 "Indexed chunk count does not match the corpus manifest"
             )
-        self.transport.refresh(self.scientific.bm25_index_name)
+        self.transport.refresh(self.index_name)
 
         index_manifest = Bm25IndexManifest(
-            index_name=self.scientific.bm25_index_name,
+            index_name=self.index_name,
+            retrieval_profile=profile,
             opensearch_version=self.scientific.opensearch_version,
             corpus_manifest_hash=manifest.manifest_hash(),
             scientific_hash=self.scientific.manifest_hash(),
@@ -154,8 +173,11 @@ class Bm25Index:
             for rank, hit in enumerate(ordered, start=1)
         ]
 
-    def _validate_corpus_manifest(self, manifest: CorpusManifest) -> None:
-        if not manifest.coverage_ready:
+    def _validate_corpus_manifest(
+        self,
+        manifest: CorpusManifest | BestAvailableCorpusManifest,
+    ) -> None:
+        if isinstance(manifest, CorpusManifest) and not manifest.coverage_ready:
             raise IncompatibleIndexManifestError(
                 "Corpus exclusion coverage is not ready"
             )
@@ -166,12 +188,20 @@ class Bm25Index:
 
     def _validated_loaded_manifests(
         self,
-    ) -> tuple[Bm25IndexManifest, CorpusManifest]:
+    ) -> tuple[
+        Bm25IndexManifest,
+        CorpusManifest | BestAvailableCorpusManifest,
+    ]:
         if self.index_manifest is None or self.corpus_manifest is None:
             raise IncompatibleIndexManifestError(
                 "BM25 index has not been built or loaded"
             )
         self._validate_corpus_manifest(self.corpus_manifest)
+        profile = _retrieval_profile(self.corpus_manifest)
+        if self.index_manifest.retrieval_profile != profile:
+            raise IncompatibleIndexManifestError(
+                "BM25 retrieval profile does not match the corpus manifest"
+            )
         if self.index_manifest.scientific_hash != self.scientific.manifest_hash():
             raise IncompatibleIndexManifestError(
                 "BM25 scientific manifest does not match retrieval configuration"
@@ -204,7 +234,7 @@ class Bm25Index:
                 "BM25 corpus counts do not match the corpus manifest"
             )
         if (
-            self.index_manifest.index_name != self.scientific.bm25_index_name
+            self.index_manifest.index_name != self.index_name
             or self.index_manifest.opensearch_version
             != self.scientific.opensearch_version
         ):
@@ -212,6 +242,14 @@ class Bm25Index:
                 "BM25 runtime version does not match retrieval configuration"
             )
         return self.index_manifest, self.corpus_manifest
+
+
+def _retrieval_profile(
+    manifest: CorpusManifest | BestAvailableCorpusManifest,
+) -> Literal["paper_exact_v1", "best_available_foiarchive_v1"]:
+    if isinstance(manifest, BestAvailableCorpusManifest):
+        return "best_available_foiarchive_v1"
+    return "paper_exact_v1"
 
 
 def build_index_definition(scientific: ScientificConfig) -> dict[str, Any]:
