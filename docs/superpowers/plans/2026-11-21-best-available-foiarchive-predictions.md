@@ -128,11 +128,11 @@
 - Consumes: verified best-available corpus/BM25/sharded-dense manifests and artifacts.
 - Produces: operational `best_available_foiarchive_v1` readiness and an orchestrator that runs query generation, four-list retrieval, and a basis-correct prediction.
 
-- [ ] **Step 1: Write failing readiness tests** for separate paths, hashes, live index count, dense shard completeness, approval independence, and exact-paper non-contamination.
-- [ ] **Step 2: Write failing runtime/orchestrator tests** for two provider stages, immutable best-available basis, durable resume boundaries, retrieval-trace persistence, and no downgrade.
-- [ ] **Step 3: Make retrieval-assisted generation basis-aware** so best-available records/events never claim `paper_exact_v1`.
-- [ ] **Step 4: Load and probe best-available BM25/sharded dense only for that basis** and expose its separate Compose paths.
-- [ ] **Step 5: Run focused tests and commit/push with `feat: enable archive-assisted prediction runtime`.**
+- [x] **Step 1: Write failing readiness tests** for separate paths, hashes, live index count, dense shard completeness, approval independence, and exact-paper non-contamination.
+- [x] **Step 2: Write failing runtime/orchestrator tests** for two provider stages, immutable best-available basis, durable resume boundaries, retrieval-trace persistence, and no downgrade.
+- [x] **Step 3: Make retrieval-assisted generation basis-aware** so best-available records/events never claim `paper_exact_v1`.
+- [x] **Step 4: Load and probe best-available BM25/sharded dense only for that basis** and expose its separate Compose paths.
+- [x] **Step 5: Run focused tests and commit/push with `feat: enable archive-assisted prediction runtime`.**
 
 ### Task 6: Verify the product flow and preserve the simple UI/demo
 

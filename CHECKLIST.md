@@ -184,6 +184,7 @@
       - [x] Add a bounded-memory, resumable gzip-to-chunk importer with atomic manifests, disk-backed duplicate detection, checkpoint reconciliation, and fail-closed source verification.
       - [x] Add a separately named, checkpointed best-available OpenSearch BM25 build that safely replays uncheckpointed idempotent batches and verifies the final live count.
       - [x] Add resumable one-million-chunk BGE/FAISS shards with checksum-verified float16 embeddings, offset-addressed metadata, global exact rescoring, and a frozen 100-query `recall@300 >= 0.98` gate.
+      - [x] Wire separate fail-closed best-available readiness and a basis-bound worker runtime through real two-stage query, four-list retrieval, prediction, persistence, retries, events, and Compose paths without any model-only downgrade.
     - [x] With a real key configured and generation still disabled, count the exact one-passage request, show expected and maximum cost, and obtain explicit approval before the first paid model call.
       - [x] Align the production input-token request with the current provider schema by excluding generation-only fields, with a regression test and full backend/frontend verification.
       - [x] Count the selected one-passage closed-book request at 131 exact provider input tokens while every paid-generation approval remains disabled.
