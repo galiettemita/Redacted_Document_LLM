@@ -1,0 +1,4 @@
+- The corpus is smaller than the paper’s corpus.
+- We cannot perform the paper’s collection-specific exclusions.
+- We cannot always prove that retrieved material was public before the redaction.
+- It is real retrieval and a real model prediction, but not an exact Andrew-paper reproduction.
