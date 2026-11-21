@@ -1,6 +1,6 @@
 # Redacted Document LLM
 
-The repository contains two deliberately separate experiences: an always-available fictional interactive demo with simulated predictions, and a production prediction path from an uploaded PDF to passage-linked model output. The real path connects PDF upload, automatic redaction detection, stable correction, visible-date detection, document-wide context preparation, durable Dramatiq execution, GPT-6 Astra generation, resumable SSE, and real sidebar cards. It can run Andrew Tang's frozen Appendix F closed-book prompt as an honestly labelled model-only prediction without a corpus; the stronger four-list retrieval path and exact-paper corpus gate remain separate and fail closed. It never fabricates an uploaded-document result.
+The repository contains two deliberately separate experiences: an always-available fictional interactive demo with simulated predictions, and a production prediction path from an uploaded PDF to passage-linked model output. The real path connects PDF upload, automatic redaction detection, stable correction, visible-date detection, document-wide context preparation, durable Dramatiq execution, GPT-6 Astra generation, resumable SSE, and real sidebar cards. It can run Andrew Tang's frozen Appendix F closed-book prompt as an honestly labelled model-only prediction, or use the pinned best-available FOIArchive snapshot through Andrew-shaped BM25/BGE four-list retrieval. The future exact-paper corpus gate remains separate and fail closed. It never fabricates an uploaded-document result.
 
 ## Backend foundation
 
@@ -58,7 +58,7 @@ REDACTED_CORPUS_ROOT=/absolute/path/to/corpus \
 docker compose --profile retrieval up --build backend opensearch worker
 ```
 
-`REDACTED_CORPUS_ROOT` must be the directory containing `manifest.json`, `bm25-manifest.json`, `dense-manifest.json`, and the `dense/` artifact directory; Compose mounts it read-only into the API and worker while OpenSearch keeps its own writable subdirectory there. The worker image installs the locked BGE/FAISS retrieval group; the web API image remains small. Corpus readiness also requires all dense files and a reachable OpenSearch index whose live chunk count matches the verified BM25 manifest. Full dense checksums and search probes run once when the worker constructs the real runtime.
+`REDACTED_CORPUS_ROOT` is the parent artifact directory. Exact-paper artifacts retain their existing top-level paths. Best-available artifacts live under `best-available/` as `corpus-manifest.json`, `bm25-manifest.json`, `dense/manifest.json`, `dense/recall-queries.txt`, and the dense shard directories. Compose mounts the root read-only into the API and worker while OpenSearch keeps its own writable subdirectory there. The worker image installs the locked BGE/FAISS retrieval group; the web API image remains small. Each basis has independent paths, manifests, readiness, and approval. Best-available readiness verifies the frozen corpus identity, live BM25 count, all shard ranges/checksums, the 100-query certification hash, and `recall@300 >= 0.98`; it can never satisfy `paper_exact_v1`.
 
 The upload screen sends PDFs to the local backend for validation and temporary content-addressed persistence while rendering a local object URL immediately. The backend scans every page, persists detected redactions under stable passage IDs, and prepares a separate hidden-answer-free context and `context-query-v1` retrieval input for every passage in one extraction/render pass. Structural target/redaction markers and the frozen stop-word list are removed from each query; query text, SHA-256, term count, query version, and stop-word version stay bound to the exact passage revision. The browser shows only simple preparation/prediction states and final provider results, not transcript, query, evidence, or research diagnostics.
 
@@ -73,7 +73,7 @@ PDF size, page, decompression, render-pixel, parser-timeout, or retention ceilin
 Normal Python logs globally redact structured PDF text, prompt/evidence fields,
 authorization values, and OpenAI-style secret tokens.
 
-Users can redraw, add, or remove passages, then choose **Predict passage** or **Predict all passages**. A blocked run shows a concise unavailable state while the backend records the exact gates. A ready run executes outside the request, resumes from its durable basis-specific checkpoint, filters replayed events to the newly scheduled jobs, and renders provider output in the sidebar—never over the PDF. Model-only output is labelled **Model-only prediction — no archive evidence used**; best-available output will be labelled **Archive-assisted prediction — available FOIArchive snapshot used**; exact-paper output is labelled **Paper-method prediction**. The worker uses an expiring Redis heartbeat and a PostgreSQL advisory lock per job. Provider results are stored on the owning job before completion; passage changes or deletion cancel active work before another external request is allowed.
+Users can redraw, add, or remove passages, then choose **Predict passage** or **Predict all passages**. A blocked run shows a concise unavailable state while the backend records the exact gates. A ready run executes outside the request, resumes from its durable basis-specific checkpoint, filters replayed events to the newly scheduled jobs, and renders provider output in the sidebar—never over the PDF. Model-only output is labelled **Model-only prediction — no archive evidence used**; best-available output is labelled **Archive-assisted prediction — available FOIArchive snapshot used**; exact-paper output is labelled **Paper-method prediction**. The worker uses an expiring Redis heartbeat and a PostgreSQL advisory lock per job. Provider results are stored on the owning job before completion; passage changes or deletion cancel active work before another external request is allowed.
 
 ## Corpus preparation
 
@@ -116,6 +116,72 @@ uv run corpus audit-bulk-export \
 ```
 
 The audit verifies the locked 7,976,348,471-byte SHA-256 before streaming gzip rows and writes its small report atomically outside Git. A ready source exits 0; a valid but scientifically incomplete source still writes its evidence and exits 2. The November 16, 2026 run parsed 4,889,089 rows, 60,782 fewer than the frozen card total of 4,949,871. All 4,889,089 rows had unresolved collection identity: 1,304,229 HTTP(S) origin URLs and 3,584,860 nulls, with zero blank or unknown values. Computed canonical collection counts were empty, and `cables` was absent. If a rerun fails before publication, atomic replacement intentionally preserves the preceding verified report; the command's exit status is authoritative, and each report identifies its source revision and SHA-256. The exact external requirement is recorded in [`docs/corpus/historylab-complete-export-request.md`](docs/corpus/historylab-complete-export-request.md); that request has not been sent.
+
+### Best-available FOIArchive production path
+
+The audited Hugging Face snapshot is now supported as an honest best-available production basis. It remains scientifically distinct from an exact reproduction; the four fixed limitations are recorded verbatim in [`4-bulletpoint-limitations.md`](4-bulletpoint-limitations.md). Every imported document uses the literal `historylab-unlabeled` corpus identity, and no missing collection label or publication date is inferred.
+
+Keep the 7.98 GB gzip in its existing cache and link it into the ignored artifact workspace rather than copying it:
+
+```bash
+mkdir -p var/corpus/best-available
+ln -s /absolute/path/to/foiarchive-202409.json.gz \
+  var/corpus/best-available/foiarchive-202409.json.gz
+```
+
+The importer validates the pinned filename, byte count, SHA-256, snapshot, catalog, canonical audit, limitations hash, counts, and reason set before writing. It streams gzip rows, checkpoints fsynced output, detects duplicate document IDs on disk, and resumes without duplicating chunks:
+
+```bash
+cd backend
+uv run corpus build-best-available-chunks \
+  --source ../var/corpus/best-available/foiarchive-202409.json.gz \
+  --snapshot-lock corpus/historylab-huggingface-2025-snapshot-lock.json \
+  --catalog corpus/historylab-huggingface-2025-catalog.json \
+  --audit corpus/historylab-huggingface-2025-audit.json \
+  --limitations ../4-bulletpoint-limitations.md \
+  --output ../var/corpus/best-available/chunks.jsonl \
+  --checkpoint ../var/corpus/best-available/chunks-checkpoint.json \
+  --manifest ../var/corpus/best-available/corpus-manifest.json
+```
+
+Start the pinned OpenSearch service, then build or resume the separately named BM25 index:
+
+```bash
+cd ..
+REDACTED_CORPUS_ROOT=/absolute/path/to/repository/var/corpus \
+  docker compose --profile retrieval up -d opensearch
+
+cd backend
+uv run corpus build-best-available-bm25 \
+  --chunks ../var/corpus/best-available/chunks.jsonl \
+  --corpus-manifest ../var/corpus/best-available/corpus-manifest.json \
+  --output-manifest ../var/corpus/best-available/bm25-manifest.json \
+  --checkpoint ../var/corpus/best-available/bm25-checkpoint.json \
+  --opensearch-url http://127.0.0.1:59200
+```
+
+Build the bounded dense index. Each shard contains at most 1,000,000 consecutive chunks and publishes atomically. Certification combines the 50 frozen public application-shaped queries with 50 stable-hash title/opening-text queries from the verified corpus, scans the stored float16 embeddings exactly in bounded blocks, and refuses to publish the top manifest below `recall@300 = 0.98`:
+
+```bash
+uv run corpus build-best-available-dense \
+  --chunks ../var/corpus/best-available/chunks.jsonl \
+  --corpus-manifest ../var/corpus/best-available/corpus-manifest.json \
+  --application-queries corpus/best_available_application_queries.txt \
+  --certification-queries ../var/corpus/best-available/dense/recall-queries.txt \
+  --output-directory ../var/corpus/best-available/dense \
+  --output-manifest ../var/corpus/best-available/dense/manifest.json
+```
+
+With all provider approvals still false, restart the API and worker and check `/v1/readiness`. The expected safe state is `best_available_foiarchive_v1.operational=true`, `approved=false`, and `ready=false`. Do not enable best-available generation from the artifact build alone. First count the exact own-query request and the resulting evidence-bound prediction request, show their expected and maximum combined cost, and obtain a new explicit approval for that two-stage call. Only then set the master and best-available flags; keep the other basis flags false unless separately approved:
+
+```dotenv
+REDACTED_ALLOW_PAID_MODEL_CALLS=true
+REDACTED_ALLOW_MODEL_ONLY_CALLS=false
+REDACTED_ALLOW_BEST_AVAILABLE_CALLS=true
+REDACTED_ALLOW_PAPER_EXACT_CALLS=false
+```
+
+Ordinary prediction cards show only the concise archive-assisted basis label and the provider result. Corpus audit details, queries, evidence, checkpoints, and research limitations remain in backend provenance and documentation rather than the document UI.
 
 Freeze a downloaded copy of the Office of the Historian's official FRUS metadata:
 
@@ -185,7 +251,7 @@ The BGE/FAISS/Torch packages are isolated in the locked `retrieval` dependency g
 
 The prediction input path has the paper's four-list shape: visible context and model-produced own query are each sent independently to BM25 and dense retrieval; self-document candidates are removed before document-level reciprocal-rank fusion; and the top 100 documents retain at most two chunk-level RRF excerpts. The worker persists all four raw ranked lists, provenance, and fused evidence transactionally on the job without comparing BM25 scores to cosine scores. The browser exposes only the final passage-linked prediction, not the query or evidence text.
 
-The Appendix F own-query, retrieval-assisted prediction, and closed-book prediction templates are frozen files. The model gateway is implemented against OpenAI's Responses API but is not called automatically: it fixes `gpt-6-astra`, medium reasoning, one user message, no system message or tools, `store: false`, disabled truncation, and a 4,096-token output reservation. It first uses the provider's exact [input-token count endpoint](https://developers.openai.com/api/docs/guides/token-counting), rejects an oversized request without silently removing evidence, and records provider IDs, usage, prompt/request hashes, immutable basis, and a versioned price estimate. The gateway follows the [Responses create contract](https://developers.openai.com/api/reference/resources/responses/methods/create) and the frozen [GPT-6 Astra limits and pricing](https://developers.openai.com/api/docs/models/gpt-6-astra). No key is configured in the verified development environment, and no real model or token-count request has been sent.
+The Appendix F own-query, retrieval-assisted prediction, and closed-book prediction templates are frozen files. The model gateway is implemented against OpenAI's Responses API but is not called automatically: it fixes `gpt-6-astra`, medium reasoning, one user message, no system message or tools, `store: false`, disabled truncation, and a 4,096-token output reservation. It first uses the provider's exact [input-token count endpoint](https://developers.openai.com/api/docs/guides/token-counting), rejects an oversized request without silently removing evidence, and records provider IDs, usage, prompt/request hashes, immutable basis, and a versioned price estimate. The gateway follows the [Responses create contract](https://developers.openai.com/api/reference/resources/responses/methods/create) and the frozen [GPT-6 Astra limits and pricing](https://developers.openai.com/api/docs/models/gpt-6-astra). Exactly one separately approved model-only generation has been completed and recorded at $0.00591 actual cost; all paid-call approvals were closed again afterward. No retrieval-assisted provider call has been made.
 
 ## Run locally
 
@@ -205,12 +271,12 @@ To create a production bundle, run `npm run build`. The output is written to `di
 2. Close the demo with its return button or Escape. Any uploaded document remains mounted and unchanged underneath; opening the demo never invokes replacement or deletion.
 3. For the real path, upload a PDF. The backend scans every page, highlights stable detected passages, and prepares each one automatically while the sidebar shows only concise product states.
 4. Review the highlights. Use **Correct selected area** to redraw one, **Add missed passage** for an omission, or **Remove selected passage** to confirm a false-positive removal.
-5. Choose **Predict passage** or **Predict all passages**. If the real services are unavailable or unapproved, the UI fails closed with a concise unavailable state and makes no model call. If model-only is ready, the worker streams the real provider result labelled **Model-only prediction — no archive evidence used**.
+5. Choose **Predict passage** or **Predict all passages**. If the real services are unavailable or unapproved, the UI fails closed with a concise unavailable state and makes no model call. A ready model-only result is labelled **Model-only prediction — no archive evidence used**. A ready best-available result runs the separate query → four-list BM25/BGE retrieval → fused evidence → prediction path and is labelled **Archive-assisted prediction — available FOIArchive snapshot used**.
 
 ## Important limitations
 
 - Visible-only context preparation runs automatically for all detected passages. Because the paper requires a date but does not prescribe a parser, `visible-date-v1` accepts only one agreeing ISO or English month-name date that occupies a complete line in the top 20% of page one. OCR date words must each have at least 0.75 confidence. It fails closed when that date is missing, ambiguous, low-confidence, inside any automatic or manually marked redaction, mask coverage is uncertain, OCR is unavailable, or nearby visible geometry cannot support a length cue. Browser-supplied dates, PDF metadata alone, corpus results, models, and hidden passages cannot supply the date.
-- The production worker is independently live in the default stack. Model-only readiness does not require corpus indexes, but it still requires the worker heartbeat, a model key, master paid-call approval, and separate model-only approval. The November 20, 2026 no-spend loopback completed upload → detection → visible context → queued `model_only_v1` job → SSE using an injected fake transport, with zero query or retrieval calls and no real provider traffic. Exact-paper readiness still requires the complete verified corpus indexes and its own approval; best-available retrieval is not implemented yet.
+- The production worker is independently live in the default stack. Model-only readiness does not require corpus indexes, but it still requires the worker heartbeat, a model key, master paid-call approval, and separate model-only approval. The November 20, 2026 no-spend loopback completed upload → detection → visible context → queued `model_only_v1` job → SSE using an injected fake transport, with zero query or retrieval calls. The November 21 no-spend archive-assisted loopback completed upload → detection → visible context → `best_available_foiarchive_v1` own-query generation → four independent ranked lists → fused evidence → basis-bound prediction → SSE, using only injected fake transports. Exact-paper readiness still requires the future complete verified corpus indexes and its own approval; best-available cannot satisfy that gate.
 - History Lab's replacement public MCP was healthy on November 15, 2026 and reports the expected multi-million-document collections, but its capped hosted search tools are not a bulk export and cannot replace Andrew's locally reproduced BM25/BGE indexes. The older document API still returns HTTP 502. The November 16 full audit of the immutable Hugging Face gzip verified its size and SHA-256, then found 4,889,089 unresolved rows, no canonical collection counts, and no `cables`; it remains scientifically incomplete. Full source acquisition still needs a complete enumerable export path.
 - Appendix F prints `{hint}` but does not publish its substitution code or a generation token cap. The implementation records the evidence-supported rendering `It is {bucket} long.` (matching the paper's examples) and a 4,096-token provider reservation as versioned engineering choices rather than attributing either to Andrew's method.
 - Stored documents become unavailable after at most 24 hours; the production retention scheduler and replacement flow retry unreferenced-byte cleanup and remove derived sensitive artifacts while retaining an auditable tombstone.
@@ -238,4 +304,4 @@ npm run typecheck
 npm run build
 ```
 
-The automated suite covers upload errors, object-URL cleanup, exact prediction-basis labels, normalized drawing, grouped multi-line passage selection, deterministic visible-date evidence and conflicts, revision-bound context/query/job persistence and invalidation, ordered/resumable analysis events, durable provider-attempt claims that prevent uncertain generations from being resent, structural-marker removal, safe retry/backfill/conflict behavior, PDF safety ceilings, log redaction, reference-safe retention, safe response fields, no prediction text over uploaded PDFs, sidebar ordering, replacement reset, responsive prediction-to-document navigation, and the complete fake-transport model-only loopback with zero retrieval.
+The automated suite covers upload errors, object-URL cleanup, exact prediction-basis labels, normalized drawing, grouped multi-line passage selection, deterministic visible-date evidence and conflicts, revision-bound context/query/job persistence and invalidation, ordered/resumable analysis events, durable provider-attempt claims that prevent uncertain generations from being resent, structural-marker removal, safe retry/backfill/conflict behavior, PDF safety ceilings, log redaction, reference-safe retention, safe response fields, no prediction text over uploaded PDFs, sidebar ordering, replacement reset, responsive prediction-to-document navigation, the fake-transport model-only loopback with zero retrieval, and the fake-transport archive-assisted loopback with two provider stages and all four retrieval lists.
