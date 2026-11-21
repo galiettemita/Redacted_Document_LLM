@@ -7,6 +7,7 @@ import pytest
 from dramatiq import Message
 from dramatiq.middleware import Retries
 
+from redacted_backend.domain.analysis import PredictionBasis
 from redacted_backend.jobs.execution import execute_analysis_job
 from redacted_backend.jobs.orchestrator import AnalysisOrchestrator
 from redacted_backend.jobs.runtime_provider import (
@@ -27,18 +28,19 @@ class RaisingRuntime:
 
 def _provider_for(error: Exception) -> AnalysisRuntimeProvider:
     runtime = cast(AnalysisOrchestrator, RaisingRuntime(error))
-    return AnalysisRuntimeProvider(lambda: runtime)
+    return AnalysisRuntimeProvider(lambda _basis: runtime)
 
 
 def test_non_final_runtime_initialization_failure_is_retried() -> None:
     failures: list[tuple[str, str, str]] = []
 
-    def build() -> AnalysisOrchestrator:
+    def build(_basis: PredictionBasis) -> AnalysisOrchestrator:
         raise RuntimeError("secret-provider-token")
 
     with pytest.raises(RuntimeError, match="RuntimeError"):
         execute_analysis_job(
             "job-1",
+            PredictionBasis.MODEL_ONLY_V1,
             AnalysisRuntimeProvider(build),
             last_attempt=False,
             fail=lambda *value: failures.append(value),
@@ -50,11 +52,12 @@ def test_non_final_runtime_initialization_failure_is_retried() -> None:
 def test_final_runtime_initialization_failure_is_sanitized() -> None:
     failures: list[tuple[str, str, str]] = []
 
-    def build() -> AnalysisOrchestrator:
+    def build(_basis: PredictionBasis) -> AnalysisOrchestrator:
         raise RuntimeError("secret-provider-token")
 
     execute_analysis_job(
         "job-2",
+        PredictionBasis.MODEL_ONLY_V1,
         AnalysisRuntimeProvider(build),
         last_attempt=True,
         fail=lambda *value: failures.append(value),
@@ -71,6 +74,7 @@ def test_retrieval_failure_after_initialization_retains_its_code() -> None:
 
     execute_analysis_job(
         "job-3",
+        PredictionBasis.PAPER_EXACT_V1,
         _provider_for(RetrievalError("self_document_unresolved", "ambiguous")),
         last_attempt=False,
         fail=lambda *value: failures.append(value),
@@ -93,6 +97,7 @@ def test_transient_model_failure_retries_then_retains_its_code() -> None:
     with pytest.raises(ModelGatewayError, match="provider_unavailable"):
         execute_analysis_job(
             "job-4",
+            PredictionBasis.MODEL_ONLY_V1,
             provider,
             last_attempt=False,
             fail=lambda *value: failures.append(value),
@@ -101,6 +106,7 @@ def test_transient_model_failure_retries_then_retains_its_code() -> None:
 
     execute_analysis_job(
         "job-4",
+        PredictionBasis.MODEL_ONLY_V1,
         provider,
         last_attempt=True,
         fail=lambda *value: failures.append(value),
@@ -128,7 +134,7 @@ def test_dramatiq_retry_payload_omits_initialization_secret() -> None:
             self.enqueued.append(message)
             return message
 
-    def build() -> AnalysisOrchestrator:
+    def build(_basis: PredictionBasis) -> AnalysisOrchestrator:
         raise RuntimeError("secret-provider-token")
 
     broker = RecordingBroker()
@@ -142,6 +148,7 @@ def test_dramatiq_retry_payload_omits_initialization_secret() -> None:
     try:
         execute_analysis_job(
             "job-5",
+            PredictionBasis.MODEL_ONLY_V1,
             AnalysisRuntimeProvider(build),
             last_attempt=False,
             fail=lambda *_value: None,

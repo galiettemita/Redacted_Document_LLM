@@ -26,6 +26,7 @@ class RecordingGateway:
     def __init__(self, *, fail_prediction_once: bool = False) -> None:
         self.query_calls: list[str] = []
         self.prediction_calls: list[str] = []
+        self.model_only_calls: list[str] = []
         self.fail_prediction_once = fail_prediction_once
 
     def generate_query(self, example, idempotency_key: str) -> QueryResult:
@@ -68,6 +69,27 @@ class RecordingGateway:
             pricing_version="test-pricing",
         )
 
+    def generate_model_only_prediction(
+        self,
+        example,
+        idempotency_key: str,
+    ) -> PredictionRecord:
+        self.model_only_calls.append(idempotency_key)
+        return PredictionRecord(
+            passage_id=example.passage_id,
+            prediction_basis=PredictionBasis.MODEL_ONLY_V1,
+            prediction="The missing passage names the officials.",
+            prompt_sha256="5" * 64,
+            request_sha256="6" * 64,
+            retrieval_trace_sha256=None,
+            provider_response_id="resp-model-only",
+            provider_request_id="req-model-only",
+            input_tokens=800,
+            usage=_usage(800, 80),
+            estimated_cost_usd=0.012,
+            pricing_version="test-pricing",
+        )
+
 
 class RecordingRetrieval:
     def __init__(self) -> None:
@@ -85,6 +107,134 @@ class RecordingRetrieval:
                 ).hexdigest(),
             }
         )
+
+
+def test_model_only_orchestrator_skips_query_and_retrieval(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app, document, passage = create_test_app_and_passage(tmp_path)
+    install_fake_preparation(monkeypatch, calls=[])
+    _prepare(app, passage.id)
+    job_id = _schedule_ready(
+        app,
+        document.id,
+        passage.id,
+        passage.revision,
+        basis=PredictionBasis.MODEL_ONLY_V1,
+    )
+    gateway = RecordingGateway()
+
+    AnalysisOrchestrator(
+        database=app.state.database,
+        model=gateway,
+        retrieval=None,
+    ).run(job_id)
+
+    with app.state.database.session_factory() as session:
+        job = session.get(AnalysisJob, job_id)
+        events = session.scalars(
+            select(AnalysisEvent)
+            .where(AnalysisEvent.job_id == job_id)
+            .order_by(AnalysisEvent.sequence)
+        ).all()
+    assert job is not None
+    assert job.status == "complete"
+    assert job.query_payload is None
+    assert job.retrieval_trace is None
+    assert job.prediction_payload["prediction_basis"] == "model_only_v1"
+    assert job.prediction_payload["retrieval_trace_sha256"] is None
+    assert gateway.query_calls == []
+    assert gateway.prediction_calls == []
+    assert gateway.model_only_calls == [f"{job_id}:prediction"]
+    assert [event.event_type for event in events] == [
+        "passage.status",
+        "passage.status",
+        "passage.prediction",
+        "passage.status",
+    ]
+    assert events[-2].payload["prediction_basis"] == "model_only_v1"
+
+
+def test_model_only_orchestrator_resumes_a_stored_prediction_without_generation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app, document, passage = create_test_app_and_passage(tmp_path)
+    install_fake_preparation(monkeypatch, calls=[])
+    _prepare(app, passage.id)
+    job_id = _schedule_ready(
+        app,
+        document.id,
+        passage.id,
+        passage.revision,
+        basis=PredictionBasis.MODEL_ONLY_V1,
+    )
+    stored = PredictionRecord(
+        passage_id=passage.id,
+        prediction_basis=PredictionBasis.MODEL_ONLY_V1,
+        prediction="Durably stored prediction",
+        prompt_sha256="7" * 64,
+        request_sha256="8" * 64,
+        retrieval_trace_sha256=None,
+        provider_response_id="resp-stored",
+        provider_request_id="req-stored",
+        input_tokens=700,
+        usage=_usage(700, 70),
+        estimated_cost_usd=0.01,
+        pricing_version="test-pricing",
+    )
+    with app.state.database.session_factory() as session, session.begin():
+        job = session.get(AnalysisJob, job_id)
+        assert job is not None
+        job.prediction_payload = stored.model_dump(mode="json")
+    gateway = RecordingGateway()
+
+    AnalysisOrchestrator(
+        database=app.state.database,
+        model=gateway,
+        retrieval=None,
+    ).run(job_id)
+
+    assert gateway.model_only_calls == []
+    with app.state.database.session_factory() as session:
+        job = session.get(AnalysisJob, job_id)
+    assert job is not None
+    assert job.status == "complete"
+    assert job.prediction_payload["prediction"] == "Durably stored prediction"
+
+
+def test_deleted_passage_cancels_model_only_before_generation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app, document, passage = create_test_app_and_passage(tmp_path)
+    install_fake_preparation(monkeypatch, calls=[])
+    _prepare(app, passage.id)
+    job_id = _schedule_ready(
+        app,
+        document.id,
+        passage.id,
+        passage.revision,
+        basis=PredictionBasis.MODEL_ONLY_V1,
+    )
+    with app.state.database.session_factory() as session, session.begin():
+        model = session.get(Passage, str(passage.id))
+        assert model is not None
+        model.status = "deleted"
+    gateway = RecordingGateway()
+
+    AnalysisOrchestrator(
+        database=app.state.database,
+        model=gateway,
+        retrieval=None,
+    ).run(job_id)
+
+    with app.state.database.session_factory() as session:
+        job = session.get(AnalysisJob, job_id)
+    assert job is not None
+    assert job.status == "cancelled"
+    assert gateway.model_only_calls == []
 
 
 def test_orchestrator_persists_each_stage_and_emits_one_real_prediction(
@@ -253,7 +403,14 @@ def _prepare(app, passage_id) -> None:
     assert response.status_code == 200
 
 
-def _schedule_ready(app, document_id, passage_id, revision: int) -> str:
+def _schedule_ready(
+    app,
+    document_id,
+    passage_id,
+    revision: int,
+    *,
+    basis: PredictionBasis = PredictionBasis.PAPER_EXACT_V1,
+) -> str:
     with app.state.database.session_factory() as session, session.begin():
         job = AnalysisJobRepository(session).schedule(
             passage_id=passage_id,
@@ -261,7 +418,7 @@ def _schedule_ready(app, document_id, passage_id, revision: int) -> str:
             passage_revision=revision,
             idempotency_key="orchestrator-test",
             blockers=[],
-            prediction_basis=PredictionBasis.PAPER_EXACT_V1,
+            prediction_basis=basis,
         )
     return str(job.id)
 

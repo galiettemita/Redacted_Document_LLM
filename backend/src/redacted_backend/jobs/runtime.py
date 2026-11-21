@@ -10,6 +10,7 @@ from redacted_backend.corpus.build_dense import FaissHnswIndex
 from redacted_backend.corpus.chunker import CorpusChunk
 from redacted_backend.corpus.manifest import CorpusManifest
 from redacted_backend.db.base import Database
+from redacted_backend.domain.analysis import PredictionBasis
 from redacted_backend.jobs.generation_store import AnalysisGenerationStore
 from redacted_backend.jobs.orchestrator import AnalysisOrchestrator
 from redacted_backend.models.openai_gateway import OpenAIGateway, OpenAIHttpTransport
@@ -22,15 +23,42 @@ from redacted_backend.scientific_config import ScientificConfig
 
 def build_analysis_orchestrator(
     settings: Settings,
+    prediction_basis: PredictionBasis,
     *,
     database: Database | None = None,
 ) -> AnalysisOrchestrator:
     if settings.database_url is None and database is None:
         raise RuntimeError("Analysis worker database is not configured")
-    if settings.opensearch_url is None:
-        raise RuntimeError("Analysis worker OpenSearch is not configured")
     if settings.openai_api_key is None or not settings.allow_paid_model_calls:
         raise RuntimeError("Analysis worker model access is not approved")
+    if database is None:
+        assert settings.database_url is not None
+        database = Database.connect(settings.database_url)
+    scientific = ScientificConfig()
+    gateway = OpenAIGateway(
+        transport=OpenAIHttpTransport(
+            settings.openai_api_key.get_secret_value(),
+        ),
+        store=AnalysisGenerationStore(database),
+        scientific=scientific,
+    )
+    if prediction_basis == PredictionBasis.MODEL_ONLY_V1:
+        if not settings.allow_model_only_calls:
+            raise RuntimeError("Analysis worker model-only access is not approved")
+        return AnalysisOrchestrator(
+            database=database,
+            model=gateway,
+            retrieval=None,
+            scientific=scientific,
+        )
+    if prediction_basis == PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1:
+        if not settings.allow_best_available_calls:
+            raise RuntimeError("Analysis worker best-available access is not approved")
+        raise RuntimeError("Analysis worker best-available runtime is not implemented")
+    if not settings.allow_paper_exact_calls:
+        raise RuntimeError("Analysis worker paper-exact access is not approved")
+    if settings.opensearch_url is None:
+        raise RuntimeError("Analysis worker OpenSearch is not configured")
     required_paths = {
         "corpus manifest": settings.corpus_manifest_path,
         "BM25 manifest": settings.bm25_manifest_path,
@@ -41,7 +69,6 @@ def build_analysis_orchestrator(
     if missing:
         raise RuntimeError(f"Analysis worker is missing {', '.join(missing)}")
 
-    scientific = ScientificConfig()
     corpus = CorpusManifest.model_validate_json(
         settings.corpus_manifest_path.read_text(encoding="utf-8")
     )
@@ -64,16 +91,6 @@ def build_analysis_orchestrator(
     )
     bm25.search("worker readiness probe", limit=1, query_kind="context")
     dense.search("worker readiness probe", limit=1, query_kind="context")
-    if database is None:
-        assert settings.database_url is not None
-        database = Database.connect(settings.database_url)
-    gateway = OpenAIGateway(
-        transport=OpenAIHttpTransport(
-            settings.openai_api_key.get_secret_value(),
-        ),
-        store=AnalysisGenerationStore(database),
-        scientific=scientific,
-    )
     return AnalysisOrchestrator(
         database=database,
         model=gateway,

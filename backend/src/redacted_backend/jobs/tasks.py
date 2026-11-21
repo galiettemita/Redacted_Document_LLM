@@ -25,14 +25,23 @@ _broker.add_middleware(WorkerHeartbeatMiddleware(_settings))
 dramatiq.set_broker(_broker)
 _database = Database.connect(_settings.database_url)
 _runtime_provider = AnalysisRuntimeProvider(
-    lambda: build_analysis_orchestrator(_settings, database=_database)
+    lambda basis: build_analysis_orchestrator(
+        _settings,
+        basis,
+        database=_database,
+    )
 )
 
 
 @dramatiq.actor(max_retries=5, min_backoff=5_000, max_backoff=120_000)
 def analyze_passage(job_id: str) -> None:
+    with _database.session_factory() as session:
+        job = AnalysisJobRepository(session).get(job_id)
+    if job is None:
+        return
     execute_analysis_job(
         job_id,
+        job.prediction_basis,
         _runtime_provider,
         last_attempt=_last_attempt(),
         fail=_fail,

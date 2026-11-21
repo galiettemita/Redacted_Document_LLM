@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from redacted_backend.domain.analysis import PredictionBasis
 from redacted_backend.jobs.runtime_provider import (
     AnalysisRuntimeProvider,
     RuntimeInitializationError,
@@ -20,13 +21,14 @@ _TRANSIENT_MODEL_ERRORS = {
 
 def execute_analysis_job(
     job_id: str,
+    prediction_basis: PredictionBasis,
     provider: AnalysisRuntimeProvider,
     *,
     last_attempt: bool,
     fail: FailureCallback,
 ) -> None:
     try:
-        provider.get().run(job_id)
+        provider.get(prediction_basis).run(job_id)
     except RuntimeInitializationError as error:
         if not last_attempt:
             raise

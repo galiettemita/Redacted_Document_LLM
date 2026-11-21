@@ -129,12 +129,12 @@
 - Produces: `build_analysis_orchestrator(settings, prediction_basis, database=...)`; model-only requires no corpus/OpenSearch/dense configuration, while retrieval bases retain their gates.
 - Changes: `AnalysisOrchestrator` dispatches from the persisted job basis and accepts `retrieval: RetrievalService | None`.
 
-- [ ] **Step 1: Write failing orchestrator tests** proving a model-only job calls `generate_model_only_prediction` exactly once, never calls query/retrieval, persists no query or trace, emits basis in prediction/status events, resumes a stored prediction without a second call, and still cancels on revision/deletion/expiry before generation.
-- [ ] **Step 2: Write failing runtime/provider tests** proving model-only constructs with database/key/two approvals alone, exact retrieval retains every existing artifact probe, best-available fails closed until implemented, per-basis caches do not contaminate each other, and sanitized retry payloads contain no secrets.
-- [ ] **Step 3: Run `cd backend && uv run pytest tests/jobs -v`; expect basis-aware execution failures.**
-- [ ] **Step 4: Implement basis-specific orchestration, runtime construction, provider caching, and task lookup; keep the selected basis immutable on every retry and raise instead of falling back.**
-- [ ] **Step 5: Run `cd backend && uv run pytest tests/jobs -v`; expect PASS and no network request.**
-- [ ] **Step 6: Commit with `feat: run model-only prediction jobs` and push.**
+- [x] **Step 1: Write failing orchestrator tests** proving a model-only job calls `generate_model_only_prediction` exactly once, never calls query/retrieval, persists no query or trace, emits basis in prediction/status events, resumes a stored prediction without a second call, and still cancels on revision/deletion/expiry before generation.
+- [x] **Step 2: Write failing runtime/provider tests** proving model-only constructs with database/key/two approvals alone, exact retrieval retains every existing artifact probe, best-available fails closed until implemented, per-basis caches do not contaminate each other, and sanitized retry payloads contain no secrets.
+- [x] **Step 3: Run `cd backend && uv run pytest tests/jobs -v`; expect basis-aware execution failures.**
+- [x] **Step 4: Implement basis-specific orchestration, runtime construction, provider caching, and task lookup; keep the selected basis immutable on every retry and raise instead of falling back.**
+- [x] **Step 5: Run `cd backend && uv run pytest tests/jobs -v`; expect PASS and no network request.**
+- [x] **Step 6: Commit with `feat: run model-only prediction jobs` and push.**
 
 ### Task 5: Show honest basis provenance in the existing frontend
 

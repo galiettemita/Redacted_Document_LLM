@@ -15,7 +15,7 @@ from redacted_backend.db.repositories.visible_examples import (
     VisibleExampleRepository,
     artifact_example,
 )
-from redacted_backend.domain.analysis import AnalysisStatus
+from redacted_backend.domain.analysis import AnalysisStatus, PredictionBasis
 from redacted_backend.domain.documents import DocumentStatus
 from redacted_backend.domain.passages import PassageStatus
 from redacted_backend.domain.predictions import PredictionRecord, QueryResult
@@ -38,6 +38,12 @@ class ModelGateway(Protocol):
         idempotency_key: str,
     ) -> PredictionRecord: ...
 
+    def generate_model_only_prediction(
+        self,
+        example: VisibleExample,
+        idempotency_key: str,
+    ) -> PredictionRecord: ...
+
 
 class RetrievalService(Protocol):
     def retrieve_realistic(
@@ -55,7 +61,7 @@ class AnalysisOrchestrator:
         *,
         database: Database,
         model: ModelGateway,
-        retrieval: RetrievalService,
+        retrieval: RetrievalService | None,
         scientific: ScientificConfig | None = None,
     ) -> None:
         self.database = database
@@ -85,6 +91,12 @@ class AnalysisOrchestrator:
         if current is None:
             return
         example, page_number = current
+
+        if record.prediction_basis == PredictionBasis.MODEL_ONLY_V1:
+            self._run_model_only(job_key, example, page_number)
+            return
+        if self.retrieval is None:
+            raise RuntimeError("Retrieval runtime is unavailable for this job basis")
 
         query = self._stored_query(job_key)
         if query is None:
@@ -117,6 +129,28 @@ class AnalysisOrchestrator:
             prediction = self.model.generate_prediction(
                 example,
                 trace,
+                f"{job_key}:prediction",
+            )
+        if not self._still_current(job_key):
+            return
+        with self.database.session_factory() as session, session.begin():
+            AnalysisJobRepository(session).complete(
+                job_key,
+                prediction.model_dump(mode="json"),
+                page_number=page_number,
+                model_name=self.scientific.model,
+            )
+
+    def _run_model_only(
+        self,
+        job_key: str,
+        example: VisibleExample,
+        page_number: int,
+    ) -> None:
+        prediction = self._stored_prediction(job_key)
+        if prediction is None:
+            prediction = self.model.generate_model_only_prediction(
+                example,
                 f"{job_key}:prediction",
             )
         if not self._still_current(job_key):

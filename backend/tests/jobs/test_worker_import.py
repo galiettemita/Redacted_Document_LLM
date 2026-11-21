@@ -12,6 +12,9 @@ def test_importing_worker_tasks_does_not_require_corpus_or_model_configuration(
     environment = os.environ.copy()
     for name in (
         "REDACTED_ALLOW_PAID_MODEL_CALLS",
+        "REDACTED_ALLOW_MODEL_ONLY_CALLS",
+        "REDACTED_ALLOW_BEST_AVAILABLE_CALLS",
+        "REDACTED_ALLOW_PAPER_EXACT_CALLS",
         "REDACTED_BM25_MANIFEST_PATH",
         "REDACTED_CORPUS_MANIFEST_PATH",
         "REDACTED_DENSE_ARTIFACT_DIRECTORY",
