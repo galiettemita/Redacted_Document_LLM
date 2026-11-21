@@ -1,0 +1,12 @@
+{
+  "files": [
+    {
+      "path": "foiarchive-202409.json.gz",
+      "sha256": "dd73e590134f3a0cd1e22f81ffd3732054fd469b09c56d78cd25e1cc90b5e5e4",
+      "size_bytes": 7976348471
+    }
+  ],
+  "license": "cc-by-nc-4.0",
+  "repo_id": "HistoryLab/foiarchive",
+  "revision": "411cf6f86b38342683e27148be167c6094d1a10c"
+}

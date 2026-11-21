@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Accept only revision `411cf6f86b38342683e27148be167c6094d1a10c`, source SHA-256 `dd73e590134f3a0cd1e22f81ffd3732054fd469b09c56d78cd25e1cc90b5e5e4`, audit SHA-256 `5430b5a6c794bdab3cd828219f1a3d944def1fbf0f75bec64042557459db5b4b`, and limitations SHA-256 `e1148411dbd8e91378d8e6e926d88f68908327ab7e1f1c9f92b389cf5c5db2e5`.
+- Accept only revision `411cf6f86b38342683e27148be167c6094d1a10c`, source SHA-256 `dd73e590134f3a0cd1e22f81ffd3732054fd469b09c56d78cd25e1cc90b5e5e4`, canonical audit manifest SHA-256 `901a51d5b468e7dad5d59a3614b73d9b8b46f14bd2a22eb23b797a770a9e2817`, and limitations SHA-256 `e1148411dbd8e91378d8e6e926d88f68908327ab7e1f1c9f92b389cf5c5db2e5`.
 - Preserve the audited 4,889,089 parsed/unresolved rows, 1,304,229 HTTP URLs, 3,584,860 null sources, empty canonical collection counts, and exact reason-code set; never infer collection labels.
 - Store every included row under the literal non-scientific corpus label `historylab-unlabeled`; preserve `source` only as `source_url`.
 - Keep `paper_coverage_ready=false`, and keep best-available manifests, index names, paths, readiness, approvals, and runtime distinct from `paper_exact_v1`.
@@ -42,11 +42,11 @@
 - Consumes: `SnapshotLock`, `BulkExportAudit`, `BulkExportCatalog`, `ScientificConfig`, and the four-bullet limitations file.
 - Produces: `BestAvailableSourceProfile`, `BestAvailableCorpusManifest`, `load_best_available_source(...)`, and CLI command `build-best-available-chunks`.
 
-- [ ] **Step 1: Write failing profile tests** for every frozen hash/count/reason, literal label, audit mismatch, changed limitations, and `paper_coverage_ready=false`.
-- [ ] **Step 2: Run `uv run pytest tests/corpus/test_best_available.py -q` and verify the new imports fail.**
-- [ ] **Step 3: Implement the frozen Pydantic profile and provenance verifier** with exact source, audit, snapshot, catalog, and limitations checks.
-- [ ] **Step 4: Run the focused tests and verify they pass.**
-- [ ] **Step 5: Commit and push with `feat: freeze best-available corpus profile`.**
+- [x] **Step 1: Write failing profile tests** for every frozen hash/count/reason, literal label, audit mismatch, changed limitations, and `paper_coverage_ready=false`.
+- [x] **Step 2: Run `uv run pytest tests/corpus/test_best_available.py -q` and verify the new imports fail.**
+- [x] **Step 3: Implement the frozen Pydantic profile and provenance verifier** with exact source, audit, snapshot, catalog, and limitations checks.
+- [x] **Step 4: Run the focused tests and verify they pass.**
+- [x] **Step 5: Commit and push with `feat: freeze best-available corpus profile`.**
 
 ### Task 2: Stream and resume deterministic chunk publication
 
