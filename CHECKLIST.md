@@ -181,6 +181,7 @@
       - [x] Allow honest model-only prediction from a valid visible example even when no retrieval query terms are available.
     - [ ] Write and execute the separate best-available FOIArchive import/index plan.
       - [x] Freeze the accepted History Lab snapshot, canonical audit, limitations hash, unresolved counts, and non-paper coverage boundary as a tested production source profile.
+      - [x] Add a bounded-memory, resumable gzip-to-chunk importer with atomic manifests, disk-backed duplicate detection, checkpoint reconciliation, and fail-closed source verification.
     - [x] With a real key configured and generation still disabled, count the exact one-passage request, show expected and maximum cost, and obtain explicit approval before the first paid model call.
       - [x] Align the production input-token request with the current provider schema by excluding generation-only fields, with a regression test and full backend/frontend verification.
       - [x] Count the selected one-passage closed-book request at 131 exact provider input tokens while every paid-generation approval remains disabled.

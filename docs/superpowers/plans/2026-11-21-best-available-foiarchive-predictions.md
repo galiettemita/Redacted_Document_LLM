@@ -59,11 +59,11 @@
 - Consumes: `load_best_available_source(...)`, `_BulkExportRow`-compatible nine-field rows, and `chunk_document(...)`.
 - Produces: `build_best_available_chunks(source_path, output_path, manifest_path, checkpoint_path, *, ...) -> BestAvailableCorpusManifest`.
 
-- [ ] **Step 1: Write failing streaming tests** for deterministic chunks, literal corpus identity, metadata preservation, empty-body counts, malformed/duplicate failure, atomic publication, simulated interruption, checkpoint truncation/verification, and exact resume equivalence.
-- [ ] **Step 2: Run the focused tests and verify failure.**
-- [ ] **Step 3: Implement bounded-memory gzip streaming** with fsynced output/checkpoints, committed source-row and byte offsets, prefix checksum verification, re-stream-and-skip resume, and atomic final manifest publication.
-- [ ] **Step 4: Add the CLI arguments** for source, snapshot lock, catalog, audit, limitations, output chunks, checkpoint, and manifest.
-- [ ] **Step 5: Run focused corpus and CLI tests, then commit/push with `feat: import best-available corpus chunks`.**
+- [x] **Step 1: Write failing streaming tests** for deterministic chunks, literal corpus identity, metadata preservation, empty-body counts, malformed/duplicate failure, atomic publication, simulated interruption, checkpoint truncation/verification, and exact resume equivalence.
+- [x] **Step 2: Run the focused tests and verify failure.**
+- [x] **Step 3: Implement bounded-memory gzip streaming** with fsynced output/checkpoints, committed source-row and byte offsets, prefix checksum verification, re-stream-and-skip resume, and atomic final manifest publication.
+- [x] **Step 4: Add the CLI arguments** for source, snapshot lock, catalog, audit, limitations, output chunks, checkpoint, and manifest.
+- [x] **Step 5: Run focused corpus and CLI tests, then commit/push with `feat: import best-available corpus chunks`.**
 
 ### Task 3: Build resumable profile-specific BM25
 

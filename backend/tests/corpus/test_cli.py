@@ -13,6 +13,10 @@ from redacted_backend.corpus.bulk_export import (
     BulkExportAuditError,
     BulkExportCatalog,
 )
+from redacted_backend.corpus.best_available import (
+    BestAvailableCorpusManifest,
+    BestAvailableSourceProfile,
+)
 from redacted_backend.corpus.historylab_export import CatalogEntry
 from redacted_backend.corpus.preflight import (
     PreflightReport,
@@ -278,3 +282,87 @@ def test_failed_audit_rerun_preserves_the_previous_atomic_report(
         )
 
     assert output.read_bytes() == previous_report
+
+
+def test_build_best_available_chunks_cli_publishes_real_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = tmp_path / "source.json.gz"
+    with gzip.GzipFile(filename=str(source), mode="wb", mtime=0) as destination:
+        destination.write(
+            json.dumps(
+                _document_row("https://example.test/document.pdf"),
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            + b"\n"
+        )
+    profile = BestAvailableSourceProfile(
+        source=SnapshotFile(
+            path=source.name,
+            size_bytes=source.stat().st_size,
+            sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+        ),
+        snapshot_manifest_hash="1" * 64,
+        catalog_manifest_hash="2" * 64,
+        audit_manifest_hash="3" * 64,
+        limitations_sha256="4" * 64,
+        catalog_document_count=1,
+        parsed_row_count=1,
+        unresolved_collection_count=1,
+        unresolved_value_counts={
+            "blank": 0,
+            "http_url": 1,
+            "null": 0,
+            "unknown": 0,
+        },
+        canonical_collection_counts={},
+        audit_reasons=["unresolved_collection_labels"],
+    )
+    monkeypatch.setattr(
+        cli,
+        "load_best_available_source",
+        lambda **_kwargs: profile,
+        raising=False,
+    )
+    chunks = tmp_path / "artifacts/chunks.jsonl"
+    checkpoint = tmp_path / "artifacts/checkpoint.json"
+    manifest = tmp_path / "artifacts/manifest.json"
+
+    exit_code = cli.run(
+        [
+            "build-best-available-chunks",
+            "--source",
+            str(source),
+            "--snapshot-lock",
+            str(tmp_path / "snapshot.json"),
+            "--catalog",
+            str(tmp_path / "catalog.json"),
+            "--audit",
+            str(tmp_path / "audit.json"),
+            "--limitations",
+            str(tmp_path / "limitations.md"),
+            "--output",
+            str(chunks),
+            "--checkpoint",
+            str(checkpoint),
+            "--manifest",
+            str(manifest),
+            "--checkpoint-interval-rows",
+            "1",
+        ]
+    )
+
+    published = BestAvailableCorpusManifest.model_validate_json(
+        manifest.read_text(encoding="utf-8")
+    )
+    assert exit_code == 0
+    assert published.document_count == 1
+    assert published.chunk_count == 1
+    assert published.paper_coverage_ready is False
+    assert BestAvailableCorpusManifest.model_validate_json(
+        capsys.readouterr().out
+    ) == published
+    assert not checkpoint.exists()

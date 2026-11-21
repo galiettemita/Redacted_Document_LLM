@@ -11,6 +11,10 @@ from redacted_backend.corpus.bulk_export import (
     BulkExportCatalog,
     audit_historylab_bulk_export,
 )
+from redacted_backend.corpus.best_available import (
+    build_best_available_chunks,
+    load_best_available_source,
+)
 from redacted_backend.corpus.build_bm25 import build_bm25_from_files
 from redacted_backend.corpus.build_dense import build_dense_from_files
 from redacted_backend.corpus.exclusions import load_exclusion_manifest
@@ -115,6 +119,24 @@ def run(argv: Sequence[str] | None = None) -> int:
         _write_json(Path(args.manifest), manifest.model_dump(mode="json"))
         print(json.dumps(manifest.model_dump(mode="json"), sort_keys=True, indent=2))
         return 0
+    if args.command == "build-best-available-chunks":
+        profile = load_best_available_source(
+            snapshot_path=Path(args.snapshot_lock),
+            catalog_path=Path(args.catalog),
+            audit_path=Path(args.audit),
+            limitations_path=Path(args.limitations),
+        )
+        manifest = build_best_available_chunks(
+            Path(args.source),
+            Path(args.output),
+            Path(args.manifest),
+            Path(args.checkpoint),
+            profile=profile,
+            scientific=ScientificConfig(),
+            checkpoint_interval_rows=args.checkpoint_interval_rows,
+        )
+        print(json.dumps(manifest.model_dump(mode="json"), sort_keys=True, indent=2))
+        return 0
     if args.command == "build-bm25":
         report = build_bm25_from_files(
             Path(args.chunks),
@@ -197,6 +219,17 @@ def _parser() -> argparse.ArgumentParser:
     chunks.add_argument("--exclusions", required=True)
     chunks.add_argument("--output", required=True)
     chunks.add_argument("--manifest", required=True)
+
+    best_chunks = subparsers.add_parser("build-best-available-chunks")
+    best_chunks.add_argument("--source", required=True)
+    best_chunks.add_argument("--snapshot-lock", required=True)
+    best_chunks.add_argument("--catalog", required=True)
+    best_chunks.add_argument("--audit", required=True)
+    best_chunks.add_argument("--limitations", required=True)
+    best_chunks.add_argument("--output", required=True)
+    best_chunks.add_argument("--checkpoint", required=True)
+    best_chunks.add_argument("--manifest", required=True)
+    best_chunks.add_argument("--checkpoint-interval-rows", type=int, default=10_000)
 
     bm25 = subparsers.add_parser("build-bm25")
     bm25.add_argument("--chunks", required=True)

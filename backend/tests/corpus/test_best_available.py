@@ -1,16 +1,24 @@
 from __future__ import annotations
 
+import gzip
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+import redacted_backend.corpus.best_available as best_available
 from redacted_backend.corpus.best_available import (
     BestAvailableCorpusManifest,
+    BestAvailableImportError,
+    BestAvailableSourceProfile,
+    build_best_available_chunks,
     BestAvailableSourceContractError,
     load_best_available_source,
 )
+from redacted_backend.corpus.chunker import CorpusChunk
+from redacted_backend.corpus.snapshot import SnapshotFile
 from redacted_backend.scientific_config import ScientificConfig
 
 
@@ -208,3 +216,306 @@ def test_best_available_manifest_rejects_inconsistent_counts() -> None:
             corpus_counts={"historylab-unlabeled": 7},
             chunks_sha256="2" * 64,
         )
+
+
+def _row(
+    doc_id: str,
+    body: str | None,
+    *,
+    source: str | None = "https://example.test/document.pdf",
+) -> dict[str, object]:
+    return {
+        "doc_id": doc_id,
+        "classification": "SECRET",
+        "authored": "1974-01-02T00:00:00",
+        "title": f"Title {doc_id}",
+        "body": body,
+        "source": source,
+        "pg_cnt": 2,
+        "char_cnt": len(body) if body is not None else 0,
+        "word_cnt": len(body.split()) if body is not None else 0,
+    }
+
+
+def _write_source(
+    path: Path,
+    rows: list[dict[str, object] | bytes],
+) -> None:
+    with gzip.GzipFile(filename=str(path), mode="wb", mtime=0) as destination:
+        for row in rows:
+            serialized = row if isinstance(row, bytes) else json.dumps(
+                row,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            destination.write(serialized + b"\n")
+
+
+def _profile(source: Path, parsed_rows: int) -> BestAvailableSourceProfile:
+    return BestAvailableSourceProfile(
+        source=SnapshotFile(
+            path=source.name,
+            size_bytes=source.stat().st_size,
+            sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+        ),
+        snapshot_manifest_hash="1" * 64,
+        catalog_manifest_hash="2" * 64,
+        audit_manifest_hash="3" * 64,
+        limitations_sha256="4" * 64,
+        catalog_document_count=parsed_rows,
+        parsed_row_count=parsed_rows,
+        unresolved_collection_count=parsed_rows,
+        unresolved_value_counts={
+            "blank": 0,
+            "http_url": parsed_rows,
+            "null": 0,
+            "unknown": 0,
+        },
+        canonical_collection_counts={},
+        audit_reasons=EXPECTED_REASONS,
+    )
+
+
+def _build(
+    root: Path,
+    source: Path,
+    *,
+    profile: BestAvailableSourceProfile | None = None,
+    checkpoint_interval_rows: int = 2,
+) -> tuple[BestAvailableCorpusManifest, Path, Path, Path]:
+    chunks = root / "chunks.jsonl"
+    manifest = root / "manifest.json"
+    checkpoint = root / "checkpoint.json"
+    result = build_best_available_chunks(
+        source,
+        chunks,
+        manifest,
+        checkpoint,
+        profile=profile or _profile(source, 1),
+        scientific=ScientificConfig(),
+        checkpoint_interval_rows=checkpoint_interval_rows,
+    )
+    return result, chunks, manifest, checkpoint
+
+
+def test_best_available_import_is_deterministic_and_preserves_real_metadata(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.json.gz"
+    long_body = " ".join(f"word-{index}" for index in range(305))
+    _write_source(
+        source,
+        [
+            _row("doc-1", long_body),
+            _row("doc-empty", "  \n"),
+        ],
+    )
+    profile = _profile(source, 2)
+
+    first, first_chunks, first_manifest, first_checkpoint = _build(
+        tmp_path / "first",
+        source,
+        profile=profile,
+    )
+    second, second_chunks, _, _ = _build(
+        tmp_path / "second",
+        source,
+        profile=profile,
+    )
+
+    assert first == second
+    assert first_chunks.read_bytes() == second_chunks.read_bytes()
+    assert BestAvailableCorpusManifest.model_validate_json(
+        first_manifest.read_text(encoding="utf-8")
+    ) == first
+    assert first.parsed_row_count == 2
+    assert first.included_row_count == 1
+    assert first.empty_body_count == 1
+    assert first.malformed_row_count == 0
+    assert first.document_count == 1
+    assert first.chunk_count == 2
+    assert first.corpus_counts == {"historylab-unlabeled": 1}
+    assert first.paper_coverage_ready is False
+    chunks = [
+        CorpusChunk.model_validate_json(line)
+        for line in first_chunks.read_text(encoding="utf-8").splitlines()
+    ]
+    assert [chunk.word_count for chunk in chunks] == [300, 5]
+    assert {chunk.document_id for chunk in chunks} == {"doc-1"}
+    assert {chunk.corpus for chunk in chunks} == {"historylab-unlabeled"}
+    assert {chunk.source_url for chunk in chunks} == {
+        "https://example.test/document.pdf"
+    }
+    assert {chunk.classification for chunk in chunks} == {"SECRET"}
+    assert {chunk.authored for chunk in chunks} == {"1974-01-02T00:00:00"}
+    assert {chunk.title for chunk in chunks} == {"Title doc-1"}
+    assert {chunk.doc_lang for chunk in chunks} == {None}
+    assert not first_checkpoint.exists()
+    assert not (first_checkpoint.parent / "checkpoint.ids.sqlite3").exists()
+
+
+@pytest.mark.parametrize(
+    ("rows", "message"),
+    [
+        ([_row("doc-1", "Visible text."), b"{not-json}"], "malformed row"),
+        (
+            [_row("duplicate", "First body."), _row("duplicate", "Second body.")],
+            "duplicate document ID",
+        ),
+    ],
+)
+def test_best_available_import_fails_closed_on_bad_rows_without_a_manifest(
+    tmp_path: Path,
+    rows: list[dict[str, object] | bytes],
+    message: str,
+) -> None:
+    source = tmp_path / "source.json.gz"
+    _write_source(source, rows)
+
+    with pytest.raises(BestAvailableImportError, match=message):
+        _build(tmp_path / "build", source, profile=_profile(source, 2))
+
+    assert not (tmp_path / "build/manifest.json").exists()
+
+
+def test_best_available_import_rejects_changed_source_bytes(tmp_path: Path) -> None:
+    source = tmp_path / "source.json.gz"
+    _write_source(source, [_row("doc-1", "Visible text.")])
+    profile = _profile(source, 1)
+    with source.open("ab") as destination:
+        destination.write(b"tamper")
+
+    with pytest.raises(BestAvailableImportError, match="source (size|checksum)"):
+        _build(tmp_path / "build", source, profile=profile)
+
+    assert not (tmp_path / "build/manifest.json").exists()
+
+
+def test_best_available_import_resumes_exactly_and_truncates_uncommitted_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source.json.gz"
+    _write_source(
+        source,
+        [
+            _row("doc-1", "First visible body."),
+            _row("doc-2", "Second visible body."),
+            _row("doc-3", "Third visible body."),
+        ],
+    )
+    profile = _profile(source, 3)
+    interrupted_root = tmp_path / "interrupted"
+    original_write = best_available._write_checkpoint_atomic
+    checkpoint_writes = 0
+
+    def interrupt_after_second_checkpoint(path: Path, value: object) -> None:
+        nonlocal checkpoint_writes
+        original_write(path, value)
+        checkpoint_writes += 1
+        if checkpoint_writes == 2:
+            raise OSError("simulated process interruption")
+
+    monkeypatch.setattr(
+        best_available,
+        "_write_checkpoint_atomic",
+        interrupt_after_second_checkpoint,
+    )
+    with pytest.raises(OSError, match="simulated process interruption"):
+        _build(
+            interrupted_root,
+            source,
+            profile=profile,
+            checkpoint_interval_rows=1,
+        )
+    assert not (interrupted_root / "manifest.json").exists()
+    checkpoint = interrupted_root / "checkpoint.json"
+    chunks = interrupted_root / "chunks.jsonl"
+    committed = json.loads(checkpoint.read_text(encoding="utf-8"))["output_bytes"]
+    with chunks.open("ab") as destination:
+        destination.write(b"uncommitted garbage\n")
+    assert chunks.stat().st_size > committed
+
+    monkeypatch.setattr(best_available, "_write_checkpoint_atomic", original_write)
+    resumed, resumed_chunks, _, resumed_checkpoint = _build(
+        interrupted_root,
+        source,
+        profile=profile,
+        checkpoint_interval_rows=1,
+    )
+    clean, clean_chunks, _, _ = _build(
+        tmp_path / "clean",
+        source,
+        profile=profile,
+        checkpoint_interval_rows=1,
+    )
+
+    assert resumed == clean
+    assert resumed_chunks.read_bytes() == clean_chunks.read_bytes()
+    assert not resumed_checkpoint.exists()
+    assert not (interrupted_root / "checkpoint.ids.sqlite3").exists()
+
+
+def test_best_available_import_rejects_a_corrupt_committed_prefix(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source.json.gz"
+    _write_source(
+        source,
+        [_row("doc-1", "First body."), _row("doc-2", "Second body.")],
+    )
+    profile = _profile(source, 2)
+    root = tmp_path / "build"
+    original_write = best_available._write_checkpoint_atomic
+
+    def interrupt(path: Path, value: object) -> None:
+        original_write(path, value)
+        raise OSError("stop")
+
+    monkeypatch.setattr(best_available, "_write_checkpoint_atomic", interrupt)
+    with pytest.raises(OSError, match="stop"):
+        _build(root, source, profile=profile, checkpoint_interval_rows=1)
+    chunks = root / "chunks.jsonl"
+    payload = bytearray(chunks.read_bytes())
+    payload[0] = ord("X")
+    chunks.write_bytes(payload)
+    monkeypatch.setattr(best_available, "_write_checkpoint_atomic", original_write)
+
+    with pytest.raises(BestAvailableImportError, match="checkpoint checksum"):
+        _build(root, source, profile=profile, checkpoint_interval_rows=1)
+
+    assert not (root / "manifest.json").exists()
+
+
+def test_best_available_import_preserves_checkpoint_after_write_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source.json.gz"
+    _write_source(
+        source,
+        [_row("doc-1", "First body."), _row("doc-2", "Second body.")],
+    )
+    profile = _profile(source, 2)
+    root = tmp_path / "build"
+    original_append = best_available._append_chunk
+    writes = 0
+
+    def fail_second_write(destination: object, serialized: bytes) -> None:
+        nonlocal writes
+        writes += 1
+        if writes == 2:
+            raise OSError("no space left on device")
+        original_append(destination, serialized)
+
+    monkeypatch.setattr(best_available, "_append_chunk", fail_second_write)
+
+    with pytest.raises(BestAvailableImportError, match="write failed"):
+        _build(root, source, profile=profile, checkpoint_interval_rows=1)
+
+    checkpoint = json.loads(
+        (root / "checkpoint.json").read_text(encoding="utf-8")
+    )
+    assert checkpoint["source_row_count"] == 1
+    assert not (root / "manifest.json").exists()
