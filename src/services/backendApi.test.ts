@@ -60,6 +60,7 @@ const blockedAnalysis: AnalysisJobRecord = {
   passage_id: passageRecord.id,
   document_id: documentRecord.id,
   passage_revision: 1,
+  prediction_basis: 'model_only_v1',
   status: 'blocked',
   stage: 'readiness',
   blockers: [

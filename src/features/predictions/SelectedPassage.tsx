@@ -1,4 +1,5 @@
 import type { Passage, Prediction } from '../../types'
+import { predictionProvenanceLabel } from './predictionProvenance'
 
 interface SelectedPassageProps {
   passage: Passage | null
@@ -33,9 +34,7 @@ export function SelectedPassage({
             <>
               <p className="prediction-text">{prediction.text}</p>
               <p className="prediction-provenance">
-                {prediction.provenance === 'simulated'
-                  ? 'Simulated prediction'
-                  : 'Model prediction'}
+                {predictionProvenanceLabel(prediction)}
               </p>
             </>
           ) : (

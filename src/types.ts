@@ -12,12 +12,16 @@ export interface Passage {
   rects: PassageRect[]
 }
 
-export interface Prediction {
+export type PredictionBasis =
+  | 'model_only_v1'
+  | 'best_available_foiarchive_v1'
+  | 'paper_exact_v1'
+
+interface PredictionBase {
   passageId: string
   page: number
   model: string
   text: string
-  provenance: 'simulated' | 'model'
   usage?: {
     inputTokens: number
     outputTokens: number
@@ -27,6 +31,17 @@ export interface Prediction {
     pricingVersion: string
   }
 }
+
+export type Prediction = PredictionBase & (
+  | {
+    provenance: 'simulated'
+    predictionBasis?: never
+  }
+  | {
+    provenance: 'model'
+    predictionBasis: PredictionBasis
+  }
+)
 
 export type DocumentMode = 'sample' | 'uploaded'
 

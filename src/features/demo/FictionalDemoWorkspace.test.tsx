@@ -53,7 +53,9 @@ describe('FictionalDemoWorkspace', () => {
 
     expect(screen.getByRole('button', { name: 'Open Passage 1 on page 1' })).toBeInTheDocument()
     expect(screen.getByText('Simulated prediction')).toBeInTheDocument()
-    expect(screen.queryByText('Model prediction')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Model-only prediction/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Archive-assisted prediction/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Paper-method prediction')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Passage 1 redaction' }))
     expect(screen.getByText('Pinned passage-1')).toBeInTheDocument()

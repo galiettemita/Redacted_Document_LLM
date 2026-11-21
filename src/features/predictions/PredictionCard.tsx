@@ -1,4 +1,5 @@
 import type { Passage, Prediction } from '../../types'
+import { predictionProvenanceLabel } from './predictionProvenance'
 
 interface PredictionCardProps {
   passage: Passage
@@ -20,9 +21,7 @@ export function PredictionCard({ passage, prediction, onSelect }: PredictionCard
       </span>
       <span className="prediction-text">{prediction.text}</span>
       <span className="prediction-provenance">
-        {prediction.provenance === 'simulated'
-          ? 'Simulated prediction'
-          : 'Model prediction'}
+        {predictionProvenanceLabel(prediction)}
       </span>
     </button>
   )

@@ -21,6 +21,7 @@ describe('usePredictionStream', () => {
           model: 'GPT-6 Astra',
           text: 'First result',
           provenance: 'model',
+          predictionBasis: 'model_only_v1',
         })
         onPrediction({
           passageId: 'passage-1',
@@ -28,6 +29,7 @@ describe('usePredictionStream', () => {
           model: 'GPT-6 Astra',
           text: 'Replayed result',
           provenance: 'model',
+          predictionBasis: 'model_only_v1',
         })
       },
     }

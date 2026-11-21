@@ -1,4 +1,4 @@
-import type { PassageRect } from '../types'
+import type { PassageRect, PredictionBasis } from '../types'
 
 export interface ComponentReadiness {
   ready: boolean
@@ -107,6 +107,7 @@ export interface AnalysisJobRecord {
   passage_id: string
   document_id: string
   passage_revision: number
+  prediction_basis: PredictionBasis
   status: 'blocked' | 'queued' | 'running' | 'complete' | 'failed' | 'cancelled'
   stage: 'readiness' | 'query' | 'retrieval' | 'prediction' | 'complete'
   blockers: AnalysisBlocker[]

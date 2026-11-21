@@ -137,8 +137,9 @@ function analysisJob(
     passage_id: passageId,
     document_id: uploadedDocument.backendDocumentId!,
     passage_revision: 1,
+    prediction_basis: 'model_only_v1',
     status,
-    stage: status === 'blocked' ? 'readiness' : 'query',
+    stage: status === 'blocked' ? 'readiness' : 'prediction',
     blockers: status === 'blocked'
       ? [{ component: 'corpus', detail: 'complete corpus indexes are not available' }]
       : [],
@@ -566,6 +567,7 @@ describe('DocumentWorkspace', () => {
           model: 'GPT-6 Astra',
           text: 'Recovered archival sentence.',
           provenance: 'model',
+          predictionBasis: 'model_only_v1',
         })
       },
     }
@@ -593,7 +595,9 @@ describe('DocumentWorkspace', () => {
       }),
     )
     expect(await screen.findByText('Recovered archival sentence.')).toBeInTheDocument()
-    expect(screen.getByText('Model prediction')).toBeInTheDocument()
+    expect(screen.getByText(
+      'Model-only prediction — no archive evidence used',
+    )).toBeInTheDocument()
     expect(screen.queryByText('Simulated prediction')).not.toBeInTheDocument()
     expect(container.querySelector('.pdf-page-shell')).not.toHaveTextContent(
       'Recovered archival sentence.',

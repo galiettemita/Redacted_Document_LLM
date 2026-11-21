@@ -1,11 +1,12 @@
 import type { PredictionService } from './predictionService'
-import type { Prediction } from '../types'
+import type { Prediction, PredictionBasis } from '../types'
 
 interface PredictionEventPayload {
   job_id: string
   passage_id: string
   page_number: number
   model: string
+  prediction_basis: PredictionBasis
   prediction: string
   usage: {
     input_tokens: number
@@ -66,6 +67,7 @@ export function createHttpPredictionService(
                 model: displayModelName(payload.model),
                 text: payload.prediction,
                 provenance: 'model',
+                predictionBasis: payload.prediction_basis,
                 usage: {
                   inputTokens: payload.usage.input_tokens,
                   outputTokens: payload.usage.output_tokens,
@@ -165,6 +167,8 @@ function parsePrediction(data: string): PredictionEventPayload {
     || value.page_number < 1
     || !('model' in value)
     || typeof value.model !== 'string'
+    || !('prediction_basis' in value)
+    || !isPredictionBasis(value.prediction_basis)
     || !('prediction' in value)
     || typeof value.prediction !== 'string'
     || !value.prediction.trim()
@@ -180,6 +184,12 @@ function parsePrediction(data: string): PredictionEventPayload {
     throw new PredictionEventError('The backend returned an invalid prediction event.')
   }
   return value as PredictionEventPayload
+}
+
+function isPredictionBasis(value: unknown): value is PredictionBasis {
+  return value === 'model_only_v1'
+    || value === 'best_available_foiarchive_v1'
+    || value === 'paper_exact_v1'
 }
 
 function isUsage(value: unknown): value is PredictionEventPayload['usage'] {

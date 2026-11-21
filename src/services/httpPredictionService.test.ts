@@ -9,7 +9,7 @@ describe('createHttpPredictionService', () => {
       '',
       'id: 5',
       'event: passage.prediction',
-      'data: {"job_id":"job-1","passage_id":"passage-1","page_number":2,"model":"gpt-6-astra","prediction":"Recovered archival sentence.","usage":{"input_tokens":2000,"output_tokens":120,"total_tokens":2120,"reasoning_tokens":30},"estimated_cost_usd":0.026,"pricing_version":"2026-11-13"}',
+      'data: {"job_id":"job-1","passage_id":"passage-1","page_number":2,"model":"gpt-6-astra","prediction_basis":"model_only_v1","prediction":"Recovered archival sentence.","usage":{"input_tokens":2000,"output_tokens":120,"total_tokens":2120,"reasoning_tokens":30},"estimated_cost_usd":0.026,"pricing_version":"2026-11-13"}',
       '',
       '',
     ].join('\n')
@@ -45,6 +45,7 @@ describe('createHttpPredictionService', () => {
       model: 'GPT-6 Astra',
       text: 'Recovered archival sentence.',
       provenance: 'model',
+      predictionBasis: 'model_only_v1',
       usage: {
         inputTokens: 2000,
         outputTokens: 120,
@@ -59,10 +60,10 @@ describe('createHttpPredictionService', () => {
   it('ignores prediction events from an older run of the same document', async () => {
     const body = [
       'event: passage.prediction',
-      'data: {"job_id":"old-job","passage_id":"passage-1","page_number":1,"model":"gpt-6-astra","prediction":"Stale result.","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2,"reasoning_tokens":0},"estimated_cost_usd":0.001,"pricing_version":"test"}',
+      'data: {"job_id":"old-job","passage_id":"passage-1","page_number":1,"model":"gpt-6-astra","prediction_basis":"paper_exact_v1","prediction":"Stale result.","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2,"reasoning_tokens":0},"estimated_cost_usd":0.001,"pricing_version":"test"}',
       '',
       'event: passage.prediction',
-      'data: {"job_id":"new-job","passage_id":"passage-1","page_number":1,"model":"gpt-6-astra","prediction":"Current result.","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2,"reasoning_tokens":0},"estimated_cost_usd":0.001,"pricing_version":"test"}',
+      'data: {"job_id":"new-job","passage_id":"passage-1","page_number":1,"model":"gpt-6-astra","prediction_basis":"paper_exact_v1","prediction":"Current result.","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2,"reasoning_tokens":0},"estimated_cost_usd":0.001,"pricing_version":"test"}',
       '',
       '',
     ].join('\n')
@@ -91,6 +92,28 @@ describe('createHttpPredictionService', () => {
       { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
     ))
     const service = createHttpPredictionService(fetchMock as typeof fetch)
+
+    await expect(service.stream(
+      {
+        id: 'uploaded-1',
+        filename: 'archive.pdf',
+        source: 'blob:test',
+        mode: 'uploaded',
+        backendDocumentId: 'document-1',
+      },
+      new AbortController().signal,
+      vi.fn(),
+    )).rejects.toThrow('invalid prediction event')
+  })
+
+  it.each([
+    ['missing', ''],
+    ['unknown', ',"prediction_basis":"experimental_v2"'],
+  ])('rejects a %s prediction basis instead of guessing provenance', async (_name, basis) => {
+    const event = `event: passage.prediction\ndata: {"job_id":"job-1","passage_id":"passage-1","page_number":1,"model":"gpt-6-astra"${basis},"prediction":"Unsafe result.","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2,"reasoning_tokens":0},"estimated_cost_usd":0.001,"pricing_version":"test"}\n\n`
+    const service = createHttpPredictionService(
+      vi.fn(async () => new Response(event)) as typeof fetch,
+    )
 
     await expect(service.stream(
       {
@@ -152,7 +175,7 @@ describe('createHttpPredictionService', () => {
     const completed = [
       'id: 12',
       'event: passage.prediction',
-      'data: {"job_id":"job-1","passage_id":"passage-1","page_number":1,"model":"gpt-6-astra","prediction":"Resumed result.","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2,"reasoning_tokens":0},"estimated_cost_usd":0.001,"pricing_version":"test"}',
+      'data: {"job_id":"job-1","passage_id":"passage-1","page_number":1,"model":"gpt-6-astra","prediction_basis":"best_available_foiarchive_v1","prediction":"Resumed result.","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2,"reasoning_tokens":0},"estimated_cost_usd":0.001,"pricing_version":"test"}',
       '',
       '',
     ].join('\n')

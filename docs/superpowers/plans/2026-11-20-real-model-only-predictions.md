@@ -154,12 +154,12 @@
 - Produces: frontend `PredictionBasis` matching the backend strings and `Prediction.predictionBasis` for model output.
 - Displays: `Model-only prediction — no archive evidence used`, `Archive-assisted prediction — available FOIArchive snapshot used`, or `Paper-method prediction`.
 
-- [ ] **Step 1: Write failing service tests** requiring `prediction_basis` in model SSE events, rejecting unknown/missing values, and mapping it to `Prediction.predictionBasis` without exposing usage/cost in rendered cards.
-- [ ] **Step 2: Write failing component/workspace tests** proving model-only provenance appears in both card and selected views, prediction text stays off the PDF, all-passage scheduling still works, and the fictional modal still shows only **Simulated prediction**.
-- [ ] **Step 3: Run `npm test -- --run src/services/httpPredictionService.test.ts src/features/predictions/PredictionSidebar.test.tsx src/features/workspace/DocumentWorkspace.test.tsx src/features/demo/FictionalDemoWorkspace.test.tsx`; expect provenance failures.**
-- [ ] **Step 4: Implement the typed basis boundary and one shared `predictionProvenanceLabel(...)` formatter used by both real prediction views.**
-- [ ] **Step 5: Run the focused tests, `npm run typecheck`, and `npm run build`; expect PASS.**
-- [ ] **Step 6: Commit with `feat: label real prediction basis` and push.**
+- [x] **Step 1: Write failing service tests** requiring `prediction_basis` in model SSE events, rejecting unknown/missing values, and mapping it to `Prediction.predictionBasis` without exposing usage/cost in rendered cards.
+- [x] **Step 2: Write failing component/workspace tests** proving model-only provenance appears in both card and selected views, prediction text stays off the PDF, all-passage scheduling still works, and the fictional modal still shows only **Simulated prediction**.
+- [x] **Step 3: Run `npm test -- --run src/services/httpPredictionService.test.ts src/features/predictions/PredictionSidebar.test.tsx src/features/workspace/DocumentWorkspace.test.tsx src/features/demo/FictionalDemoWorkspace.test.tsx`; expect provenance failures.**
+- [x] **Step 4: Implement the typed basis boundary and one shared `predictionProvenanceLabel(...)` formatter used by both real prediction views.**
+- [x] **Step 5: Run the focused tests, `npm run typecheck`, and `npm run build`; expect PASS.**
+- [x] **Step 6: Commit with `feat: label real prediction basis` and push.**
 
 ### Task 6: Verify, document, and stop at the paid-call gate
 

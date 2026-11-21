@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { TEST_PASSAGES, TEST_PREDICTIONS } from '../../test/fixtures'
+import type { PredictionBasis } from '../../types'
 import { PredictionSidebar } from './PredictionSidebar'
 
 describe('PredictionSidebar', () => {
@@ -69,10 +70,11 @@ describe('PredictionSidebar', () => {
     render(
       <PredictionSidebar
         passages={TEST_PASSAGES}
-        predictions={[{
-          ...TEST_PREDICTIONS[0],
+        predictions={TEST_PREDICTIONS.slice(0, 2).map((prediction) => ({
+          ...prediction,
           model: 'GPT-6 Astra',
-          provenance: 'model',
+          provenance: 'model' as const,
+          predictionBasis: 'model_only_v1' as const,
           usage: {
             inputTokens: 2_000,
             outputTokens: 120,
@@ -81,7 +83,7 @@ describe('PredictionSidebar', () => {
             estimatedCostUsd: 0.026,
             pricingVersion: '2026-11-13',
           },
-        }]}
+        }))}
         phase="complete"
         error={null}
         activePassageId="passage-1"
@@ -90,7 +92,9 @@ describe('PredictionSidebar', () => {
       />,
     )
 
-    expect(screen.getByText('Model prediction')).toBeInTheDocument()
+    expect(screen.getAllByText(
+      'Model-only prediction — no archive evidence used',
+    )).toHaveLength(2)
     expect(screen.queryByText('GPT-6 Astra')).not.toBeInTheDocument()
     expect(screen.queryByText(/2,120 tokens/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/\$0\.0260 estimated/i)).not.toBeInTheDocument()
@@ -102,7 +106,10 @@ describe('PredictionSidebar', () => {
       <PredictionSidebar
         passages={TEST_PASSAGES}
         predictions={[{
-          ...TEST_PREDICTIONS[0],
+          passageId: TEST_PREDICTIONS[0].passageId,
+          page: TEST_PREDICTIONS[0].page,
+          model: 'Demo LLM',
+          text: TEST_PREDICTIONS[0].text,
           provenance: 'simulated',
         }]}
         phase="complete"
@@ -114,6 +121,37 @@ describe('PredictionSidebar', () => {
     )
 
     expect(screen.getByText('Simulated prediction')).toBeInTheDocument()
-    expect(screen.queryByText('Model prediction')).not.toBeInTheDocument()
+    expect(screen.queryByText(
+      'Model-only prediction — no archive evidence used',
+    )).not.toBeInTheDocument()
+  })
+
+  it.each<[PredictionBasis, string]>([
+    [
+      'best_available_foiarchive_v1',
+      'Archive-assisted prediction — available FOIArchive snapshot used',
+    ],
+    ['paper_exact_v1', 'Paper-method prediction'],
+  ])('labels %s output with its exact evidence basis', (predictionBasis, label) => {
+    render(
+      <PredictionSidebar
+        passages={TEST_PASSAGES}
+        predictions={[{
+          passageId: TEST_PREDICTIONS[0].passageId,
+          page: TEST_PREDICTIONS[0].page,
+          model: 'GPT-6 Astra',
+          text: TEST_PREDICTIONS[0].text,
+          provenance: 'model',
+          predictionBasis,
+        }]}
+        phase="complete"
+        error={null}
+        activePassageId={null}
+        onSelectPassage={vi.fn()}
+        onDismissSelection={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText(label)).toBeInTheDocument()
   })
 })

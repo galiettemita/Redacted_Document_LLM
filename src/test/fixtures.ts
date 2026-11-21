@@ -30,4 +30,5 @@ export const TEST_PREDICTIONS: Prediction[] = TEST_PASSAGES.map((passage) => ({
   model: 'GPT-6 Astra',
   text: `Provider prediction for ${passage.label}.`,
   provenance: 'model',
+  predictionBasis: 'model_only_v1',
 }))
