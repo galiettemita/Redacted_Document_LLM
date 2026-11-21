@@ -163,3 +163,9 @@
     - [x] Implement and run a bounded-memory streaming audit for the pinned official nine-field gzip without creating a second uncompressed raw copy.
     - [ ] Convert a future official bundle into normalized import artifacts only after its audit passes the complete-source contract.
     - [ ] Acquire or capture one complete official source with explicit collection labels and a non-empty `cables` collection, then pass the existing coverage gate.
+  - [ ] Task 15: Ship staged honest real predictions while preserving the exact-paper gate.
+    - [x] Record the four agreed best-available corpus limitations verbatim in `4-bulletpoint-limitations.md`.
+    - [x] Draft and builder-check the model-only, best-available FOIArchive, and future exact-paper prediction design.
+    - [ ] Obtain explicit approval for the staged real-predictions design.
+    - [ ] Write the implementation plan and build the approved stages with tests.
+    - [ ] Show the exact one-passage cost and obtain explicit approval before the first paid model call.
