@@ -166,6 +166,8 @@
   - [ ] Task 15: Ship staged honest real predictions while preserving the exact-paper gate.
     - [x] Record the four agreed best-available corpus limitations verbatim in `4-bulletpoint-limitations.md`.
     - [x] Draft and builder-check the model-only, best-available FOIArchive, and future exact-paper prediction design.
-    - [ ] Obtain explicit approval for the staged real-predictions design.
-    - [ ] Write the implementation plan and build the approved stages with tests.
+    - [x] Obtain explicit approval for the staged real-predictions design.
+    - [x] Write the test-first implementation plan for the first real model-only production stage.
+    - [ ] Build the approved model-only stage with tests.
+    - [ ] Write and execute the separate best-available FOIArchive import/index plan.
     - [ ] Show the exact one-passage cost and obtain explicit approval before the first paid model call.
