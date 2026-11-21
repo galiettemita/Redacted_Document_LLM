@@ -185,6 +185,8 @@
       - [x] Add a separately named, checkpointed best-available OpenSearch BM25 build that safely replays uncheckpointed idempotent batches and verifies the final live count.
       - [x] Add resumable one-million-chunk BGE/FAISS shards with checksum-verified float16 embeddings, offset-addressed metadata, global exact rescoring, and a frozen 100-query `recall@300 >= 0.98` gate.
       - [x] Wire separate fail-closed best-available readiness and a basis-bound worker runtime through real two-stage query, four-list retrieval, prediction, persistence, retries, events, and Compose paths without any model-only downgrade.
+      - [x] Pass the archive-assisted upload-to-SSE loopback with two fake provider stages, four non-empty retrieval lists, fused evidence, durable best-available provenance, and no real provider traffic.
+      - [x] Document the production source link/import/BM25/sharded-dense/readiness commands and verify backend, frontend, migration, Compose, typecheck, and production build regressions with every paid approval false.
     - [x] With a real key configured and generation still disabled, count the exact one-passage request, show expected and maximum cost, and obtain explicit approval before the first paid model call.
       - [x] Align the production input-token request with the current provider schema by excluding generation-only fields, with a regression test and full backend/frontend verification.
       - [x] Count the selected one-passage closed-book request at 131 exact provider input tokens while every paid-generation approval remains disabled.

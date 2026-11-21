@@ -146,11 +146,11 @@
 - Consumes: complete best-available runtime and existing prediction-basis UI.
 - Produces: upload-to-SSE archive-assisted loopback, operational runbook, and completed checklist evidence.
 
-- [ ] **Step 1: Add a fake-transport integration test** covering upload, detection, visible context, own-query generation, four ranked lists, fused evidence, prediction, durable best-available provenance, and SSE.
-- [ ] **Step 2: Re-run UI tests** proving **Archive-assisted prediction**, **Model-only prediction**, and **Simulated prediction** remain distinct and no prediction text appears over the PDF.
-- [ ] **Step 3: Document source linking, chunk/index commands, readiness, limitations, and separate cost approval without exposing research diagnostics in the UI.**
-- [ ] **Step 4: Run `uv run pytest -q`, `npm test -- --run`, `npm run typecheck`, `npm run build`, migration checks, and `git diff --check`.**
-- [ ] **Step 5: Update `CHECKLIST.md`, commit/push with `feat: ship best-available archive prediction path`, and keep all paid approvals disabled.**
+- [x] **Step 1: Add a fake-transport integration test** covering upload, detection, visible context, own-query generation, four ranked lists, fused evidence, prediction, durable best-available provenance, and SSE.
+- [x] **Step 2: Re-run UI tests** proving **Archive-assisted prediction**, **Model-only prediction**, and **Simulated prediction** remain distinct and no prediction text appears over the PDF.
+- [x] **Step 3: Document source linking, chunk/index commands, readiness, limitations, and separate cost approval without exposing research diagnostics in the UI.**
+- [x] **Step 4: Run `uv run pytest -q`, `npm test -- --run`, `npm run typecheck`, `npm run build`, migration checks, and `git diff --check`.**
+- [x] **Step 5: Update `CHECKLIST.md`, commit/push with `feat: ship best-available archive prediction path`, and keep all paid approvals disabled.**
 
 ### Task 7: Build the real local artifacts without paid generation
 
