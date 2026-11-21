@@ -15,6 +15,7 @@ from redacted_backend.domain.analysis import (
     AnalysisJobRecord,
     AnalysisStage,
     AnalysisStatus,
+    PredictionBasis,
 )
 
 
@@ -34,6 +35,7 @@ class AnalysisJobRepository:
         passage_revision: int,
         idempotency_key: str,
         blockers: list[AnalysisBlocker],
+        prediction_basis: PredictionBasis,
     ) -> AnalysisJobRecord:
         request_hash = _request_hash(passage_id, passage_revision)
         existing = self._session.scalar(
@@ -57,6 +59,7 @@ class AnalysisJobRepository:
             passage_id=str(passage_id),
             document_id=str(document_id),
             passage_revision=passage_revision,
+            prediction_basis=prediction_basis.value,
             idempotency_key=idempotency_key,
             request_hash=request_hash,
             status=status.value,
@@ -144,6 +147,7 @@ class AnalysisJobRepository:
                 "passage_id": model.passage_id,
                 "document_id": model.document_id,
                 "passage_revision": model.passage_revision,
+                "prediction_basis": model.prediction_basis,
                 "page_number": page_number,
                 "model": model_name,
                 "prediction": payload["prediction"],
@@ -285,6 +289,7 @@ class AnalysisJobRepository:
                     "passage_id": model.passage_id,
                     "document_id": model.document_id,
                     "passage_revision": model.passage_revision,
+                    "prediction_basis": model.prediction_basis,
                     "status": model.status,
                     "stage": model.stage,
                     "blockers": model.blockers,
@@ -367,6 +372,7 @@ def _job_record(model: AnalysisJob) -> AnalysisJobRecord:
         passage_id=model.passage_id,
         document_id=model.document_id,
         passage_revision=model.passage_revision,
+        prediction_basis=model.prediction_basis,
         status=model.status,
         stage=model.stage,
         blockers=model.blockers,
@@ -396,6 +402,7 @@ def _status_payload(model: AnalysisJob) -> dict[str, object]:
         "passage_id": model.passage_id,
         "document_id": model.document_id,
         "passage_revision": model.passage_revision,
+        "prediction_basis": model.prediction_basis,
         "status": model.status,
         "stage": model.stage,
         "blockers": model.blockers,

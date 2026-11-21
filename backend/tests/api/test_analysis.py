@@ -8,7 +8,9 @@ from uuid import UUID
 from sqlalchemy import func, select
 
 import redacted_backend.api.analysis as analysis_api
+import redacted_backend.domain.analysis as analysis_domain
 from redacted_backend.db.models import AnalysisEvent, AnalysisJob, Document
+from redacted_backend.db.repositories.analysis import AnalysisJobRepository
 from tests.api.test_context import (
     create_test_app_and_passage,
     install_fake_preparation,
@@ -59,6 +61,7 @@ def test_analysis_request_persists_a_truthful_blocked_job_and_is_idempotent(
     assert job["passage_id"] == str(passage.id)
     assert job["document_id"] == str(document.id)
     assert job["passage_revision"] == passage.revision
+    assert job["prediction_basis"] == "paper_exact_v1"
     assert {blocker["component"] for blocker in job["blockers"]} == {
         "corpus",
         "model",
@@ -68,6 +71,40 @@ def test_analysis_request_persists_a_truthful_blocked_job_and_is_idempotent(
     with app.state.database.session_factory() as session:
         assert session.scalar(select(func.count()).select_from(AnalysisJob)) == 1
         assert session.scalar(select(func.count()).select_from(AnalysisEvent)) == 1
+        event = session.scalar(select(AnalysisEvent))
+        assert event is not None
+        assert event.payload["prediction_basis"] == "paper_exact_v1"
+
+
+def test_analysis_repository_keeps_the_original_basis_on_same_key_replay(
+    tmp_path: Path,
+) -> None:
+    prediction_basis = getattr(analysis_domain, "PredictionBasis", None)
+    assert prediction_basis is not None
+    app, document, passage = create_test_app_and_passage(tmp_path)
+
+    with app.state.database.session_factory() as session, session.begin():
+        repository = AnalysisJobRepository(session)
+        first = repository.schedule(
+            passage_id=passage.id,
+            document_id=document.id,
+            passage_revision=passage.revision,
+            idempotency_key="stable-basis",
+            blockers=[],
+            prediction_basis=prediction_basis.MODEL_ONLY_V1,
+        )
+        replay = repository.schedule(
+            passage_id=passage.id,
+            document_id=document.id,
+            passage_revision=passage.revision,
+            idempotency_key="stable-basis",
+            blockers=[],
+            prediction_basis=prediction_basis.PAPER_EXACT_V1,
+        )
+
+    assert first.id == replay.id
+    assert first.prediction_basis == prediction_basis.MODEL_ONLY_V1
+    assert replay.prediction_basis == prediction_basis.MODEL_ONLY_V1
 
 
 def test_analysis_request_requires_the_exact_prepared_passage_revision(

@@ -222,6 +222,7 @@ class AnalysisJob(Base):
         index=True,
     )
     passage_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    prediction_basis: Mapped[str] = mapped_column(String(64), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(512), nullable=False)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)

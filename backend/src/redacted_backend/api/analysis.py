@@ -22,7 +22,11 @@ from redacted_backend.db.repositories.analysis import (
 from redacted_backend.db.repositories.documents import DocumentRepository
 from redacted_backend.db.repositories.passages import PassageRepository
 from redacted_backend.db.repositories.visible_examples import VisibleExampleRepository
-from redacted_backend.domain.analysis import AnalysisBlocker, AnalysisJobRecord
+from redacted_backend.domain.analysis import (
+    AnalysisBlocker,
+    AnalysisJobRecord,
+    PredictionBasis,
+)
 from redacted_backend.jobs.queue import AnalysisDispatcher
 
 
@@ -88,6 +92,7 @@ def create_analysis_router(
                     passage_revision=passage.revision,
                     idempotency_key=idempotency_key,
                     blockers=_analysis_blockers(settings),
+                    prediction_basis=PredictionBasis.PAPER_EXACT_V1,
                 )
             if job.status == "queued":
                 if dispatcher is None:

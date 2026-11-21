@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from redacted_backend.db.models import AnalysisEvent, AnalysisJob, Passage
 from redacted_backend.db.repositories.analysis import AnalysisJobRepository
+from redacted_backend.domain.analysis import PredictionBasis
 from redacted_backend.domain.predictions import (
     PredictionRecord,
     QueryResult,
@@ -259,6 +260,7 @@ def _schedule_ready(app, document_id, passage_id, revision: int) -> str:
             passage_revision=revision,
             idempotency_key="orchestrator-test",
             blockers=[],
+            prediction_basis=PredictionBasis.PAPER_EXACT_V1,
         )
     return str(job.id)
 

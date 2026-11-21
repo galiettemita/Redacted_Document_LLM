@@ -25,6 +25,12 @@ class AnalysisStage(StrEnum):
     COMPLETE = "complete"
 
 
+class PredictionBasis(StrEnum):
+    MODEL_ONLY_V1 = "model_only_v1"
+    BEST_AVAILABLE_FOIARCHIVE_V1 = "best_available_foiarchive_v1"
+    PAPER_EXACT_V1 = "paper_exact_v1"
+
+
 class AnalysisBlocker(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -39,6 +45,7 @@ class AnalysisJobRecord(BaseModel):
     passage_id: UUID
     document_id: UUID
     passage_revision: int = Field(ge=1)
+    prediction_basis: PredictionBasis
     status: AnalysisStatus
     stage: AnalysisStage
     blockers: list[AnalysisBlocker]

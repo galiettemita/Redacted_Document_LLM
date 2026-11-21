@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from redacted_backend.db.repositories.analysis import AnalysisJobRepository
+from redacted_backend.domain.analysis import PredictionBasis
 from redacted_backend.jobs.generation_store import AnalysisGenerationStore
 from redacted_backend.models.openai_gateway import StoredGeneration
 from tests.api.test_context import create_test_app_and_passage
@@ -17,6 +18,7 @@ def test_generation_store_survives_a_new_worker_process_boundary(
             passage_revision=passage.revision,
             idempotency_key="durable-generation",
             blockers=[],
+            prediction_basis=PredictionBasis.PAPER_EXACT_V1,
         )
     value = StoredGeneration(
         kind="query",

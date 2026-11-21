@@ -58,11 +58,11 @@
 - Produces: required `AnalysisJobRecord.prediction_basis: PredictionBasis` and matching database column/event field.
 - Consumes: existing `AnalysisJobRepository.schedule(...)`; add required `prediction_basis: PredictionBasis` without changing same-key replay semantics.
 
-- [ ] **Step 1: Write failing migration and repository tests** proving upgrade backfills every legacy job, stored prediction payload, and existing analysis-event payload as `paper_exact_v1`; downgrade removes only the new job column; new jobs persist the supplied basis; new status events include it; and a same-key replay returns the original basis even when a different basis is offered later.
-- [ ] **Step 2: Run `cd backend && uv run pytest tests/security/test_prediction_basis_migration.py tests/api/test_analysis.py -v`; expect failures for the missing enum, migration, and field.**
-- [ ] **Step 3: Implement `PredictionBasis`, migration `0010_prediction_basis`, the non-null model column, repository persistence, and event serialization.** Backfill is `paper_exact_v1` because every pre-migration executable job belongs to the existing retrieval-only runtime; do not infer from result content.
-- [ ] **Step 4: Run the focused tests and `cd backend && uv run alembic upgrade head`; expect PASS and schema head `0010_prediction_basis`.**
-- [ ] **Step 5: Commit with `feat: persist prediction basis` and push.**
+- [x] **Step 1: Write failing migration and repository tests** proving upgrade backfills every legacy job, stored prediction payload, and existing analysis-event payload as `paper_exact_v1`; downgrade removes only the new job column; new jobs persist the supplied basis; new status events include it; and a same-key replay returns the original basis even when a different basis is offered later.
+- [x] **Step 2: Run `cd backend && uv run pytest tests/security/test_prediction_basis_migration.py tests/api/test_analysis.py -v`; expect failures for the missing enum, migration, and field.**
+- [x] **Step 3: Implement `PredictionBasis`, migration `0010_prediction_basis`, the non-null model column, repository persistence, and event serialization.** Backfill is `paper_exact_v1` because every pre-migration executable job belongs to the existing retrieval-only runtime; do not infer from result content.
+- [x] **Step 4: Run the focused tests and `cd backend && uv run alembic upgrade head`; expect PASS and schema head `0010_prediction_basis`.**
+- [x] **Step 5: Commit with `feat: persist prediction basis` and push.**
 
 ### Task 2: Freeze Appendix F and add retrieval-free model generation
 
