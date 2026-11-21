@@ -7,6 +7,7 @@ from typing import Any, Literal, Protocol, TypeVar
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from redacted_backend.domain.analysis import PredictionBasis
 from redacted_backend.domain.predictions import (
     PredictionRecord,
     QueryResult,
@@ -20,6 +21,7 @@ from redacted_backend.models.pricing import (
 )
 from redacted_backend.models.prompts import (
     RenderedPrompt,
+    render_model_only_prediction_prompt,
     render_prediction_prompt,
     render_query_prompt,
 )
@@ -163,12 +165,55 @@ class OpenAIGateway:
             raise ModelGatewayError("empty_output", "Provider returned no prediction")
         result = PredictionRecord(
             passage_id=example.passage_id,
+            prediction_basis=PredictionBasis.PAPER_EXACT_V1,
             prediction=prediction,
             prompt_sha256=prompt.sha256,
             request_sha256=request_hash,
             retrieval_trace_sha256=_canonical_hash(
                 retrieval.model_dump(mode="json")
             ),
+            provider_response_id=_response_id(response.body),
+            provider_request_id=response.request_id,
+            input_tokens=input_tokens,
+            usage=usage,
+            estimated_cost_usd=estimate_usage_cost(usage),
+            pricing_version=OPENAI_GPT6_ASTRA_PRICING.version,
+        )
+        self._save(scope, idempotency_key, "prediction", result)
+        return result
+
+    def generate_model_only_prediction(
+        self,
+        example: VisibleExample,
+        idempotency_key: str,
+    ) -> PredictionRecord:
+        prompt = render_model_only_prediction_prompt(example)
+        request = self._request(prompt)
+        request_hash = _canonical_hash(request)
+        scope = f"prediction:{example.passage_id}"
+        existing = self._existing(
+            scope,
+            idempotency_key,
+            request_hash,
+            "prediction",
+            PredictionRecord,
+        )
+        if existing is not None:
+            return existing
+        input_tokens, response, output, usage = self._execute(
+            request,
+            idempotency_key,
+        )
+        prediction = output.strip()
+        if not prediction:
+            raise ModelGatewayError("empty_output", "Provider returned no prediction")
+        result = PredictionRecord(
+            passage_id=example.passage_id,
+            prediction_basis=PredictionBasis.MODEL_ONLY_V1,
+            prediction=prediction,
+            prompt_sha256=prompt.sha256,
+            request_sha256=request_hash,
+            retrieval_trace_sha256=None,
             provider_response_id=_response_id(response.body),
             provider_request_id=response.request_id,
             input_tokens=input_tokens,

@@ -5,7 +5,10 @@ from typing import Any
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
+from redacted_backend.domain.analysis import PredictionBasis
+from redacted_backend.domain.predictions import PredictionRecord, TokenUsage
 from redacted_backend.models.openai_gateway import (
     InMemoryGenerationStore,
     ModelGatewayError,
@@ -90,7 +93,96 @@ def test_gateway_prediction_remains_linked_to_the_passage_and_trace() -> None:
 
     assert result.passage_id == _example().passage_id
     assert result.prediction == "Predicted hidden passage"
+    assert result.prediction_basis == PredictionBasis.PAPER_EXACT_V1
     assert result.retrieval_trace_sha256
+
+
+def test_gateway_model_only_prediction_is_retrieval_free_and_idempotent() -> None:
+    transport = RecordingTransport([_response("Predicted without archive evidence")])
+    gateway = OpenAIGateway(
+        transport=transport,
+        store=InMemoryGenerationStore(),
+    )
+    generate = getattr(gateway, "generate_model_only_prediction", None)
+    assert generate is not None
+
+    first = generate(_example(), "model-only-idempotency-key")
+    replay = generate(_example(), "model-only-idempotency-key")
+
+    assert replay == first
+    assert first.prediction_basis == PredictionBasis.MODEL_ONLY_V1
+    assert first.retrieval_trace_sha256 is None
+    assert len(transport.count_requests) == 1
+    assert len(transport.create_requests) == 1
+    request, client_request_id = transport.create_requests[0]
+    assert client_request_id == "model-only-idempotency-key"
+    assert request["model"] == "gpt-6-astra"
+    assert request["reasoning"] == {"effort": "medium"}
+    assert request["store"] is False
+    assert request["tools"] == []
+    assert request["truncation"] == "disabled"
+    assert request["max_output_tokens"] == 4096
+
+
+def test_model_only_gateway_rejects_empty_refused_and_incomplete_outputs() -> None:
+    cases = [
+        (_response("   "), "empty_output"),
+        (_refusal_response(), "provider_refusal"),
+        ({**_response("prediction"), "status": "incomplete"}, "provider_incomplete"),
+    ]
+    for index, (response, code) in enumerate(cases):
+        gateway = OpenAIGateway(
+            transport=RecordingTransport([response]),
+            store=InMemoryGenerationStore(),
+        )
+        generate = getattr(gateway, "generate_model_only_prediction", None)
+        assert generate is not None
+        with pytest.raises(ModelGatewayError, match=code):
+            generate(_example(), f"model-only-invalid-{index}")
+
+
+def test_prediction_record_requires_trace_only_for_retrieval_bases() -> None:
+    values = {
+        "passage_id": _example().passage_id,
+        "prediction": "Predicted text",
+        "prompt_sha256": "1" * 64,
+        "request_sha256": "2" * 64,
+        "provider_response_id": "resp-123",
+        "provider_request_id": "req-123",
+        "input_tokens": 10,
+        "usage": TokenUsage(
+            input_tokens=10,
+            output_tokens=2,
+            total_tokens=12,
+            cached_input_tokens=0,
+            reasoning_tokens=0,
+        ),
+        "estimated_cost_usd": 0.01,
+        "pricing_version": "test",
+    }
+    model_only = PredictionRecord(
+        **values,
+        prediction_basis=PredictionBasis.MODEL_ONLY_V1,
+        retrieval_trace_sha256=None,
+    )
+    assert model_only.retrieval_trace_sha256 is None
+
+    for basis in (
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
+        PredictionBasis.PAPER_EXACT_V1,
+    ):
+        with pytest.raises(ValidationError):
+            PredictionRecord(
+                **values,
+                prediction_basis=basis,
+                retrieval_trace_sha256=None,
+            )
+    with pytest.raises(ValidationError):
+        PredictionRecord(
+            **values,
+            prediction_basis=PredictionBasis.MODEL_ONLY_V1,
+            retrieval_trace_sha256="3" * 64,
+        )
 
 
 def test_gateway_rejects_invalid_query_empty_output_and_refusal_without_fallback() -> None:

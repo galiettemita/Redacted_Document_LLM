@@ -79,12 +79,12 @@
 - Produces: `OpenAIGateway.generate_model_only_prediction(example, idempotency_key) -> PredictionRecord`.
 - Changes: `PredictionRecord.prediction_basis: PredictionBasis`; `retrieval_trace_sha256` is `None` only for `model_only_v1` and is a 64-character SHA-256 for both retrieval bases.
 
-- [ ] **Step 1: Write a failing prompt snapshot test** against the exact Appendix F page-26 text beginning `Below is the declassified CIA intelligence bulletin of {date}.` and ending `{before}[[TARGET]]{after}`; assert the same visible date, coarse length hint, and target serialization used by the paper.
-- [ ] **Step 2: Write failing gateway/domain tests** proving model-only creates the existing fixed Responses request, performs one token count and one generation, persists idempotently, records `model_only_v1`, has no retrieval hash, rejects an empty/refused/incomplete response, and rejects a null retrieval hash for either retrieval basis.
-- [ ] **Step 3: Run `cd backend && uv run pytest tests/models/test_prompts.py tests/models/test_openai_gateway.py -v`; expect the closed-book interfaces to be missing.**
-- [ ] **Step 4: Add the frozen template, renderer, conditional `PredictionRecord` validation, and `generate_model_only_prediction`; reuse `_request`, `_execute`, cost, usage, provider-ID, and generation-store behavior.**
-- [ ] **Step 5: Run the focused tests; expect PASS and no network request.**
-- [ ] **Step 6: Commit with `feat: add closed-book prediction gateway` and push.**
+- [x] **Step 1: Write a failing prompt snapshot test** against the exact Appendix F page-26 text beginning `Below is the declassified CIA intelligence bulletin of {date}.` and ending `{before}[[TARGET]]{after}`; assert the same visible date, coarse length hint, and target serialization used by the paper.
+- [x] **Step 2: Write failing gateway/domain tests** proving model-only creates the existing fixed Responses request, performs one token count and one generation, persists idempotently, records `model_only_v1`, has no retrieval hash, rejects an empty/refused/incomplete response, and rejects a null retrieval hash for either retrieval basis.
+- [x] **Step 3: Run `cd backend && uv run pytest tests/models/test_prompts.py tests/models/test_openai_gateway.py -v`; expect the closed-book interfaces to be missing.**
+- [x] **Step 4: Add the frozen template, renderer, conditional `PredictionRecord` validation, and `generate_model_only_prediction`; reuse `_request`, `_execute`, cost, usage, provider-ID, and generation-store behavior.**
+- [x] **Step 5: Run the focused tests; expect PASS and no network request.**
+- [x] **Step 6: Commit with `feat: add closed-book prediction gateway` and push.**
 
 ### Task 3: Select and report separately approved prediction bases
 

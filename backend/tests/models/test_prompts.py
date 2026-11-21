@@ -5,6 +5,7 @@ from datetime import date
 from pathlib import Path
 from uuid import UUID
 
+import redacted_backend.models.prompts as prompt_module
 from redacted_backend.domain.retrieval import (
     FourRankedLists,
     FusedChunk,
@@ -47,6 +48,25 @@ def test_query_and_prediction_render_only_visible_example_and_retrieved_evidence
     assert "Hidden answer" not in prediction.text
     assert query.sha256 == hashlib.sha256(query.text.encode()).hexdigest()
     assert prediction.sha256 == hashlib.sha256(prediction.text.encode()).hexdigest()
+
+
+def test_closed_book_prompt_matches_appendix_f_and_uses_only_visible_text() -> None:
+    renderer = getattr(prompt_module, "render_model_only_prediction_prompt", None)
+    assert renderer is not None
+
+    prompt = renderer(_example())
+
+    assert prompt.template_version == "closed-book-prediction-v1"
+    assert prompt.text == (
+        "Below is the declassified CIA intelligence bulletin of March 24, 2019.\n"
+        "Redacted text appears as [REDACTED]; one redaction is\n"
+        "marked [[TARGET]]. Predict the redacted text at [[TARGET]]\n"
+        "as exactly as you can. It is part of a sentence long. Answer with the\n"
+        "predicted text only, with no preamble or commentary.\n\n"
+        "Visible before. [[TARGET]] Visible after."
+    )
+    assert "Hidden answer" not in prompt.text
+    assert prompt.sha256 == hashlib.sha256(prompt.text.encode()).hexdigest()
 
 
 def _example() -> VisibleExample:

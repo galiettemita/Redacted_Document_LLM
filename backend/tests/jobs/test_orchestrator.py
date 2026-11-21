@@ -55,6 +55,7 @@ class RecordingGateway:
         ).hexdigest()
         return PredictionRecord(
             passage_id=example.passage_id,
+            prediction_basis=PredictionBasis.PAPER_EXACT_V1,
             prediction="The missing passage identifies the officials and their planned meeting.",
             prompt_sha256="3" * 64,
             request_sha256="4" * 64,

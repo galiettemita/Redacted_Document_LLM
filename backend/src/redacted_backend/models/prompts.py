@@ -11,6 +11,7 @@ from redacted_backend.domain.visible_examples import VisibleExample
 _PROMPT_ROOT = Path(__file__).resolve().parents[3] / "prompts"
 _QUERY_PATH = _PROMPT_ROOT / "realistic_query_v1.txt"
 _PREDICTION_PATH = _PROMPT_ROOT / "realistic_prediction_v1.txt"
+_MODEL_ONLY_PREDICTION_PATH = _PROMPT_ROOT / "closed_book_prediction_v1.txt"
 
 
 class RenderedPrompt(BaseModel):
@@ -43,6 +44,17 @@ def render_prediction_prompt(
         date=_paper_date(example),
         hint=f"It is {example.length_cue.bucket} long. ",
         documents=retrieval.serialized_documents,
+        before=example.before_target,
+        after=example.after_target,
+    )
+
+
+def render_model_only_prediction_prompt(example: VisibleExample) -> RenderedPrompt:
+    return _render(
+        _MODEL_ONLY_PREDICTION_PATH,
+        "closed-book-prediction-v1",
+        date=_paper_date(example),
+        hint=f"It is {example.length_cue.bucket} long. ",
         before=example.before_target,
         after=example.after_target,
     )
