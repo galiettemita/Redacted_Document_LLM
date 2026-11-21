@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from redacted_backend.api.readiness import (
+    resolve_best_available_corpus_readiness,
     resolve_corpus_readiness,
     resolve_prediction_basis_readiness,
     resolve_worker_readiness,
@@ -196,11 +197,13 @@ def _analysis_decision(
     database = ComponentReadiness(ready=True, detail="ready")
     worker = resolve_worker_readiness(settings)
     corpus = resolve_corpus_readiness(settings)
+    best_available_corpus = resolve_best_available_corpus_readiness(settings)
     bases = resolve_prediction_basis_readiness(
         settings,
         database=database,
         worker=worker,
         corpus=corpus,
+        best_available_corpus=best_available_corpus,
     )
     if not context_query_ready:
         for basis in (

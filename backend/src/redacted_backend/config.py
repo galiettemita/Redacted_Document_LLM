@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     bm25_manifest_path: Path | None = None
     dense_manifest_path: Path | None = None
     dense_artifact_directory: Path | None = None
+    best_available_corpus_manifest_path: Path | None = None
+    best_available_bm25_manifest_path: Path | None = None
+    best_available_dense_manifest_path: Path | None = None
+    best_available_dense_artifact_directory: Path | None = None
+    best_available_recall_queries_path: Path | None = None
     opensearch_url: str | None = None
     openai_api_key: SecretStr | None = None
     allow_paid_model_calls: bool = False

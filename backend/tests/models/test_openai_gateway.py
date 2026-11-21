@@ -104,12 +104,51 @@ def test_gateway_prediction_remains_linked_to_the_passage_and_trace() -> None:
         _example(),
         _retrieval(),
         "prediction-idempotency-key",
+        prediction_basis=PredictionBasis.PAPER_EXACT_V1,
     )
 
     assert result.passage_id == _example().passage_id
     assert result.prediction == "Predicted hidden passage"
     assert result.prediction_basis == PredictionBasis.PAPER_EXACT_V1
     assert result.retrieval_trace_sha256
+
+
+def test_gateway_retrieval_prediction_preserves_best_available_basis() -> None:
+    gateway = OpenAIGateway(
+        transport=RecordingTransport([_response("Archive-assisted prediction")]),
+        store=InMemoryGenerationStore(),
+    )
+
+    result = gateway.generate_prediction(
+        _example(),
+        _retrieval(),
+        "best-available-prediction",
+        prediction_basis=PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
+    )
+
+    assert result.prediction_basis == PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1
+    assert result.retrieval_trace_sha256 is not None
+
+
+def test_gateway_never_replays_a_retrieval_prediction_under_another_basis() -> None:
+    gateway = OpenAIGateway(
+        transport=RecordingTransport([_response("Paper-exact prediction")]),
+        store=InMemoryGenerationStore(),
+    )
+    gateway.generate_prediction(
+        _example(),
+        _retrieval(),
+        "basis-bound-prediction",
+        prediction_basis=PredictionBasis.PAPER_EXACT_V1,
+    )
+
+    with pytest.raises(ModelGatewayError, match="idempotency_conflict"):
+        gateway.generate_prediction(
+            _example(),
+            _retrieval(),
+            "basis-bound-prediction",
+            prediction_basis=PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
+        )
 
 
 def test_gateway_model_only_prediction_is_retrieval_free_and_idempotent() -> None:
@@ -255,14 +294,24 @@ def test_gateway_rejects_invalid_query_empty_output_and_refusal_without_fallback
         OpenAIGateway(
             transport=empty,
             store=InMemoryGenerationStore(),
-        ).generate_prediction(_example(), _retrieval(), "empty-prediction")
+        ).generate_prediction(
+            _example(),
+            _retrieval(),
+            "empty-prediction",
+            prediction_basis=PredictionBasis.PAPER_EXACT_V1,
+        )
 
     refusal = RecordingTransport([_refusal_response()])
     with pytest.raises(ModelGatewayError, match="provider_refusal"):
         OpenAIGateway(
             transport=refusal,
             store=InMemoryGenerationStore(),
-        ).generate_prediction(_example(), _retrieval(), "refusal")
+        ).generate_prediction(
+            _example(),
+            _retrieval(),
+            "refusal",
+            prediction_basis=PredictionBasis.PAPER_EXACT_V1,
+        )
 
 
 def test_gateway_idempotency_reuses_the_persisted_result_without_provider_calls() -> None:

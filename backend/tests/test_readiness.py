@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 from pathlib import Path
 
@@ -6,17 +7,30 @@ from httpx import ASGITransport, AsyncClient
 
 import redacted_backend.api.readiness as readiness_api
 from redacted_backend.api.readiness import (
+    resolve_best_available_corpus_readiness,
     resolve_corpus_readiness,
     resolve_worker_readiness,
 )
 from redacted_backend.config import Settings
+from redacted_backend.corpus.best_available import (
+    BEST_AVAILABLE_BM25_INDEX_NAME,
+    BestAvailableCorpusManifest,
+)
 from redacted_backend.corpus.manifest import CorpusManifest
-from redacted_backend.domain.readiness import verify_corpus_readiness
+from redacted_backend.domain.readiness import (
+    verify_best_available_corpus_readiness,
+    verify_corpus_readiness,
+)
 from redacted_backend.domain.analysis import PredictionBasis
 from redacted_backend.domain.readiness import ComponentReadiness
 from redacted_backend.main import create_app
 from redacted_backend.retrieval.bm25 import index_definition_hash
-from redacted_backend.retrieval.types import Bm25IndexManifest, DenseIndexManifest
+from redacted_backend.retrieval.types import (
+    Bm25IndexManifest,
+    DenseIndexManifest,
+    DenseShardManifest,
+    ShardedDenseIndexManifest,
+)
 from redacted_backend.scientific_config import ScientificConfig
 
 
@@ -170,6 +184,7 @@ def test_model_only_basis_is_operational_without_corpus_but_separately_approved(
         database=ready,
         worker=ready,
         corpus=corpus_unavailable,
+        best_available_corpus=corpus_unavailable,
     )
 
     assert bases[PredictionBasis.MODEL_ONLY_V1].model_dump() == {
@@ -182,7 +197,7 @@ def test_model_only_basis_is_operational_without_corpus_but_separately_approved(
         "operational": False,
         "approved": True,
         "ready": False,
-        "detail": "best-available retrieval is not implemented",
+        "detail": "corpus: not configured",
     }
     assert bases[PredictionBasis.PAPER_EXACT_V1].model_dump() == {
         "operational": False,
@@ -208,6 +223,7 @@ def test_model_only_basis_requires_master_and_its_own_spending_approval() -> Non
         database=ready,
         worker=ready,
         corpus=corpus_unavailable,
+        best_available_corpus=corpus_unavailable,
     )[PredictionBasis.MODEL_ONLY_V1]
     master_unapproved = resolve(
         Settings(
@@ -218,6 +234,7 @@ def test_model_only_basis_requires_master_and_its_own_spending_approval() -> Non
         database=ready,
         worker=ready,
         corpus=corpus_unavailable,
+        best_available_corpus=corpus_unavailable,
     )[PredictionBasis.MODEL_ONLY_V1]
 
     assert per_basis_unapproved.model_dump() == {
@@ -227,6 +244,31 @@ def test_model_only_basis_requires_master_and_its_own_spending_approval() -> Non
         "detail": "operational; spending not approved",
     }
     assert master_unapproved == per_basis_unapproved
+
+
+def test_best_available_basis_is_operational_without_contaminating_exact() -> None:
+    ready = ComponentReadiness(ready=True, detail="ready")
+    unavailable = ComponentReadiness(ready=False, detail="not configured")
+    settings = Settings(
+        openai_api_key="secret",
+        allow_paid_model_calls=True,
+        allow_best_available_calls=True,
+        allow_paper_exact_calls=True,
+    )
+
+    bases = readiness_api.resolve_prediction_basis_readiness(
+        settings,
+        database=ready,
+        worker=ready,
+        corpus=unavailable,
+        best_available_corpus=ready,
+    )
+
+    assert bases[PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1].ready is True
+    assert bases[PredictionBasis.PAPER_EXACT_V1].ready is False
+    assert readiness_api.select_prediction_basis(bases) == (
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1
+    )
 
 
 def test_corpus_readiness_requires_dense_artifact_files(
@@ -322,6 +364,66 @@ def test_corpus_readiness_requires_matching_manifests_artifacts_and_live_index(
     assert readiness.model_dump() == {
         "ready": True,
         "detail": "corpus and retrieval indexes operational",
+    }
+
+
+def test_best_available_readiness_verifies_separate_shards_queries_and_live_index(
+    tmp_path: Path,
+) -> None:
+    settings, corpus, bm25, dense = _compatible_best_available_settings(tmp_path)
+
+    readiness = resolve_best_available_corpus_readiness(
+        settings,
+        index_counter=lambda url, name: (
+            bm25.chunk_count
+            if (url, name) == ("http://search.test:9200", bm25.index_name)
+            else -1
+        ),
+    )
+
+    assert readiness.model_dump() == {
+        "ready": True,
+        "detail": "best-available corpus and retrieval indexes operational",
+    }
+    assert verify_best_available_corpus_readiness(
+        corpus,
+        bm25,
+        dense,
+        ScientificConfig(),
+    ).ready is True
+
+
+def test_best_available_readiness_fails_closed_on_corruption_or_live_count(
+    tmp_path: Path,
+) -> None:
+    settings, _corpus, bm25, dense = _compatible_best_available_settings(tmp_path)
+    assert resolve_best_available_corpus_readiness(
+        settings,
+        index_counter=lambda _url, _name: bm25.chunk_count,
+    ).ready is True
+    shard_root = settings.best_available_dense_artifact_directory
+    assert shard_root is not None
+    (shard_root / dense.shards[0].path / "candidate.faiss").write_bytes(b"tampered")
+
+    corrupt = resolve_best_available_corpus_readiness(
+        settings,
+        index_counter=lambda _url, _name: bm25.chunk_count,
+    )
+    assert corrupt.model_dump() == {
+        "ready": False,
+        "detail": "dense shard artifacts invalid",
+    }
+
+    settings, _corpus, bm25, _dense = _compatible_best_available_settings(
+        tmp_path / "count"
+    )
+    mismatch = resolve_best_available_corpus_readiness(
+        settings,
+        index_counter=lambda _url, _name: bm25.chunk_count + 1,
+    )
+    assert mismatch.model_dump() == {
+        "ready": False,
+        "detail": "BM25 live index count mismatch",
     }
 
 
@@ -502,3 +604,110 @@ def _dense_manifest(
         recall_at_300=0.99,
         recall_sample_sha256="8" * 64,
     )
+
+
+def _compatible_best_available_settings(
+    tmp_path: Path,
+) -> tuple[
+    Settings,
+    BestAvailableCorpusManifest,
+    Bm25IndexManifest,
+    ShardedDenseIndexManifest,
+]:
+    scientific = ScientificConfig()
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    corpus = BestAvailableCorpusManifest(
+        source_profile_hash="1" * 64,
+        source_sha256="2" * 64,
+        source_size_bytes=100,
+        audit_manifest_hash="3" * 64,
+        limitations_sha256="4" * 64,
+        scientific_hash=scientific.manifest_hash(),
+        chunker_version=scientific.corpus_chunker_version,
+        chunk_words=scientific.chunk_words,
+        chunk_overlap=scientific.chunk_overlap,
+        parsed_row_count=1,
+        included_row_count=1,
+        empty_body_count=0,
+        malformed_row_count=0,
+        document_count=1,
+        chunk_count=1,
+        corpus_counts={"historylab-unlabeled": 1},
+        chunks_sha256="5" * 64,
+    )
+    bm25 = Bm25IndexManifest(
+        index_name=BEST_AVAILABLE_BM25_INDEX_NAME,
+        retrieval_profile="best_available_foiarchive_v1",
+        opensearch_version=scientific.opensearch_version,
+        corpus_manifest_hash=corpus.manifest_hash(),
+        scientific_hash=scientific.manifest_hash(),
+        stopwords_hash=scientific.context_stopwords_hash(),
+        index_definition_hash=index_definition_hash(scientific),
+        document_count=1,
+        chunk_count=1,
+    )
+    dense_root = tmp_path / "best-dense"
+    shard_directory = dense_root / "shard-00000"
+    shard_directory.mkdir(parents=True)
+    artifacts = {
+        "embeddings.f16": b"\0" * (scientific.embedding_dimension * 2),
+        "metadata.jsonl": b'{}\n',
+        "metadata.offsets.u64": b"\0" * 8,
+        "candidate.faiss": b"candidate-fixture",
+    }
+    for name, value in artifacts.items():
+        (shard_directory / name).write_bytes(value)
+    shard = DenseShardManifest(
+        shard_id=0,
+        path=shard_directory.name,
+        start_row=0,
+        end_row=1,
+        chunk_count=1,
+        embeddings_sha256=hashlib.sha256(artifacts["embeddings.f16"]).hexdigest(),
+        metadata_sha256=hashlib.sha256(artifacts["metadata.jsonl"]).hexdigest(),
+        offsets_sha256=hashlib.sha256(
+            artifacts["metadata.offsets.u64"]
+        ).hexdigest(),
+        candidate_index_sha256=hashlib.sha256(
+            artifacts["candidate.faiss"]
+        ).hexdigest(),
+    )
+    queries = "".join(f"public certification query {index}\n" for index in range(100))
+    queries_path = tmp_path / "best-recall-queries.txt"
+    queries_path.write_text(queries, encoding="utf-8")
+    dense = ShardedDenseIndexManifest(
+        model_name=scientific.embedding_model,
+        model_revision=scientific.embedding_model_revision,
+        embedding_dimension=scientific.embedding_dimension,
+        corpus_manifest_hash=corpus.manifest_hash(),
+        scientific_hash=scientific.manifest_hash(),
+        chunks_sha256=corpus.chunks_sha256,
+        chunk_count=1,
+        shard_size_limit=1_000_000,
+        shards=[shard],
+        dtype="float16",
+        metric="inner_product",
+        candidate_index=scientific.dense_index_version,
+        hnsw_m=scientific.dense_hnsw_m,
+        ef_construction=scientific.dense_ef_construction,
+        ef_search=scientific.dense_ef_search,
+        candidate_count=scientific.dense_candidate_count,
+        recall_at_300=0.99,
+        recall_queries_sha256=hashlib.sha256(queries.encode("utf-8")).hexdigest(),
+        recall_query_count=100,
+    )
+    corpus_path = tmp_path / "best-corpus.json"
+    bm25_path = tmp_path / "best-bm25.json"
+    dense_path = tmp_path / "best-dense.json"
+    corpus_path.write_text(corpus.model_dump_json(), encoding="utf-8")
+    bm25_path.write_text(bm25.model_dump_json(), encoding="utf-8")
+    dense_path.write_text(dense.model_dump_json(), encoding="utf-8")
+    settings = Settings(
+        best_available_corpus_manifest_path=corpus_path,
+        best_available_bm25_manifest_path=bm25_path,
+        best_available_dense_manifest_path=dense_path,
+        best_available_dense_artifact_directory=dense_root,
+        best_available_recall_queries_path=queries_path,
+        opensearch_url="http://search.test:9200",
+    )
+    return settings, corpus, bm25, dense

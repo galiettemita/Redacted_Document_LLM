@@ -5,7 +5,9 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import cast
 
 import pytest
+from pydantic import SecretStr
 
+import redacted_backend.jobs.runtime as runtime_module
 from redacted_backend.config import Settings
 from redacted_backend.db.base import Database
 from redacted_backend.domain.analysis import PredictionBasis
@@ -15,6 +17,7 @@ from redacted_backend.jobs.runtime_provider import (
     AnalysisRuntimeProvider,
     RuntimeInitializationError,
 )
+from tests.test_readiness import _compatible_best_available_settings
 
 
 def _runtime() -> AnalysisOrchestrator:
@@ -163,7 +166,7 @@ def test_runtime_keeps_each_basis_fail_closed(tmp_path) -> None:
             PredictionBasis.MODEL_ONLY_V1,
             database=database,
         )
-    with pytest.raises(RuntimeError, match="best-available runtime is not implemented"):
+    with pytest.raises(RuntimeError, match="best-available corpus manifest"):
         build_analysis_orchestrator(
             Settings(**base, allow_best_available_calls=True),
             PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
@@ -175,3 +178,63 @@ def test_runtime_keeps_each_basis_fail_closed(tmp_path) -> None:
             PredictionBasis.PAPER_EXACT_V1,
             database=database,
         )
+
+
+def test_best_available_runtime_loads_only_its_separate_verified_artifacts(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    settings, _corpus, bm25_manifest, dense_manifest = (
+        _compatible_best_available_settings(tmp_path)
+    )
+    settings = settings.model_copy(
+        update={
+            "openai_api_key": SecretStr("secret"),
+            "allow_paid_model_calls": True,
+            "allow_best_available_calls": True,
+        }
+    )
+    database = Database.connect(f"sqlite+pysqlite:///{tmp_path / 'runtime.db'}")
+    captured: dict[str, object] = {}
+
+    class FakeBm25:
+        def __init__(self, _transport, **kwargs) -> None:
+            captured["bm25_manifest"] = kwargs["index_manifest"]
+            captured["corpus_manifest"] = kwargs["corpus_manifest"]
+            captured["index_name"] = kwargs["index_name"]
+
+        def search(self, *_args, **_kwargs):
+            return []
+
+    class FakeDense:
+        def __init__(self, **kwargs) -> None:
+            captured["dense_root"] = kwargs["root"]
+            captured["dense_manifest"] = kwargs["manifest"]
+
+        def search(self, *_args, **_kwargs):
+            return []
+
+    class FakeTransport:
+        def __init__(self, url: str) -> None:
+            captured["opensearch_url"] = url
+
+        def count(self, index_name: str) -> int:
+            assert index_name == bm25_manifest.index_name
+            return bm25_manifest.chunk_count
+
+    monkeypatch.setattr(runtime_module, "Bm25Index", FakeBm25)
+    monkeypatch.setattr(runtime_module, "ShardedDenseIndex", FakeDense, raising=False)
+    monkeypatch.setattr(runtime_module, "OpenSearchHttpTransport", FakeTransport)
+
+    runtime = build_analysis_orchestrator(
+        settings,
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
+        database=database,
+    )
+
+    assert runtime.retrieval is not None
+    assert runtime.prediction_basis == PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1
+    assert captured["bm25_manifest"] == bm25_manifest
+    assert captured["dense_manifest"] == dense_manifest
+    assert captured["index_name"] == "foiarchive-best-available-bm25-v1"
+    assert captured["dense_root"] == settings.best_available_dense_artifact_directory

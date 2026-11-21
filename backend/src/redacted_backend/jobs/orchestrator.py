@@ -41,6 +41,7 @@ class ModelGateway(Protocol):
         retrieval: RetrievalTrace,
         idempotency_key: str,
         *,
+        prediction_basis: PredictionBasis,
         before_generation: Callable[[], bool] | None = None,
     ) -> PredictionRecord: ...
 
@@ -70,11 +71,13 @@ class AnalysisOrchestrator:
         database: Database,
         model: ModelGateway,
         retrieval: RetrievalService | None,
+        prediction_basis: PredictionBasis | None = None,
         scientific: ScientificConfig | None = None,
     ) -> None:
         self.database = database
         self.model = model
         self.retrieval = retrieval
+        self.prediction_basis = prediction_basis
         self.scientific = scientific or ScientificConfig()
 
     def run(self, job_id: UUID | str) -> None:
@@ -99,6 +102,13 @@ class AnalysisOrchestrator:
             AnalysisStatus.CANCELLED,
         }:
             return
+        if (
+            self.prediction_basis is not None
+            and record.prediction_basis != self.prediction_basis
+        ):
+            raise RuntimeError(
+                "Analysis runtime prediction basis does not match the scheduled job"
+            )
 
         current = self._current(job_key)
         if current is None:
@@ -147,7 +157,12 @@ class AnalysisOrchestrator:
                 example,
                 trace,
                 f"{job_key}:prediction",
+                prediction_basis=record.prediction_basis,
                 before_generation=lambda: self._still_current(job_key),
+            )
+        if prediction.prediction_basis != record.prediction_basis:
+            raise RuntimeError(
+                "Model prediction basis does not match the scheduled job"
             )
         if not self._still_current(job_key):
             return
@@ -171,6 +186,10 @@ class AnalysisOrchestrator:
                 example,
                 f"{job_key}:prediction",
                 before_generation=lambda: self._still_current(job_key),
+            )
+        if prediction.prediction_basis != PredictionBasis.MODEL_ONLY_V1:
+            raise RuntimeError(
+                "Model prediction basis does not match the scheduled job"
             )
         if not self._still_current(job_key):
             return

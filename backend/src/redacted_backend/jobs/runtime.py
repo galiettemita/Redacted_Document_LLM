@@ -6,18 +6,30 @@ from pathlib import Path
 import numpy as np
 
 from redacted_backend.config import Settings
+from redacted_backend.corpus.best_available import (
+    BEST_AVAILABLE_BM25_INDEX_NAME,
+    BestAvailableCorpusManifest,
+)
 from redacted_backend.corpus.build_dense import FaissHnswIndex
 from redacted_backend.corpus.chunker import CorpusChunk
 from redacted_backend.corpus.manifest import CorpusManifest
 from redacted_backend.db.base import Database
 from redacted_backend.domain.analysis import PredictionBasis
+from redacted_backend.domain.readiness import (
+    verify_best_available_corpus_readiness,
+)
 from redacted_backend.jobs.generation_store import AnalysisGenerationStore
 from redacted_backend.jobs.orchestrator import AnalysisOrchestrator
 from redacted_backend.models.openai_gateway import OpenAIGateway, OpenAIHttpTransport
 from redacted_backend.retrieval.bm25 import Bm25Index, OpenSearchHttpTransport
 from redacted_backend.retrieval.dense import BgeEncoder, DenseIndex
+from redacted_backend.retrieval.dense_sharded import ShardedDenseIndex
 from redacted_backend.retrieval.service import RealisticRetrievalService
-from redacted_backend.retrieval.types import Bm25IndexManifest, DenseIndexManifest
+from redacted_backend.retrieval.types import (
+    Bm25IndexManifest,
+    DenseIndexManifest,
+    ShardedDenseIndexManifest,
+)
 from redacted_backend.scientific_config import ScientificConfig
 
 
@@ -49,12 +61,18 @@ def build_analysis_orchestrator(
             database=database,
             model=gateway,
             retrieval=None,
+            prediction_basis=prediction_basis,
             scientific=scientific,
         )
     if prediction_basis == PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1:
         if not settings.allow_best_available_calls:
             raise RuntimeError("Analysis worker best-available access is not approved")
-        raise RuntimeError("Analysis worker best-available runtime is not implemented")
+        return _build_best_available_orchestrator(
+            settings,
+            database=database,
+            gateway=gateway,
+            scientific=scientific,
+        )
     if not settings.allow_paper_exact_calls:
         raise RuntimeError("Analysis worker paper-exact access is not approved")
     if settings.opensearch_url is None:
@@ -99,6 +117,102 @@ def build_analysis_orchestrator(
             dense=dense,
             scientific=scientific,
         ),
+        prediction_basis=prediction_basis,
+        scientific=scientific,
+    )
+
+
+def _build_best_available_orchestrator(
+    settings: Settings,
+    *,
+    database: Database,
+    gateway: OpenAIGateway,
+    scientific: ScientificConfig,
+) -> AnalysisOrchestrator:
+    required_paths = {
+        "best-available corpus manifest": (
+            settings.best_available_corpus_manifest_path
+        ),
+        "best-available BM25 manifest": settings.best_available_bm25_manifest_path,
+        "best-available dense manifest": settings.best_available_dense_manifest_path,
+        "best-available dense artifact directory": (
+            settings.best_available_dense_artifact_directory
+        ),
+        "best-available recall queries": settings.best_available_recall_queries_path,
+    }
+    missing = [name for name, path in required_paths.items() if path is None]
+    if missing:
+        raise RuntimeError(f"Analysis worker is missing {', '.join(missing)}")
+    if settings.opensearch_url is None:
+        raise RuntimeError("Analysis worker OpenSearch is not configured")
+    corpus_path = settings.best_available_corpus_manifest_path
+    bm25_path = settings.best_available_bm25_manifest_path
+    dense_path = settings.best_available_dense_manifest_path
+    dense_root = settings.best_available_dense_artifact_directory
+    queries_path = settings.best_available_recall_queries_path
+    assert corpus_path is not None
+    assert bm25_path is not None
+    assert dense_path is not None
+    assert dense_root is not None
+    assert queries_path is not None
+
+    corpus = BestAvailableCorpusManifest.model_validate_json(
+        corpus_path.read_text(encoding="utf-8")
+    )
+    bm25_manifest = Bm25IndexManifest.model_validate_json(
+        bm25_path.read_text(encoding="utf-8")
+    )
+    dense_manifest = ShardedDenseIndexManifest.model_validate_json(
+        dense_path.read_text(encoding="utf-8")
+    )
+    manifest_readiness = verify_best_available_corpus_readiness(
+        corpus,
+        bm25_manifest,
+        dense_manifest,
+        scientific,
+    )
+    if not manifest_readiness.ready:
+        raise RuntimeError(manifest_readiness.detail)
+    try:
+        query_bytes = queries_path.read_bytes()
+        query_count = len(query_bytes.decode("utf-8").splitlines())
+    except (OSError, UnicodeError) as error:
+        raise RuntimeError("Dense recall query artifact is unavailable") from error
+    if (
+        hashlib.sha256(query_bytes).hexdigest()
+        != dense_manifest.recall_queries_sha256
+        or query_count != dense_manifest.recall_query_count
+    ):
+        raise RuntimeError("Dense recall query artifact mismatch")
+
+    transport = OpenSearchHttpTransport(settings.opensearch_url)
+    if transport.count(bm25_manifest.index_name) != bm25_manifest.chunk_count:
+        raise RuntimeError("BM25 live index count mismatch")
+    bm25 = Bm25Index(
+        transport,
+        scientific=scientific,
+        index_manifest=bm25_manifest,
+        corpus_manifest=corpus,
+        index_name=BEST_AVAILABLE_BM25_INDEX_NAME,
+    )
+    dense = ShardedDenseIndex(
+        root=dense_root,
+        manifest=dense_manifest,
+        encoder=BgeEncoder(scientific=scientific),
+        candidate_loader=FaissHnswIndex.load,
+        scientific=scientific,
+    )
+    bm25.search("worker readiness probe", limit=1, query_kind="context")
+    dense.search("worker readiness probe", limit=1, query_kind="context")
+    return AnalysisOrchestrator(
+        database=database,
+        model=gateway,
+        retrieval=RealisticRetrievalService(
+            bm25=bm25,
+            dense=dense,
+            scientific=scientific,
+        ),
+        prediction_basis=PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
         scientific=scientific,
     )
 

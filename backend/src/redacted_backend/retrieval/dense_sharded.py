@@ -5,6 +5,7 @@ import heapq
 import os
 import tempfile
 from collections.abc import Callable, Iterator, Sequence
+from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -323,6 +324,38 @@ def verify_sharded_dense_artifacts(
 ) -> None:
     for shard in manifest.shards:
         _verify_shard_files(root, shard, manifest.embedding_dimension)
+
+
+def verify_sharded_dense_artifacts_cached(
+    root: Path,
+    manifest: ShardedDenseIndexManifest,
+) -> None:
+    signatures: list[tuple[str, int, int]] = []
+    for shard in manifest.shards:
+        for name in (
+            "embeddings.f16",
+            "metadata.jsonl",
+            "metadata.offsets.u64",
+            "candidate.faiss",
+        ):
+            path = root / shard.path / name
+            stat = path.stat()
+            signatures.append((f"{shard.path}/{name}", stat.st_size, stat.st_mtime_ns))
+    _verify_sharded_dense_artifacts_cached(
+        str(root.resolve()),
+        manifest.model_dump_json(),
+        tuple(signatures),
+    )
+
+
+@lru_cache(maxsize=8)
+def _verify_sharded_dense_artifacts_cached(
+    root: str,
+    manifest_json: str,
+    _signatures: tuple[tuple[str, int, int], ...],
+) -> None:
+    manifest = ShardedDenseIndexManifest.model_validate_json(manifest_json)
+    verify_sharded_dense_artifacts(Path(root), manifest)
 
 
 def verify_dense_shard_artifacts(

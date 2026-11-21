@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import pytest
 from sqlalchemy import select
 
 from redacted_backend.db.models import AnalysisEvent, AnalysisJob, Passage
@@ -27,6 +28,7 @@ class RecordingGateway:
     def __init__(self, *, fail_prediction_once: bool = False) -> None:
         self.query_calls: list[str] = []
         self.prediction_calls: list[str] = []
+        self.prediction_bases: list[PredictionBasis] = []
         self.model_only_calls: list[str] = []
         self.fail_prediction_once = fail_prediction_once
 
@@ -59,11 +61,13 @@ class RecordingGateway:
         retrieval,
         idempotency_key: str,
         *,
+        prediction_basis: PredictionBasis,
         before_generation=None,
     ) -> PredictionRecord:
         if before_generation is not None and not before_generation():
             raise ModelGatewayError("analysis_cancelled", "job is no longer current")
         self.prediction_calls.append(idempotency_key)
+        self.prediction_bases.append(prediction_basis)
         if self.fail_prediction_once:
             self.fail_prediction_once = False
             raise TimeoutError("temporary provider timeout")
@@ -72,7 +76,7 @@ class RecordingGateway:
         ).hexdigest()
         return PredictionRecord(
             passage_id=example.passage_id,
-            prediction_basis=PredictionBasis.PAPER_EXACT_V1,
+            prediction_basis=prediction_basis,
             prediction="The missing passage identifies the officials and their planned meeting.",
             prompt_sha256="3" * 64,
             request_sha256="4" * 64,
@@ -357,23 +361,114 @@ def test_orchestrator_persists_each_stage_and_emits_one_real_prediction(
     assert prediction_event["prediction"].startswith("The missing passage")
     assert gateway.query_calls == [f"{job_id}:query"]
     assert gateway.prediction_calls == [f"{job_id}:prediction"]
+    assert gateway.prediction_bases == [PredictionBasis.PAPER_EXACT_V1]
     assert retrieval.calls == ["specific actors paris 1960 meeting"]
 
 
-def test_retry_after_prediction_timeout_reuses_query_and_retrieval_trace(
+def test_best_available_orchestrator_preserves_basis_through_prediction_event(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
     app, document, passage = create_test_app_and_passage(tmp_path)
     install_fake_preparation(monkeypatch, calls=[])
     _prepare(app, passage.id)
-    job_id = _schedule_ready(app, document.id, passage.id, passage.revision)
+    job_id = _schedule_ready(
+        app,
+        document.id,
+        passage.id,
+        passage.revision,
+        basis=PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
+    )
+    gateway = RecordingGateway()
+    retrieval = RecordingRetrieval()
+
+    AnalysisOrchestrator(
+        database=app.state.database,
+        model=gateway,
+        retrieval=retrieval,
+        prediction_basis=PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
+    ).run(job_id)
+
+    with app.state.database.session_factory() as session:
+        job = session.get(AnalysisJob, job_id)
+        events = session.scalars(
+            select(AnalysisEvent)
+            .where(AnalysisEvent.job_id == job_id)
+            .order_by(AnalysisEvent.sequence)
+        ).all()
+    assert job is not None
+    assert job.prediction_basis == "best_available_foiarchive_v1"
+    assert job.prediction_payload["prediction_basis"] == (
+        "best_available_foiarchive_v1"
+    )
+    assert events[-2].payload["prediction_basis"] == (
+        "best_available_foiarchive_v1"
+    )
+    assert gateway.prediction_bases == [
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1
+    ]
+    assert retrieval.calls == ["specific actors paris 1960 meeting"]
+
+
+def test_basis_bound_runtime_refuses_a_job_from_another_basis(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app, document, passage = create_test_app_and_passage(tmp_path)
+    install_fake_preparation(monkeypatch, calls=[])
+    _prepare(app, passage.id)
+    job_id = _schedule_ready(
+        app,
+        document.id,
+        passage.id,
+        passage.revision,
+        basis=PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
+    )
+    gateway = RecordingGateway()
+    retrieval = RecordingRetrieval()
+
+    with pytest.raises(RuntimeError, match="prediction basis"):
+        AnalysisOrchestrator(
+            database=app.state.database,
+            model=gateway,
+            retrieval=retrieval,
+            prediction_basis=PredictionBasis.PAPER_EXACT_V1,
+        ).run(job_id)
+
+    assert gateway.query_calls == []
+    assert retrieval.calls == []
+    assert gateway.prediction_calls == []
+
+
+@pytest.mark.parametrize(
+    "basis",
+    [
+        PredictionBasis.PAPER_EXACT_V1,
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
+    ],
+)
+def test_retry_after_prediction_timeout_reuses_query_trace_and_basis(
+    tmp_path: Path,
+    monkeypatch,
+    basis: PredictionBasis,
+) -> None:
+    app, document, passage = create_test_app_and_passage(tmp_path)
+    install_fake_preparation(monkeypatch, calls=[])
+    _prepare(app, passage.id)
+    job_id = _schedule_ready(
+        app,
+        document.id,
+        passage.id,
+        passage.revision,
+        basis=basis,
+    )
     gateway = RecordingGateway(fail_prediction_once=True)
     retrieval = RecordingRetrieval()
     orchestrator = AnalysisOrchestrator(
         database=app.state.database,
         model=gateway,
         retrieval=retrieval,
+        prediction_basis=basis,
     )
 
     try:
@@ -390,9 +485,11 @@ def test_retry_after_prediction_timeout_reuses_query_and_retrieval_trace(
         f"{job_id}:prediction",
         f"{job_id}:prediction",
     ]
+    assert gateway.prediction_bases == [basis, basis]
     with app.state.database.session_factory() as session:
         job = session.get(AnalysisJob, job_id)
     assert job is not None and job.status == "complete"
+    assert job.prediction_payload["prediction_basis"] == basis.value
 
 
 def test_revision_change_cancels_resumed_work_before_another_external_call(

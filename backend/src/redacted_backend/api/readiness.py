@@ -1,3 +1,4 @@
+import hashlib
 from collections.abc import Callable
 from typing import Protocol
 
@@ -9,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from redacted_backend.config import Settings
+from redacted_backend.corpus.best_available import BestAvailableCorpusManifest
 from redacted_backend.corpus.manifest import CorpusManifest
 from redacted_backend.db.base import Database
 from redacted_backend.domain.analysis import PredictionBasis
@@ -16,10 +18,18 @@ from redacted_backend.domain.readiness import (
     BasisReadiness,
     ComponentReadiness,
     ReadinessResponse,
+    verify_best_available_corpus_readiness,
     verify_corpus_readiness,
 )
 from redacted_backend.retrieval.bm25 import OpenSearchHttpTransport
-from redacted_backend.retrieval.types import Bm25IndexManifest, DenseIndexManifest
+from redacted_backend.retrieval.dense_sharded import (
+    verify_sharded_dense_artifacts_cached,
+)
+from redacted_backend.retrieval.types import (
+    Bm25IndexManifest,
+    DenseIndexManifest,
+    ShardedDenseIndexManifest,
+)
 from redacted_backend.scientific_config import ScientificConfig
 
 
@@ -42,12 +52,14 @@ def create_readiness_router(
         database_readiness = resolve_database_readiness(database)
         worker = resolve_worker_readiness(settings)
         corpus = resolve_corpus_readiness(settings)
+        best_available_corpus = resolve_best_available_corpus_readiness(settings)
         model = resolve_model_readiness(settings)
         prediction_bases = resolve_prediction_basis_readiness(
             settings,
             database=database_readiness,
             worker=worker,
             corpus=corpus,
+            best_available_corpus=best_available_corpus,
         )
         strongest = select_prediction_basis(prediction_bases)
         return ReadinessResponse(
@@ -83,6 +95,7 @@ def resolve_prediction_basis_readiness(
     database: ComponentReadiness,
     worker: ComponentReadiness,
     corpus: ComponentReadiness,
+    best_available_corpus: ComponentReadiness | None = None,
 ) -> dict[PredictionBasis, BasisReadiness]:
     model_only_operational, model_only_detail = _operational(
         ("database", database),
@@ -95,6 +108,16 @@ def resolve_prediction_basis_readiness(
         ("corpus", corpus),
         model_configured=settings.openai_api_key is not None,
     )
+    best_operational, best_detail = _operational(
+        ("database", database),
+        ("worker", worker),
+        (
+            "corpus",
+            best_available_corpus
+            or ComponentReadiness(ready=False, detail="not configured"),
+        ),
+        model_configured=settings.openai_api_key is not None,
+    )
     master = settings.allow_paid_model_calls
     return {
         PredictionBasis.MODEL_ONLY_V1: _basis_readiness(
@@ -102,11 +125,10 @@ def resolve_prediction_basis_readiness(
             approved=master and settings.allow_model_only_calls,
             unavailable_detail=model_only_detail,
         ),
-        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1: BasisReadiness(
-            operational=False,
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1: _basis_readiness(
+            operational=best_operational,
             approved=master and settings.allow_best_available_calls,
-            ready=False,
-            detail="best-available retrieval is not implemented",
+            unavailable_detail=best_detail,
         ),
         PredictionBasis.PAPER_EXACT_V1: _basis_readiness(
             operational=exact_operational,
@@ -259,6 +281,104 @@ def resolve_corpus_readiness(
     return ComponentReadiness(
         ready=True,
         detail="corpus and retrieval indexes operational",
+    )
+
+
+def resolve_best_available_corpus_readiness(
+    settings: Settings,
+    *,
+    index_counter: Callable[[str, str], int] | None = None,
+) -> ComponentReadiness:
+    required = (
+        settings.best_available_corpus_manifest_path,
+        settings.best_available_bm25_manifest_path,
+        settings.best_available_dense_manifest_path,
+        settings.best_available_dense_artifact_directory,
+        settings.best_available_recall_queries_path,
+    )
+    if any(path is None for path in required):
+        return ComponentReadiness(ready=False, detail="not configured")
+    corpus_path = settings.best_available_corpus_manifest_path
+    bm25_path = settings.best_available_bm25_manifest_path
+    dense_path = settings.best_available_dense_manifest_path
+    dense_root = settings.best_available_dense_artifact_directory
+    queries_path = settings.best_available_recall_queries_path
+    assert corpus_path is not None
+    assert bm25_path is not None
+    assert dense_path is not None
+    assert dense_root is not None
+    assert queries_path is not None
+    if not all(path.is_file() for path in (corpus_path, bm25_path, dense_path)):
+        return ComponentReadiness(ready=False, detail="manifest not verified")
+    try:
+        corpus = BestAvailableCorpusManifest.model_validate_json(
+            corpus_path.read_text(encoding="utf-8")
+        )
+        index = Bm25IndexManifest.model_validate_json(
+            bm25_path.read_text(encoding="utf-8")
+        )
+        dense = ShardedDenseIndexManifest.model_validate_json(
+            dense_path.read_text(encoding="utf-8")
+        )
+    except (OSError, ValidationError, ValueError):
+        return ComponentReadiness(ready=False, detail="manifest invalid")
+    manifest_readiness = verify_best_available_corpus_readiness(
+        corpus,
+        index,
+        dense,
+        ScientificConfig(),
+    )
+    if not manifest_readiness.ready:
+        return manifest_readiness
+    if not queries_path.is_file():
+        return ComponentReadiness(
+            ready=False,
+            detail="dense recall queries not available",
+        )
+    try:
+        query_bytes = queries_path.read_bytes()
+        query_count = len(query_bytes.decode("utf-8").splitlines())
+    except (OSError, UnicodeError):
+        return ComponentReadiness(
+            ready=False,
+            detail="dense recall queries not available",
+        )
+    if (
+        hashlib.sha256(query_bytes).hexdigest() != dense.recall_queries_sha256
+        or query_count != dense.recall_query_count
+    ):
+        return ComponentReadiness(
+            ready=False,
+            detail="dense recall query artifact mismatch",
+        )
+    try:
+        verify_sharded_dense_artifacts_cached(dense_root, dense)
+    except (OSError, ValueError):
+        return ComponentReadiness(
+            ready=False,
+            detail="dense shard artifacts invalid",
+        )
+    if settings.opensearch_url is None:
+        return ComponentReadiness(
+            ready=False,
+            detail="retrieval service not configured",
+        )
+    counter = index_counter or _count_opensearch_chunks
+    try:
+        live_count = counter(settings.opensearch_url, index.index_name)
+    except Exception:
+        return ComponentReadiness(
+            ready=False,
+            detail="retrieval index probe failed",
+        )
+    if live_count != index.chunk_count:
+        return ComponentReadiness(
+            ready=False,
+            detail="BM25 live index count mismatch",
+        )
+    return ComponentReadiness(
+        ready=True,
+        detail="best-available corpus and retrieval indexes operational",
     )
 
 

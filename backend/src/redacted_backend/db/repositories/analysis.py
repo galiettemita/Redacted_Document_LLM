@@ -153,6 +153,10 @@ class AnalysisJobRepository:
         model_name: str,
     ) -> AnalysisJobRecord:
         model = self._required_for_update(job_id)
+        if payload.get("prediction_basis") != model.prediction_basis:
+            raise AnalysisConflictError(
+                "Prediction payload basis does not match the scheduled job"
+            )
         self._save_immutable_payload(model, "prediction_payload", payload)
         if model.status == AnalysisStatus.COMPLETE.value:
             return _job_record(model)

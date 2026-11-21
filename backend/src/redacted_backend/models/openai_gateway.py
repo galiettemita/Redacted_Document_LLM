@@ -194,8 +194,14 @@ class OpenAIGateway:
         retrieval: RetrievalTrace,
         idempotency_key: str,
         *,
+        prediction_basis: PredictionBasis,
         before_generation: Callable[[], bool] | None = None,
     ) -> PredictionRecord:
+        if prediction_basis == PredictionBasis.MODEL_ONLY_V1:
+            raise ModelGatewayError(
+                "invalid_prediction_basis",
+                "Retrieval-assisted generation requires a retrieval basis",
+            )
         prompt = render_prediction_prompt(example, retrieval)
         request = self._request(prompt)
         request_hash = _canonical_hash(request)
@@ -208,6 +214,11 @@ class OpenAIGateway:
             PredictionRecord,
         )
         if existing is not None:
+            if existing.prediction_basis != prediction_basis:
+                raise ModelGatewayError(
+                    "idempotency_conflict",
+                    "Stored prediction belongs to a different prediction basis",
+                )
             return existing
         input_tokens, response, output, usage = self._execute(
             request,
@@ -222,7 +233,7 @@ class OpenAIGateway:
             raise ModelGatewayError("empty_output", "Provider returned no prediction")
         result = PredictionRecord(
             passage_id=example.passage_id,
-            prediction_basis=PredictionBasis.PAPER_EXACT_V1,
+            prediction_basis=prediction_basis,
             prediction=prediction,
             prompt_sha256=prompt.sha256,
             request_sha256=request_hash,

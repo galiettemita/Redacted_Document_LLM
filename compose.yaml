@@ -47,6 +47,11 @@ services:
       REDACTED_BM25_MANIFEST_PATH: /artifacts/corpus/bm25-manifest.json
       REDACTED_DENSE_MANIFEST_PATH: /artifacts/corpus/dense-manifest.json
       REDACTED_DENSE_ARTIFACT_DIRECTORY: /artifacts/corpus/dense
+      REDACTED_BEST_AVAILABLE_CORPUS_MANIFEST_PATH: /artifacts/corpus/best-available/corpus-manifest.json
+      REDACTED_BEST_AVAILABLE_BM25_MANIFEST_PATH: /artifacts/corpus/best-available/bm25-manifest.json
+      REDACTED_BEST_AVAILABLE_DENSE_MANIFEST_PATH: /artifacts/corpus/best-available/dense/manifest.json
+      REDACTED_BEST_AVAILABLE_DENSE_ARTIFACT_DIRECTORY: /artifacts/corpus/best-available/dense
+      REDACTED_BEST_AVAILABLE_RECALL_QUERIES_PATH: /artifacts/corpus/best-available/dense/recall-queries.txt
       REDACTED_OPENSEARCH_URL: http://opensearch:9200
       REDACTED_OPENAI_API_KEY: ${REDACTED_OPENAI_API_KEY:-}
       REDACTED_ALLOW_PAID_MODEL_CALLS: ${REDACTED_ALLOW_PAID_MODEL_CALLS:-false}
@@ -86,6 +91,11 @@ services:
       REDACTED_BM25_MANIFEST_PATH: /artifacts/corpus/bm25-manifest.json
       REDACTED_DENSE_MANIFEST_PATH: /artifacts/corpus/dense-manifest.json
       REDACTED_DENSE_ARTIFACT_DIRECTORY: /artifacts/corpus/dense
+      REDACTED_BEST_AVAILABLE_CORPUS_MANIFEST_PATH: /artifacts/corpus/best-available/corpus-manifest.json
+      REDACTED_BEST_AVAILABLE_BM25_MANIFEST_PATH: /artifacts/corpus/best-available/bm25-manifest.json
+      REDACTED_BEST_AVAILABLE_DENSE_MANIFEST_PATH: /artifacts/corpus/best-available/dense/manifest.json
+      REDACTED_BEST_AVAILABLE_DENSE_ARTIFACT_DIRECTORY: /artifacts/corpus/best-available/dense
+      REDACTED_BEST_AVAILABLE_RECALL_QUERIES_PATH: /artifacts/corpus/best-available/dense/recall-queries.txt
       REDACTED_OPENSEARCH_URL: http://opensearch:9200
       REDACTED_OPENAI_API_KEY: ${REDACTED_OPENAI_API_KEY:-}
       REDACTED_ALLOW_PAID_MODEL_CALLS: ${REDACTED_ALLOW_PAID_MODEL_CALLS:-false}
