@@ -11,6 +11,7 @@ import redacted_backend.api.analysis as analysis_api
 import redacted_backend.domain.analysis as analysis_domain
 from redacted_backend.db.models import AnalysisEvent, AnalysisJob, Document
 from redacted_backend.db.repositories.analysis import AnalysisJobRepository
+from redacted_backend.domain.readiness import ComponentReadiness
 from tests.api.test_context import (
     create_test_app_and_passage,
     install_fake_preparation,
@@ -61,9 +62,8 @@ def test_analysis_request_persists_a_truthful_blocked_job_and_is_idempotent(
     assert job["passage_id"] == str(passage.id)
     assert job["document_id"] == str(document.id)
     assert job["passage_revision"] == passage.revision
-    assert job["prediction_basis"] == "paper_exact_v1"
+    assert job["prediction_basis"] == "model_only_v1"
     assert {blocker["component"] for blocker in job["blockers"]} == {
-        "corpus",
         "model",
         "worker",
     }
@@ -73,7 +73,7 @@ def test_analysis_request_persists_a_truthful_blocked_job_and_is_idempotent(
         assert session.scalar(select(func.count()).select_from(AnalysisEvent)) == 1
         event = session.scalar(select(AnalysisEvent))
         assert event is not None
-        assert event.payload["prediction_basis"] == "paper_exact_v1"
+        assert event.payload["prediction_basis"] == "model_only_v1"
 
 
 def test_analysis_repository_keeps_the_original_basis_on_same_key_replay(
@@ -105,6 +105,18 @@ def test_analysis_repository_keeps_the_original_basis_on_same_key_replay(
     assert first.id == replay.id
     assert first.prediction_basis == prediction_basis.MODEL_ONLY_V1
     assert replay.prediction_basis == prediction_basis.MODEL_ONLY_V1
+    assert first.stage == analysis_domain.AnalysisStage.PREDICTION
+
+    with app.state.database.session_factory() as session, session.begin():
+        exact = AnalysisJobRepository(session).schedule(
+            passage_id=passage.id,
+            document_id=document.id,
+            passage_revision=passage.revision,
+            idempotency_key="exact-basis",
+            blockers=[],
+            prediction_basis=prediction_basis.PAPER_EXACT_V1,
+        )
+    assert exact.stage == analysis_domain.AnalysisStage.QUERY
 
 
 def test_analysis_request_requires_the_exact_prepared_passage_revision(
@@ -217,10 +229,32 @@ def test_ready_analysis_is_queued_and_dispatched_to_the_durable_worker(
         def dispatch(self, job_id: UUID) -> None:
             dispatched.append(job_id)
 
-    monkeypatch.setattr(analysis_api, "_analysis_blockers", lambda _settings: [])
+    monkeypatch.setattr(
+        analysis_api,
+        "resolve_worker_readiness",
+        lambda _settings: ComponentReadiness(
+            ready=True,
+            detail="heartbeat current",
+        ),
+    )
+    monkeypatch.setattr(
+        analysis_api,
+        "resolve_corpus_readiness",
+        lambda _settings: ComponentReadiness(
+            ready=True,
+            detail="corpus and retrieval indexes operational",
+        ),
+    )
     app, _document, passage = create_test_app_and_passage(
         tmp_path,
         analysis_dispatcher=RecordingDispatcher(),
+        settings_overrides={
+            "redis_url": "redis://worker.test/0",
+            "openai_api_key": "secret",
+            "allow_paid_model_calls": True,
+            "allow_model_only_calls": True,
+            "allow_paper_exact_calls": False,
+        },
     )
     install_fake_preparation(monkeypatch, calls=[])
     assert (
@@ -242,4 +276,6 @@ def test_ready_analysis_is_queued_and_dispatched_to_the_durable_worker(
 
     assert response.status_code == 202
     assert response.json()["status"] == "queued"
+    assert response.json()["stage"] == "prediction"
+    assert response.json()["prediction_basis"] == "model_only_v1"
     assert dispatched == [UUID(response.json()["id"])]

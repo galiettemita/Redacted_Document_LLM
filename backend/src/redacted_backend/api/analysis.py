@@ -11,7 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from redacted_backend.api.readiness import (
     resolve_corpus_readiness,
+    resolve_prediction_basis_readiness,
     resolve_worker_readiness,
+    select_prediction_basis,
 )
 from redacted_backend.config import Settings
 from redacted_backend.db.base import Database
@@ -27,6 +29,7 @@ from redacted_backend.domain.analysis import (
     AnalysisJobRecord,
     PredictionBasis,
 )
+from redacted_backend.domain.readiness import ComponentReadiness
 from redacted_backend.jobs.queue import AnalysisDispatcher
 
 
@@ -86,13 +89,14 @@ def create_analysis_router(
                             "message": "Prepare visible-only context before analysis",
                         },
                     )
+                prediction_basis, blockers = _analysis_decision(settings)
                 job = AnalysisJobRepository(session).schedule(
                     passage_id=passage.id,
                     document_id=passage.document_id,
                     passage_revision=passage.revision,
                     idempotency_key=idempotency_key,
-                    blockers=_analysis_blockers(settings),
-                    prediction_basis=PredictionBasis.PAPER_EXACT_V1,
+                    blockers=blockers,
+                    prediction_basis=prediction_basis,
                 )
             if job.status == "queued":
                 if dispatcher is None:
@@ -162,11 +166,24 @@ def create_analysis_router(
     return router
 
 
-def _analysis_blockers(settings: Settings) -> list[AnalysisBlocker]:
-    blockers: list[AnalysisBlocker] = []
+def _analysis_decision(
+    settings: Settings,
+) -> tuple[PredictionBasis, list[AnalysisBlocker]]:
+    database = ComponentReadiness(ready=True, detail="ready")
+    worker = resolve_worker_readiness(settings)
     corpus = resolve_corpus_readiness(settings)
-    if not corpus.ready:
-        blockers.append(AnalysisBlocker(component="corpus", detail=corpus.detail))
+    bases = resolve_prediction_basis_readiness(
+        settings,
+        database=database,
+        worker=worker,
+        corpus=corpus,
+    )
+    selected = select_prediction_basis(bases)
+    if selected is not None:
+        return selected, []
+
+    basis = PredictionBasis.MODEL_ONLY_V1
+    blockers: list[AnalysisBlocker] = []
     if settings.openai_api_key is None:
         blockers.append(
             AnalysisBlocker(
@@ -181,10 +198,16 @@ def _analysis_blockers(settings: Settings) -> list[AnalysisBlocker]:
                 detail="paid model calls are not approved",
             )
         )
-    worker = resolve_worker_readiness(settings)
+    elif not settings.allow_model_only_calls:
+        blockers.append(
+            AnalysisBlocker(
+                component="model_only",
+                detail="model-only calls are not approved",
+            )
+        )
     if not worker.ready:
         blockers.append(AnalysisBlocker(component="worker", detail=worker.detail))
-    return blockers
+    return basis, blockers
 
 
 def _event_stream(

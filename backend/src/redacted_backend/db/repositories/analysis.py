@@ -52,7 +52,13 @@ class AnalysisJobRepository:
             return _job_record(existing)
 
         status = AnalysisStatus.BLOCKED if blockers else AnalysisStatus.QUEUED
-        stage = AnalysisStage.READINESS if blockers else AnalysisStage.QUERY
+        stage = (
+            AnalysisStage.READINESS
+            if blockers
+            else AnalysisStage.PREDICTION
+            if prediction_basis == PredictionBasis.MODEL_ONLY_V1
+            else AnalysisStage.QUERY
+        )
         now = datetime.now(UTC)
         model = AnalysisJob(
             id=str(uuid4()),

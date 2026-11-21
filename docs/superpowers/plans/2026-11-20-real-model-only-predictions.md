@@ -104,12 +104,12 @@
 - Produces: `resolve_prediction_basis_readiness(...)` and `select_prediction_basis(...)` with priority exact, best-available, then model-only.
 - Produces: when no basis is ready, a terminal blocked job records `model_only_v1` plus its blockers; it is a candidate for the next intentional run, never an automatically upgradable job.
 
-- [ ] **Step 1: Write failing readiness tests** proving model-only is operational without corpus artifacts, requires database/worker/key/master approval/model-only approval, reports operational separately from approval, leaves unimplemented best-available unready, and does not make `paper_exact_v1` ready without the existing exact corpus gate.
-- [ ] **Step 2: Write failing scheduling tests** proving selection and persistence occur in the scheduling transaction, model-only starts at `prediction`, retrieval bases start at `query`, no ready basis creates a durable blocked job, and corpus completion cannot switch an existing or unapproved job to a two-call basis.
-- [ ] **Step 3: Run `cd backend && uv run pytest tests/test_readiness.py tests/api/test_analysis.py -v`; expect failures for the new readiness contract.**
-- [ ] **Step 4: Implement settings, additive readiness response, deterministic selector, basis-aware blockers, transactional persistence, and initial-stage selection while preserving current component fields for compatibility.**
-- [ ] **Step 5: Run the focused tests; expect PASS.**
-- [ ] **Step 6: Commit with `feat: select approved prediction basis` and push.**
+- [x] **Step 1: Write failing readiness tests** proving model-only is operational without corpus artifacts, requires database/worker/key/master approval/model-only approval, reports operational separately from approval, leaves unimplemented best-available unready, and does not make `paper_exact_v1` ready without the existing exact corpus gate.
+- [x] **Step 2: Write failing scheduling tests** proving selection and persistence occur in the scheduling transaction, model-only starts at `prediction`, retrieval bases start at `query`, no ready basis creates a durable blocked job, and corpus completion cannot switch an existing or unapproved job to a two-call basis.
+- [x] **Step 3: Run `cd backend && uv run pytest tests/test_readiness.py tests/api/test_analysis.py -v`; expect failures for the new readiness contract.**
+- [x] **Step 4: Implement settings, additive readiness response, deterministic selector, basis-aware blockers, transactional persistence, and initial-stage selection while preserving current component fields for compatibility.**
+- [x] **Step 5: Run the focused tests; expect PASS.**
+- [x] **Step 6: Commit with `feat: select approved prediction basis` and push.**
 
 ### Task 4: Execute model-only jobs without constructing retrieval
 

@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     opensearch_url: str | None = None
     openai_api_key: SecretStr | None = None
     allow_paid_model_calls: bool = False
+    allow_model_only_calls: bool = False
+    allow_best_available_calls: bool = False
+    allow_paper_exact_calls: bool = False
     worker_heartbeat_key: str = "redacted:analysis-worker:heartbeat"
     worker_heartbeat_ttl_seconds: int = 30
     document_storage_root: Path = Path("/var/lib/redacted/documents")

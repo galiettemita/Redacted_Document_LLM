@@ -11,7 +11,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from redacted_backend.config import Settings
 from redacted_backend.corpus.manifest import CorpusManifest
 from redacted_backend.db.base import Database
+from redacted_backend.domain.analysis import PredictionBasis
 from redacted_backend.domain.readiness import (
+    BasisReadiness,
     ComponentReadiness,
     ReadinessResponse,
     verify_corpus_readiness,
@@ -40,30 +42,124 @@ def create_readiness_router(
         database_readiness = resolve_database_readiness(database)
         worker = resolve_worker_readiness(settings)
         corpus = resolve_corpus_readiness(settings)
-        model = ComponentReadiness(
-            ready=(
-                settings.openai_api_key is not None and settings.allow_paid_model_calls
-            ),
-            detail=(
-                "configured and paid calls approved"
-                if settings.openai_api_key is not None
-                and settings.allow_paid_model_calls
-                else "configured; paid calls not approved"
-                if settings.openai_api_key is not None
-                else "not configured"
-            ),
+        model = resolve_model_readiness(settings)
+        prediction_bases = resolve_prediction_basis_readiness(
+            settings,
+            database=database_readiness,
+            worker=worker,
+            corpus=corpus,
         )
-        components = (database_readiness, worker, corpus, model)
+        strongest = select_prediction_basis(prediction_bases)
         return ReadinessResponse(
             http=ComponentReadiness(ready=True, detail="ready"),
             database=database_readiness,
             worker=worker,
             corpus=corpus,
             model=model,
-            prediction_ready=all(component.ready for component in components),
+            prediction_ready=strongest is not None,
+            prediction_bases=prediction_bases,
+            strongest_ready_basis=strongest,
         )
 
     return router
+
+
+def resolve_model_readiness(settings: Settings) -> ComponentReadiness:
+    return ComponentReadiness(
+        ready=settings.openai_api_key is not None and settings.allow_paid_model_calls,
+        detail=(
+            "configured and paid calls approved"
+            if settings.openai_api_key is not None and settings.allow_paid_model_calls
+            else "configured; paid calls not approved"
+            if settings.openai_api_key is not None
+            else "not configured"
+        ),
+    )
+
+
+def resolve_prediction_basis_readiness(
+    settings: Settings,
+    *,
+    database: ComponentReadiness,
+    worker: ComponentReadiness,
+    corpus: ComponentReadiness,
+) -> dict[PredictionBasis, BasisReadiness]:
+    model_only_operational, model_only_detail = _operational(
+        ("database", database),
+        ("worker", worker),
+        model_configured=settings.openai_api_key is not None,
+    )
+    exact_operational, exact_detail = _operational(
+        ("database", database),
+        ("worker", worker),
+        ("corpus", corpus),
+        model_configured=settings.openai_api_key is not None,
+    )
+    master = settings.allow_paid_model_calls
+    return {
+        PredictionBasis.MODEL_ONLY_V1: _basis_readiness(
+            operational=model_only_operational,
+            approved=master and settings.allow_model_only_calls,
+            unavailable_detail=model_only_detail,
+        ),
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1: BasisReadiness(
+            operational=False,
+            approved=master and settings.allow_best_available_calls,
+            ready=False,
+            detail="best-available retrieval is not implemented",
+        ),
+        PredictionBasis.PAPER_EXACT_V1: _basis_readiness(
+            operational=exact_operational,
+            approved=master and settings.allow_paper_exact_calls,
+            unavailable_detail=exact_detail,
+        ),
+    }
+
+
+def select_prediction_basis(
+    readiness: dict[PredictionBasis, BasisReadiness],
+) -> PredictionBasis | None:
+    for basis in (
+        PredictionBasis.PAPER_EXACT_V1,
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
+        PredictionBasis.MODEL_ONLY_V1,
+    ):
+        if readiness[basis].ready:
+            return basis
+    return None
+
+
+def _operational(
+    *components: tuple[str, ComponentReadiness],
+    model_configured: bool,
+) -> tuple[bool, str]:
+    for name, component in components:
+        if not component.ready:
+            return False, f"{name}: {component.detail}"
+    if not model_configured:
+        return False, "model: not configured"
+    return True, "operational"
+
+
+def _basis_readiness(
+    *,
+    operational: bool,
+    approved: bool,
+    unavailable_detail: str,
+) -> BasisReadiness:
+    ready = operational and approved
+    return BasisReadiness(
+        operational=operational,
+        approved=approved,
+        ready=ready,
+        detail=(
+            "operational and approved"
+            if ready
+            else "operational; spending not approved"
+            if operational
+            else unavailable_detail
+        ),
+    )
 
 
 def resolve_worker_readiness(

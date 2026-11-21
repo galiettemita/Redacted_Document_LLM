@@ -1,6 +1,7 @@
 from pydantic import BaseModel, ConfigDict
 
 from redacted_backend.corpus.manifest import CorpusManifest
+from redacted_backend.domain.analysis import PredictionBasis
 from redacted_backend.retrieval.bm25 import index_definition_hash
 from redacted_backend.retrieval.types import Bm25IndexManifest, DenseIndexManifest
 from redacted_backend.scientific_config import ScientificConfig
@@ -9,6 +10,15 @@ from redacted_backend.scientific_config import ScientificConfig
 class ComponentReadiness(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    ready: bool
+    detail: str
+
+
+class BasisReadiness(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    operational: bool
+    approved: bool
     ready: bool
     detail: str
 
@@ -22,6 +32,8 @@ class ReadinessResponse(BaseModel):
     corpus: ComponentReadiness
     model: ComponentReadiness
     prediction_ready: bool
+    prediction_bases: dict[PredictionBasis, BasisReadiness]
+    strongest_ready_basis: PredictionBasis | None
 
 
 def verify_corpus_readiness(

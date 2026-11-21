@@ -48,11 +48,13 @@ async def request(app, method: str, path: str, **kwargs):
 
 
 def create_test_app_and_passage(tmp_path: Path, **app_kwargs):
+    settings_overrides = app_kwargs.pop("settings_overrides", {})
     app = create_app(
         Settings(
             database_url=f"sqlite+pysqlite:///{tmp_path / 'context.sqlite3'}",
             document_storage_root=tmp_path / "stored-documents",
             opensearch_url="http://127.0.0.1:1",
+            **settings_overrides,
         ),
         **app_kwargs,
     )

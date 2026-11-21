@@ -4,6 +4,7 @@ from pathlib import Path
 
 from httpx import ASGITransport, AsyncClient
 
+import redacted_backend.api.readiness as readiness_api
 from redacted_backend.api.readiness import (
     resolve_corpus_readiness,
     resolve_worker_readiness,
@@ -11,6 +12,8 @@ from redacted_backend.api.readiness import (
 from redacted_backend.config import Settings
 from redacted_backend.corpus.manifest import CorpusManifest
 from redacted_backend.domain.readiness import verify_corpus_readiness
+from redacted_backend.domain.analysis import PredictionBasis
+from redacted_backend.domain.readiness import ComponentReadiness
 from redacted_backend.main import create_app
 from redacted_backend.retrieval.bm25 import index_definition_hash
 from redacted_backend.retrieval.types import Bm25IndexManifest, DenseIndexManifest
@@ -47,6 +50,14 @@ def test_readiness_never_equates_http_health_with_prediction_readiness() -> None
         "corpus",
         "model",
         "prediction_ready",
+        "prediction_bases",
+        "strongest_ready_basis",
+    }
+    assert body["strongest_ready_basis"] is None
+    assert set(body["prediction_bases"]) == {
+        "model_only_v1",
+        "best_available_foiarchive_v1",
+        "paper_exact_v1",
     }
 
 
@@ -137,6 +148,85 @@ def test_model_readiness_requires_access_and_explicit_paid_call_approval() -> No
 
     empty = asyncio.run(read(Settings(openai_api_key="", allow_paid_model_calls=True)))
     assert empty["model"] == {"ready": False, "detail": "not configured"}
+
+
+def test_model_only_basis_is_operational_without_corpus_but_separately_approved() -> None:
+    resolve = getattr(readiness_api, "resolve_prediction_basis_readiness", None)
+    select = getattr(readiness_api, "select_prediction_basis", None)
+    assert resolve is not None
+    assert select is not None
+    ready = ComponentReadiness(ready=True, detail="ready")
+    corpus_unavailable = ComponentReadiness(ready=False, detail="not configured")
+    settings = Settings(
+        openai_api_key="secret",
+        allow_paid_model_calls=True,
+        allow_model_only_calls=True,
+        allow_best_available_calls=True,
+        allow_paper_exact_calls=True,
+    )
+
+    bases = resolve(
+        settings,
+        database=ready,
+        worker=ready,
+        corpus=corpus_unavailable,
+    )
+
+    assert bases[PredictionBasis.MODEL_ONLY_V1].model_dump() == {
+        "operational": True,
+        "approved": True,
+        "ready": True,
+        "detail": "operational and approved",
+    }
+    assert bases[PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1].model_dump() == {
+        "operational": False,
+        "approved": True,
+        "ready": False,
+        "detail": "best-available retrieval is not implemented",
+    }
+    assert bases[PredictionBasis.PAPER_EXACT_V1].model_dump() == {
+        "operational": False,
+        "approved": True,
+        "ready": False,
+        "detail": "corpus: not configured",
+    }
+    assert select(bases) == PredictionBasis.MODEL_ONLY_V1
+
+
+def test_model_only_basis_requires_master_and_its_own_spending_approval() -> None:
+    resolve = getattr(readiness_api, "resolve_prediction_basis_readiness", None)
+    assert resolve is not None
+    ready = ComponentReadiness(ready=True, detail="ready")
+    corpus_unavailable = ComponentReadiness(ready=False, detail="not configured")
+
+    per_basis_unapproved = resolve(
+        Settings(
+            openai_api_key="secret",
+            allow_paid_model_calls=True,
+            allow_model_only_calls=False,
+        ),
+        database=ready,
+        worker=ready,
+        corpus=corpus_unavailable,
+    )[PredictionBasis.MODEL_ONLY_V1]
+    master_unapproved = resolve(
+        Settings(
+            openai_api_key="secret",
+            allow_paid_model_calls=False,
+            allow_model_only_calls=True,
+        ),
+        database=ready,
+        worker=ready,
+        corpus=corpus_unavailable,
+    )[PredictionBasis.MODEL_ONLY_V1]
+
+    assert per_basis_unapproved.model_dump() == {
+        "operational": True,
+        "approved": False,
+        "ready": False,
+        "detail": "operational; spending not approved",
+    }
+    assert master_unapproved == per_basis_unapproved
 
 
 def test_corpus_readiness_requires_dense_artifact_files(
