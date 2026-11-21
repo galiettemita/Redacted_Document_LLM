@@ -93,7 +93,7 @@
     - [x] Validate one-line 30-word punctuation-free queries and fail explicitly on empty, refused, incomplete, rate-limited, or invalid output.
     - [x] Count the exact provider request before generation and reject an oversized prompt without truncating evidence.
     - [x] Preserve passage ID, trace/prompt/request hashes, provider IDs, usage, cost, pricing version, and idempotent result reuse.
-    - [ ] Obtain an exact real-passage token count and ask for explicit spending approval only after complete evidence exists.
+    - [ ] For the first retrieval-assisted paper-method call, obtain an exact real-passage token count and ask for explicit spending approval only after complete evidence exists.
   - [ ] Task 11: Run revision-bound analysis jobs and stream the first real linked prediction.
     - [x] Task 11A: Connect the permanent, no-spend prediction-readiness slice to the website.
       - [x] Persist revision-bound analysis jobs and ordered document events in migration `0006_analysis_jobs`.
@@ -111,10 +111,10 @@
     - [x] Add a live Redis worker heartbeat, fail-closed readiness probe, bounded retry policy, and PostgreSQL duplicate-execution lock.
     - [x] Persist query and prediction provider results at the job boundary so retries resume from the last durable stage.
     - [x] Connect replayable SSE prediction events to real passage-linked sidebar cards and filter out events from older runs.
-    - [x] Add **Predict passage/all passages** to the uploaded-document frontend and label provider output **Model prediction**.
+    - [x] Add **Predict passage/all passages** to the uploaded-document frontend and label provider output with its immutable prediction basis.
     - [x] Preserve recorded token usage and estimated cost in service/backend records without exposing implementation metrics in the customer prediction cards.
     - [x] Verify the rebuilt loopback API through real upload, two-passage detection, all-context preparation, blocked scheduling, ordered SSE, and cleanup without a paid call.
-    - [ ] After complete corpus evidence exists, show exact token cost and obtain explicit approval before the first paid model call.
+    - [ ] After complete corpus evidence exists, show exact token cost and obtain explicit approval before the first retrieval-assisted paper-method call.
   - [x] Task 12A: Correct automatic multi-line mask geometry and passage-length estimation.
     - [x] Split connected stepped black regions into exact line-level rectangles so visible words remain visible.
     - [x] Estimate wrapped-passage length from visible line pitch instead of treating a tall block as one oversized text line.
@@ -134,7 +134,7 @@
     - [x] Cover transport, state transition, confirmation, overlay removal, and context rebuilding with frontend tests.
   - [x] Task 13A: Isolate simulation and harden the real prediction path.
     - [x] Remove fictional data and mock services from the uploaded-document prediction path.
-    - [x] Label every reachable provider result **Model prediction**.
+    - [x] Label every reachable provider result with its honest model-only, archive-assisted, or paper-method basis.
     - [x] Enforce non-overridable 24-hour/PDF resource ceilings in runtime configuration.
     - [x] Reject access at expiry, drain every cleanup batch, retry storage failures durably, clear derived sensitive text, record deletion reasons, and preserve shared bytes until their final live reference expires.
     - [x] Coordinate upload/unlink decisions across API processes with a PostgreSQL advisory lock.
@@ -152,9 +152,9 @@
     - [x] Trace the worker boot failure to eager real-runtime construction before heartbeat startup.
     - [x] Recheck the official MCP, PostgREST API, and frozen Hugging Face artifact; record that the live MCP corpus call still surfaces the API 502 and the frozen 11-collection snapshot predates the separate `cables` collection.
     - [x] Design an always-on worker that lazily constructs only the real orchestrator and never falls back to a mock runtime.
-    - [x] Add a thread-safe runtime provider that caches one successful real orchestrator, retries failed initialization, and exposes no secret-bearing error text.
+    - [x] Add a thread-safe runtime provider that caches successful real orchestrators independently by basis, retries failed initialization, and exposes no secret-bearing error text.
     - [x] Boot the real task module with PostgreSQL and Redis alone, retry runtime initialization, and durably sanitize final initialization failures.
-    - [x] Keep prediction dispatch closed until dense artifacts exist and the live OpenSearch index count matches its verified manifest.
+    - [x] Keep retrieval-basis dispatch closed until dense artifacts exist and the live OpenSearch index count matches its verified manifest; keep model-only separately gated.
     - [x] Set the design policy that fixed free-space estimates are advisory while source completeness, checksums, and coverage remain mandatory.
     - [x] Implement and verify the lazy runtime provider, durable initialization failure, default worker lifecycle, and operational retrieval gates.
     - [x] Prove the loopback worker heartbeat remains live with corpus/model gates closed and no retrieval or model request.
@@ -168,6 +168,13 @@
     - [x] Draft and builder-check the model-only, best-available FOIArchive, and future exact-paper prediction design.
     - [x] Obtain explicit approval for the staged real-predictions design.
     - [x] Write the test-first implementation plan for the first real model-only production stage.
-    - [ ] Build the approved model-only stage with tests.
+    - [x] Build the approved model-only stage with tests.
+      - [x] Persist an immutable basis on jobs, prediction payloads, and ordered events with a reversible migration.
+      - [x] Freeze Andrew's Appendix F closed-book prompt and execute exactly one model-only generation without query or retrieval construction.
+      - [x] Select only separately approved operational bases and keep every retry on its originally scheduled basis.
+      - [x] Require and validate the basis at the browser SSE boundary, with concise labels in both real result views.
+      - [x] Keep the fictional demo unchanged and every invented result labelled **Simulated prediction**.
+      - [x] Pass the full backend/frontend suites, migration round-trip, production build, and fake-transport upload-to-SSE loopback with zero retrieval.
+      - [x] Pass the master and per-basis approval variables to both Compose services while defaulting every approval to `false`.
     - [ ] Write and execute the separate best-available FOIArchive import/index plan.
-    - [ ] Show the exact one-passage cost and obtain explicit approval before the first paid model call.
+    - [ ] With a real key configured and generation still disabled, count the exact one-passage request, show expected and maximum cost, and obtain explicit approval before the first paid model call.

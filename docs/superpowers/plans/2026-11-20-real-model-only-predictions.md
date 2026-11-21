@@ -172,11 +172,11 @@
 - Produces: a no-spend production path ready for one explicitly approved live passage.
 - Defers: the best-available FOIArchive importer/index plan and every paid provider request.
 
-- [ ] **Step 1: Run `cd backend && uv run pytest -q`; expect all backend tests PASS.**
-- [ ] **Step 2: Run `npm test -- --run && npm run typecheck && npm run build`; expect all frontend checks PASS.**
-- [ ] **Step 3: Run fresh upgrade/downgrade/re-upgrade migration checks and the loopback upload → detection → context → model-only queued-job → SSE path with an injected fake transport; assert zero query/retrieval calls and no real provider traffic.**
-- [ ] **Step 4: Update README and CHECKLIST with the completed no-spend milestone, exact activation environment variables, and the still-unchecked live-call gate.**
-- [ ] **Step 5: Mark completed plan boxes, run `git diff --check`, commit with `feat: ship no-spend model-only prediction path`, and push.**
+- [x] **Step 1: Run `cd backend && uv run pytest -q`; expect all backend tests PASS.**
+- [x] **Step 2: Run `npm test -- --run && npm run typecheck && npm run build`; expect all frontend checks PASS.**
+- [x] **Step 3: Run fresh upgrade/downgrade/re-upgrade migration checks and the loopback upload → detection → context → model-only queued-job → SSE path with an injected fake transport; assert zero query/retrieval calls and no real provider traffic.**
+- [x] **Step 4: Update README and CHECKLIST with the completed no-spend milestone, exact activation environment variables, and the still-unchecked live-call gate.**
+- [x] **Step 5: Mark completed plan boxes, run `git diff --check`, commit with `feat: ship no-spend model-only prediction path`, and push.**
 - [ ] **Step 6: With a real key configured but generation still disabled, count the exact one-passage Appendix F request, calculate expected/maximum price from the frozen pricing table, show both numbers to the user, and stop for explicit approval before enabling or sending one live generation.**
 
 ## Deferred Follow-up Plan
