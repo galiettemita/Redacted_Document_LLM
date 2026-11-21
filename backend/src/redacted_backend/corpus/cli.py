@@ -20,6 +20,9 @@ from redacted_backend.corpus.build_bm25 import (
     build_bm25_from_files,
 )
 from redacted_backend.corpus.build_dense import build_dense_from_files
+from redacted_backend.corpus.build_dense_sharded import (
+    build_sharded_dense_from_files,
+)
 from redacted_backend.corpus.exclusions import load_exclusion_manifest
 from redacted_backend.corpus.frus_metadata import (
     FrusPublicationManifest,
@@ -176,6 +179,19 @@ def run(argv: Sequence[str] | None = None) -> int:
         )
         print(json.dumps(report.model_dump(mode="json"), sort_keys=True, indent=2))
         return 0
+    if args.command == "build-best-available-dense":
+        report = build_sharded_dense_from_files(
+            Path(args.chunks),
+            Path(args.corpus_manifest),
+            Path(args.output_directory),
+            Path(args.output_manifest),
+            application_queries_path=Path(args.application_queries),
+            certification_queries_path=Path(args.certification_queries),
+            batch_size=args.batch_size,
+            shard_size=args.shard_size,
+        )
+        print(json.dumps(report.model_dump(mode="json"), sort_keys=True, indent=2))
+        return 0
     parser.error("A corpus command is required")
     return 2
 
@@ -269,6 +285,16 @@ def _parser() -> argparse.ArgumentParser:
     dense.add_argument("--output-directory", required=True)
     dense.add_argument("--output-manifest", required=True)
     dense.add_argument("--batch-size", type=int, default=64)
+
+    best_dense = subparsers.add_parser("build-best-available-dense")
+    best_dense.add_argument("--chunks", required=True)
+    best_dense.add_argument("--corpus-manifest", required=True)
+    best_dense.add_argument("--application-queries", required=True)
+    best_dense.add_argument("--certification-queries", required=True)
+    best_dense.add_argument("--output-directory", required=True)
+    best_dense.add_argument("--output-manifest", required=True)
+    best_dense.add_argument("--batch-size", type=int, default=64)
+    best_dense.add_argument("--shard-size", type=int, default=1_000_000)
     return parser
 
 
