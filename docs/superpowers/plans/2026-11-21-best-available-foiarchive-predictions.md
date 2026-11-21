@@ -101,13 +101,13 @@
 - Consumes: best-available chunks/manifest, `BgeEncoder`, and 50 frozen public application-shaped queries.
 - Produces: `ShardedDenseIndexManifest`, a generated 100-query certification artifact containing 50 application-shaped and 50 stable-hash corpus-derived queries, atomic per-shard embeddings/metadata/offsets/FAISS artifacts, `build_sharded_dense_from_files(...)`, and `ShardedDenseIndex.search(...)`.
 
-- [ ] **Step 1: Write failing builder tests** for one-million-row boundaries, consecutive non-overlapping ranges, per-file checksums, resume, corruption rejection, and no top-level manifest before all shards certify.
-- [ ] **Step 2: Write failing runtime tests** proving every shard participates, only candidate metadata is read by offset, candidate vectors are exact-rescored globally, ties use chunk ID, and output matches an unsharded exact fixture.
-- [ ] **Step 3: Write failing certification tests** for batched exact streaming top-300, sharded candidate-union recall, query-file hash, and the 0.98 minimum.
-- [ ] **Step 4: Implement atomic resumable shard construction** with float16 memmaps, uint64 metadata offsets, FAISS HNSW, and bounded batches.
-- [ ] **Step 5: Implement sequential/bounded shard querying and certification** without loading all graphs or metadata into memory.
-- [ ] **Step 6: Freeze 50 public application-shaped queries and implement stable-hash selection of 50 title/opening-text queries from the verified corpus; atomically publish the combined query artifact and record its SHA-256.**
-- [ ] **Step 7: Run dense suites and commit/push with `feat: add sharded best-available dense retrieval`.**
+- [x] **Step 1: Write failing builder tests** for one-million-row boundaries, consecutive non-overlapping ranges, per-file checksums, resume, corruption rejection, and no top-level manifest before all shards certify.
+- [x] **Step 2: Write failing runtime tests** proving every shard participates, only candidate metadata is read by offset, candidate vectors are exact-rescored globally, ties use chunk ID, and output matches an unsharded exact fixture.
+- [x] **Step 3: Write failing certification tests** for batched exact streaming top-300, sharded candidate-union recall, query-file hash, and the 0.98 minimum.
+- [x] **Step 4: Implement atomic resumable shard construction** with float16 memmaps, uint64 metadata offsets, FAISS HNSW, and bounded batches.
+- [x] **Step 5: Implement sequential/bounded shard querying and certification** without loading all graphs or metadata into memory.
+- [x] **Step 6: Freeze 50 public application-shaped queries and implement stable-hash selection of 50 title/opening-text queries from the verified corpus; atomically publish the combined query artifact and record its SHA-256.**
+- [x] **Step 7: Run dense suites and commit/push with `feat: add sharded best-available dense retrieval`.**
 
 ### Task 5: Wire separate readiness and worker runtime
 
