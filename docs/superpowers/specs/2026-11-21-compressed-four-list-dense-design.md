@@ -207,7 +207,8 @@ Artifact building and retrieval verification use no OpenAI generation. Once oper
 - [x] Select compressed local dense artifacts with a one-time cloud GPU build.
 - [x] Freeze intent, constraints, safety gates, and user responsibilities in this design.
 - [x] Approve this design, including the five-second maximum per warm dense search.
-- [ ] Write and approve the implementation plan.
+- [x] Write the implementation plan.
+- [ ] Approve the implementation plan.
 - [ ] Implement profile/offset/candidate/runtime changes test-first.
 - [ ] Verify local suites and the fictional demo.
 - [ ] Complete the capped cloud benchmark after explicit approval.
