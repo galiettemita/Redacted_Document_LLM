@@ -381,7 +381,6 @@ def benchmark_sharded_dense_build(
         expected_chunks_sha256=corpus.chunks_sha256,
     )
     selected_rows = _select_training_rows(chunks_path, sample_rows)
-    setup_seconds = time.monotonic() - setup_started
     embeddings_path = output_directory / "sample-embeddings.f16"
     _require_available_bytes(
         output_directory,
@@ -394,7 +393,6 @@ def benchmark_sharded_dense_build(
         shape=(sample_rows, config.embedding_dimension),
     )
     effective_encoder = encoder or BgeEncoder(scientific=config)
-    encoding_started = time.monotonic()
     with ChunkOffsetIndex.open(
         chunks_path,
         offsets_path,
@@ -402,15 +400,17 @@ def benchmark_sharded_dense_build(
         expected_chunks_sha256=corpus.chunks_sha256,
         expected_offsets_sha256=offsets.offsets_sha256,
     ) as chunk_index:
+        setup_seconds = time.monotonic() - setup_started
+        encoding_started = time.monotonic()
         for start in range(0, sample_rows, batch_size):
             rows = selected_rows[start : start + batch_size]
             chunks = [chunk_index.read(row) for row in rows]
             vectors = _encode_documents(effective_encoder, chunks, config)
             embeddings[start : start + len(vectors)] = vectors.astype(np.float16)
+        encoding_seconds = max(time.monotonic() - encoding_started, 1e-9)
     embeddings.flush()
     del embeddings
     _fsync_path(embeddings_path)
-    encoding_seconds = max(time.monotonic() - encoding_started, 1e-9)
     training_started = time.monotonic()
     training_vectors = _normalized_float32_embeddings(
         embeddings_path,
@@ -981,6 +981,10 @@ def _certify_candidate_recall(
         del embeddings
     recalls: list[float] = []
     for exact_values, approximate_values in zip(exact, approximate, strict=True):
+        if len(approximate_values) != limit:
+            raise ValueError(
+                "Compressed dense recall did not return a complete result list"
+            )
         expected = {row for _, row in exact_values}
         returned = {row for _, row in approximate_values}
         recalls.append(len(expected & returned) / len(expected))
@@ -1214,8 +1218,12 @@ def _load_completed_candidate_shard(
     manifest_path = directory / "manifest.json"
     embeddings_path = directory / "embeddings.f16"
     candidate_path = directory / "candidate.faiss"
-    if not manifest_path.is_file() or not embeddings_path.is_file():
-        raise ValueError(f"Incomplete dense shard directory: {directory}")
+    if (
+        not manifest_path.is_file()
+        or not embeddings_path.is_file()
+        or not candidate_path.is_file()
+    ):
+        return None
     shard = CompressedDenseShardManifest.model_validate_json(
         manifest_path.read_text(encoding="utf-8")
     )
@@ -1233,8 +1241,6 @@ def _load_completed_candidate_shard(
         or shard.embeddings_size_bytes != checkpoint.embeddings_size_bytes
     ):
         raise ValueError("Completed compressed dense shard is incompatible")
-    if not candidate_path.is_file():
-        return None
     if (
         candidate_path.stat().st_size != shard.candidate_index_size_bytes
         or _sha256_file(candidate_path) != shard.candidate_index_sha256
@@ -1274,12 +1280,44 @@ def _load_completed_manifest(
         or manifest.dense_semantics_hash != dense_semantics_hash(config)
     ):
         raise ValueError("Completed compressed dense manifest is incompatible")
-    _verify_published_artifacts(output_directory, manifest)
-    require_dense_recall(
-        manifest.recall_at_300,
-        minimum=config.dense_recall_minimum,
-    )
+    _repair_missing_shard_manifests(output_directory, manifest)
+    try:
+        _verify_published_artifacts(output_directory, manifest)
+        require_dense_recall(
+            manifest.recall_at_300,
+            minimum=config.dense_recall_minimum,
+        )
+    except (OSError, ValueError):
+        return None
     return manifest
+
+
+def _repair_missing_shard_manifests(
+    root: Path,
+    manifest: CompressedShardedDenseIndexManifest,
+) -> None:
+    for shard in manifest.shards:
+        manifest_path = root / shard.path / "manifest.json"
+        if manifest_path.exists():
+            continue
+        embeddings_path = root / shard.path / "embeddings.f16"
+        candidate_path = root / shard.path / "candidate.faiss"
+        if (
+            not embeddings_path.is_file()
+            or embeddings_path.stat().st_size != shard.embeddings_size_bytes
+            or _sha256_file(embeddings_path) != shard.embeddings_sha256
+            or not candidate_path.is_file()
+            or candidate_path.stat().st_size != shard.candidate_index_size_bytes
+            or _sha256_file(candidate_path) != shard.candidate_index_sha256
+        ):
+            return
+        candidate = FaissIvfPqIndex.load(
+            candidate_path,
+            profile=manifest.artifact_profile,
+        )
+        if candidate.ntotal != shard.chunk_count:
+            return
+        _write_json_atomic(manifest_path, shard.model_dump(mode="json"))
 
 
 def _verify_published_artifacts(
@@ -1304,6 +1342,23 @@ def _verify_published_artifacts(
         ),
     ]
     for shard in manifest.shards:
+        shard_manifest_path = root / shard.path / "manifest.json"
+        if not shard_manifest_path.is_file():
+            raise ValueError(
+                f"Published dense shard manifest is missing: {shard_manifest_path}"
+            )
+        try:
+            on_disk_shard = CompressedDenseShardManifest.model_validate_json(
+                shard_manifest_path.read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError) as error:
+            raise ValueError(
+                f"Published dense shard manifest is invalid: {shard_manifest_path}"
+            ) from error
+        if on_disk_shard != shard:
+            raise ValueError(
+                f"Published dense shard manifest mismatch: {shard_manifest_path}"
+            )
         files.extend(
             [
                 (

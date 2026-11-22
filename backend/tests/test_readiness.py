@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import platform as runtime_platform
 import struct
 from pathlib import Path
 
@@ -38,6 +39,7 @@ from redacted_backend.retrieval.types import (
     Bm25IndexManifest,
     CompressedDenseShardManifest,
     CompressedShardedDenseIndexManifest,
+    DenseFaissVerification,
     DenseLatencyReport,
     DenseRecallReport,
     DenseIndexManifest,
@@ -429,6 +431,30 @@ def test_best_available_readiness_verifies_separate_shards_queries_and_live_inde
         "ready": False,
         "detail": "operational; spending not approved",
     }
+
+
+def test_best_available_readiness_rejects_latency_from_another_platform(
+    tmp_path: Path,
+) -> None:
+    settings, corpus, _bm25, dense = _compatible_best_available_settings(tmp_path)
+    latency_path = settings.best_available_latency_report_path
+    assert latency_path is not None
+    latency = DenseLatencyReport.model_validate_json(
+        latency_path.read_text(encoding="utf-8")
+    )
+    latency_path.write_text(
+        latency.model_copy(update={"platform": "Linux-cloud-host"}).model_dump_json(),
+        encoding="utf-8",
+    )
+
+    result = resolve_best_available_corpus_readiness(
+        settings,
+        index_counter=lambda *_args: pytest.fail("live index should not be probed"),
+        contract=_best_available_test_contract(corpus, dense),
+    )
+
+    assert result.ready is False
+    assert result.detail == "dense latency report invalid"
 
 
 def test_best_available_readiness_fails_closed_on_corruption_or_live_count(
@@ -1000,13 +1026,20 @@ def _compatible_best_available_settings(
     )
     latency = DenseLatencyReport(
         dense_manifest_hash=dense.manifest_hash(),
+        faiss_verification=DenseFaissVerification(
+            dense_manifest_hash=dense.manifest_hash(),
+            faiss_version=dense.artifact_profile.faiss_version,
+            template_ntotal=0,
+            candidate_shard_count=len(dense.shards),
+            candidate_row_count=dense.chunk_count,
+        ),
         recall_queries_sha256=dense.recall_queries_sha256,
         query_count=100,
         warm_search_seconds=[1.0] * 100,
         max_observed_seconds=1.0,
         maximum_allowed_seconds=profile.max_warm_search_seconds,
-        platform="test-platform",
-        machine="test-machine",
+        platform=runtime_platform.platform(),
+        machine=runtime_platform.machine(),
         runtime_environment="test-worker",
     )
     corpus_path = tmp_path / "best-corpus.json"
@@ -1087,13 +1120,20 @@ def _rewrite_dense_fixture(
     latency_path.write_text(
         DenseLatencyReport(
             dense_manifest_hash=dense.manifest_hash(),
+            faiss_verification=DenseFaissVerification(
+                dense_manifest_hash=dense.manifest_hash(),
+                faiss_version=dense.artifact_profile.faiss_version,
+                template_ntotal=0,
+                candidate_shard_count=len(dense.shards),
+                candidate_row_count=dense.chunk_count,
+            ),
             recall_queries_sha256=dense.recall_queries_sha256,
             query_count=dense.recall_query_count,
             warm_search_seconds=[1.0] * dense.recall_query_count,
             max_observed_seconds=1.0,
             maximum_allowed_seconds=dense.artifact_profile.max_warm_search_seconds,
-            platform="test-platform",
-            machine="test-machine",
+            platform=runtime_platform.platform(),
+            machine=runtime_platform.machine(),
             runtime_environment="test-worker",
         ).model_dump_json(),
         encoding="utf-8",

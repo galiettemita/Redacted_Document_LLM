@@ -134,19 +134,27 @@ These clicks spend money. They are future actions, not part of local implementat
 In the Pod SSH terminal, set up the pinned repository checkout. Replace `APPROVED_BUILD_COMMIT` with the exact pushed commit chosen before deployment.
 
 ```bash
+mkdir -p /workspace/redacted-build/bin \
+  /workspace/redacted-build/uv-python \
+  /workspace/redacted-build/uv-cache
+export PATH="/workspace/redacted-build/bin:$PATH"
+export UV_PYTHON_INSTALL_DIR=/workspace/redacted-build/uv-python
+export UV_CACHE_DIR=/workspace/redacted-build/uv-cache
+curl -LsSf https://astral.sh/uv/0.12.21/install.sh \
+  | env UV_UNMANAGED_INSTALL=/workspace/redacted-build/bin sh
+uv python install 3.12
+
 cd /workspace
 git clone https://github.com/galiettemita/Redacted_Document_LLM.git
 cd Redacted_Document_LLM
 git checkout APPROVED_BUILD_COMMIT
 cd backend
-curl -LsSf https://astral.sh/uv/install.sh | sh
-source "$HOME/.local/bin/env"
-uv sync --group dev
+uv sync --python 3.12 --group dev
 uv pip install --python .venv/bin/python --reinstall torch --index-url https://download.pytorch.org/whl/cu128
 uv run --no-sync python -c "import torch; assert torch.cuda.is_available(); print(torch.cuda.get_device_name(0))"
 ```
 
-The final command must print the selected NVIDIA GPU. Stop if it reports no CUDA device.
+The final command must print the selected NVIDIA GPU. Stop if it reports no CUDA device. The pinned `uv` binary, its managed Python, cache, repository, and virtual environment now live under `/workspace`; this is required because [RunPod clears container-disk data when a Pod is stopped](https://docs.runpod.io/pods/manage-pods#stop-a-pod).
 
 Download the public pinned source directly to the network volume. Do not upload the Mac copy:
 
@@ -206,7 +214,12 @@ Show both expected and maximum cost. Do not restart or redeploy a GPU until the 
 Restart the Pod only if its GPU is available and its rate is within the approved maximum. Otherwise deploy a new Pod against the same network volume, re-price it, and obtain approval if the cap changes.
 
 ```bash
+export PATH="/workspace/redacted-build/bin:$PATH"
+export UV_PYTHON_INSTALL_DIR=/workspace/redacted-build/uv-python
+export UV_CACHE_DIR=/workspace/redacted-build/uv-cache
+test -x /workspace/redacted-build/bin/uv
 cd /workspace/Redacted_Document_LLM/backend
+uv run --no-sync python -c "import torch; assert torch.cuda.is_available(); print(torch.cuda.get_device_name(0))"
 mkdir -p /workspace/redacted-build/best-available/dense
 uv run --no-sync corpus build-best-available-dense \
   --chunks /workspace/redacted-build/best-available/chunks.jsonl \
@@ -223,51 +236,17 @@ The top-level manifest is published only after the checksum, storage, and recall
 
 ## Phase 7: Transfer, local latency certification, and verification
 
-Keep the Pod running only for the transfer. From Mac Terminal, use the SSH host and port shown by RunPod. Replace the placeholders, then download the manifest as an uninstalled transfer plan. The script refuses to start without enough real free space, resumes partial files, verifies every shard immediately, and installs `manifest.json` only after all bytes pass:
+Keep the Pod running only for the transfer. From Mac Terminal, use the SSH host and port shown by RunPod. Replace the placeholders below, then run the checked-in native-zsh transfer script. It validates the remote manifest and every relative path, stops on the first SSH/rsync/checksum error, counts only bytes that remain to be downloaded plus 2 GiB headroom, resumes in place, derives each shard manifest from the verified top manifest, and installs `manifest.json` last:
 
 ```bash
 PROJECT_ROOT=/absolute/path/to/Redacted_Document_LLM
-DENSE_DIR="$PROJECT_ROOT/var/corpus/best-available/dense"
 REMOTE=root@RUNPOD_SSH_HOST
-SSH_COMMAND="ssh -p RUNPOD_SSH_PORT -i $HOME/.ssh/id_ed25519"
+SSH_PORT=RUNPOD_SSH_PORT
+SSH_KEY="$HOME/.ssh/id_ed25519"
 REMOTE_DENSE=/workspace/redacted-build/best-available/dense
-mkdir -p "$DENSE_DIR"
-
-$SSH_COMMAND "$REMOTE" "cat $REMOTE_DENSE/manifest.json" > "$DENSE_DIR/.incoming-manifest.json"
-required_bytes=$(jq -r '.total_artifact_bytes + 2147483648' "$DENSE_DIR/.incoming-manifest.json")
-available_bytes=$(df -Pk "$DENSE_DIR" | awk 'NR==2 {printf "%.0f\n", $4 * 1024}')
-if [ "$available_bytes" -lt "$required_bytes" ]; then
-  echo "STOP: need $required_bytes free bytes; only $available_bytes are available"
-  exit 1
-fi
-
-transfer_file() {
-  relative_path=$1
-  expected_sha256=$2
-  mkdir -p "$(dirname "$DENSE_DIR/$relative_path")"
-  rsync -avP --partial -e "$SSH_COMMAND" \
-    "$REMOTE:$REMOTE_DENSE/$relative_path" "$DENSE_DIR/$relative_path"
-  printf '%s  %s\n' "$expected_sha256" "$DENSE_DIR/$relative_path" | shasum -a 256 -c -
-}
-
-transfer_file chunks.offsets.u64 "$(jq -r '.chunk_offsets_sha256' "$DENSE_DIR/.incoming-manifest.json")"
-transfer_file candidate-template.faiss "$(jq -r '.candidate_template_sha256' "$DENSE_DIR/.incoming-manifest.json")"
-transfer_file recall-report.json "$(jq -r '.recall_report_sha256' "$DENSE_DIR/.incoming-manifest.json")"
-transfer_file recall-queries.txt "$(jq -r '.recall_queries_sha256' "$DENSE_DIR/.incoming-manifest.json")"
-
-jq -c '.shards[]' "$DENSE_DIR/.incoming-manifest.json" | while IFS= read -r shard; do
-  shard_path=$(printf '%s' "$shard" | jq -r '.path')
-  transfer_file "$shard_path/embeddings.f16" "$(printf '%s' "$shard" | jq -r '.embeddings_sha256')"
-  transfer_file "$shard_path/candidate.faiss" "$(printf '%s' "$shard" | jq -r '.candidate_index_sha256')"
-  rsync -avP --partial -e "$SSH_COMMAND" \
-    "$REMOTE:$REMOTE_DENSE/$shard_path/manifest.json" "$DENSE_DIR/$shard_path/manifest.json"
-  printf '%s' "$shard" | jq -S . > "$DENSE_DIR/.expected-shard.json"
-  jq -S . "$DENSE_DIR/$shard_path/manifest.json" > "$DENSE_DIR/.actual-shard.json"
-  cmp "$DENSE_DIR/.expected-shard.json" "$DENSE_DIR/.actual-shard.json"
-done
-
-rm -f "$DENSE_DIR/.expected-shard.json" "$DENSE_DIR/.actual-shard.json"
-mv "$DENSE_DIR/.incoming-manifest.json" "$DENSE_DIR/manifest.json"
+export PROJECT_ROOT REMOTE SSH_PORT SSH_KEY REMOTE_DENSE
+cd "$PROJECT_ROOT"
+./scripts/transfer-compressed-dense.zsh
 ```
 
 On the Mac, certify all 100 warm searches inside the same worker image that serves predictions. The command has no option that can raise the frozen five-second limit. It mounts the artifact directory read-write only for the certification report; ordinary API and worker services continue mounting it read-only:

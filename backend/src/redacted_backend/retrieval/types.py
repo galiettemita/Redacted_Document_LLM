@@ -294,13 +294,41 @@ class CompressedShardedDenseIndexManifest(BaseModel):
         return hashlib.sha256(canonical).hexdigest()
 
 
+class DenseFaissVerification(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal["dense-faiss-verification-v1"] = (
+        "dense-faiss-verification-v1"
+    )
+    dense_manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    faiss_version: str = Field(min_length=1)
+    template_ntotal: Literal[0] = 0
+    candidate_shard_count: int = Field(ge=1)
+    candidate_row_count: int = Field(ge=1)
+
+    def require_compatible(
+        self,
+        manifest: CompressedShardedDenseIndexManifest,
+    ) -> DenseFaissVerification:
+        if self.dense_manifest_hash != manifest.manifest_hash():
+            raise ValueError("Dense FAISS verification manifest hash mismatch")
+        if self.faiss_version != manifest.artifact_profile.faiss_version:
+            raise ValueError("Dense FAISS verification version mismatch")
+        if self.candidate_shard_count != len(manifest.shards):
+            raise ValueError("Dense FAISS verification shard count mismatch")
+        if self.candidate_row_count != manifest.chunk_count:
+            raise ValueError("Dense FAISS verification row count mismatch")
+        return self
+
+
 class DenseLatencyReport(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: Literal["dense-latency-report-v1"] = (
-        "dense-latency-report-v1"
+    schema_version: Literal["dense-latency-report-v2"] = (
+        "dense-latency-report-v2"
     )
     dense_manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    faiss_verification: DenseFaissVerification
     recall_queries_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     query_count: int = Field(ge=1)
     warm_search_seconds: list[float] = Field(min_length=1)
@@ -345,6 +373,24 @@ class DenseLatencyReport(BaseModel):
             != manifest.artifact_profile.max_warm_search_seconds
         ):
             raise ValueError("Dense latency profile maximum mismatch")
+        self.faiss_verification.require_compatible(manifest)
+        return self
+
+    def require_runtime_compatible(
+        self,
+        manifest: CompressedShardedDenseIndexManifest,
+        *,
+        runtime_environment: str,
+        platform: str,
+        machine: str,
+    ) -> DenseLatencyReport:
+        self.require_compatible(manifest)
+        if self.runtime_environment != runtime_environment:
+            raise ValueError("Dense latency runtime environment mismatch")
+        if self.platform != platform:
+            raise ValueError("Dense latency platform mismatch")
+        if self.machine != machine:
+            raise ValueError("Dense latency machine mismatch")
         return self
 
 

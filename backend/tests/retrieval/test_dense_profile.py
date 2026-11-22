@@ -14,6 +14,7 @@ from redacted_backend.retrieval.dense_profile import (
 from redacted_backend.retrieval.types import (
     CompressedDenseShardManifest,
     CompressedShardedDenseIndexManifest,
+    DenseFaissVerification,
     DenseLatencyReport,
 )
 from redacted_backend.scientific_config import ScientificConfig
@@ -230,8 +231,16 @@ def test_compressed_manifest_requires_consecutive_complete_shard_ranges() -> Non
 
 def test_latency_report_rejects_manifest_or_query_identity_mismatches() -> None:
     manifest = CompressedShardedDenseIndexManifest(**_manifest_data(_profile()))
+    verification = DenseFaissVerification(
+        dense_manifest_hash=manifest.manifest_hash(),
+        faiss_version=manifest.artifact_profile.faiss_version,
+        template_ntotal=0,
+        candidate_shard_count=len(manifest.shards),
+        candidate_row_count=manifest.chunk_count,
+    )
     report = DenseLatencyReport(
         dense_manifest_hash=manifest.manifest_hash(),
+        faiss_verification=verification,
         recall_queries_sha256=manifest.recall_queries_sha256,
         query_count=100,
         warm_search_seconds=[0.5] * 100,
@@ -243,6 +252,12 @@ def test_latency_report_rejects_manifest_or_query_identity_mismatches() -> None:
     )
 
     assert report.require_compatible(manifest) is report
+    assert report.require_runtime_compatible(
+        manifest,
+        runtime_environment="test-worker",
+        platform="macOS",
+        machine="arm64",
+    ) is report
     with pytest.raises(ValueError, match="manifest"):
         report.model_copy(update={"dense_manifest_hash": "0" * 64}).require_compatible(
             manifest
@@ -251,12 +266,33 @@ def test_latency_report_rejects_manifest_or_query_identity_mismatches() -> None:
         report.model_copy(update={"recall_queries_sha256": "0" * 64}).require_compatible(
             manifest
         )
+    with pytest.raises(ValueError, match="platform"):
+        report.require_runtime_compatible(
+            manifest,
+            runtime_environment="test-worker",
+            platform="Linux-cloud",
+            machine="arm64",
+        )
+    with pytest.raises(ValueError, match="machine"):
+        report.require_runtime_compatible(
+            manifest,
+            runtime_environment="test-worker",
+            platform="macOS",
+            machine="x86_64",
+        )
 
 
 def test_latency_report_rejects_slow_or_incomplete_certification() -> None:
     with pytest.raises(ValidationError, match="query count"):
         DenseLatencyReport(
             dense_manifest_hash="1" * 64,
+            faiss_verification=DenseFaissVerification(
+                dense_manifest_hash="1" * 64,
+                faiss_version=_profile().faiss_version,
+                template_ntotal=0,
+                candidate_shard_count=1,
+                candidate_row_count=2,
+            ),
             recall_queries_sha256="2" * 64,
             query_count=2,
             warm_search_seconds=[0.5],
@@ -270,6 +306,13 @@ def test_latency_report_rejects_slow_or_incomplete_certification() -> None:
     with pytest.raises(ValidationError, match="maximum"):
         DenseLatencyReport(
             dense_manifest_hash="1" * 64,
+            faiss_verification=DenseFaissVerification(
+                dense_manifest_hash="1" * 64,
+                faiss_version=_profile().faiss_version,
+                template_ntotal=0,
+                candidate_shard_count=1,
+                candidate_row_count=1,
+            ),
             recall_queries_sha256="2" * 64,
             query_count=1,
             warm_search_seconds=[5.01],

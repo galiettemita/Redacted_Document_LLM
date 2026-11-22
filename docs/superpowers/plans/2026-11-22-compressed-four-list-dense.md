@@ -298,7 +298,7 @@ Load and verify all candidate indexes once during construction, mmap embeddings 
 
 - [x] **Step 4: Implement local latency certification**
 
-Warm the encoder/runtime once, execute all 100 queries, retain every elapsed value, and atomically write `DenseLatencyReport` only when every result is `<= 5.0` seconds. Record platform/machine strings for audit without making model-specific assumptions in readiness.
+Warm the encoder/runtime once, execute all 100 queries, retain every elapsed value, and atomically write `DenseLatencyReport` only when every result is complete and `<= 5.0` seconds. Require the FAISS-enabled worker to deserialize the template and every candidate, bind that proof to the exact dense manifest, and require the report's platform/machine/runtime identity to match the serving deployment.
 
 - [x] **Step 5: Run focused tests and an un-timed small real-FAISS smoke**
 
@@ -500,6 +500,13 @@ git push origin HEAD
 - [x] Invalidate stale latency reports, reject nonfinite timings, and certify inside the serving worker image.
 - [x] Make transfer free-space-aware, shard-by-shard, resumable, checksum-verified, and top-manifest-last.
 - [x] Prove natural BM25 separation and query-dependent pinned BGE vectors against a disposable real OpenSearch node without touching the production index.
+- [x] Require worker-side FAISS deserialization of the template and every candidate, and bind that proof to local latency evidence consumed by the FAISS-free API.
+- [x] Require complete dense result cardinality during recall and latency certification; bind latency evidence to the current serving platform and invalidate stale evidence at CLI entry.
+- [x] Verify every chunk offset against the actual pinned JSONL line starts and make normal published-manifest retries repair missing shard manifests or corrupt candidates without re-encoding.
+- [x] Exclude full-source verification from scaled encoding time in benchmark projections.
+- [x] Replace the inline transfer commands with a fail-fast native-zsh script that validates paths, computes remaining bytes, verifies every file, and promotes the top manifest last.
+- [x] Persist and re-check the RunPod toolchain under `/workspace` so stopping the benchmark Pod cannot break the separately approved full build.
+- [x] Extend the opt-in live component smoke through pinned BGE encoding and a real compressed FAISS search.
 
 ### Task 9: Cross the paid cloud and model boundaries only with explicit approvals
 

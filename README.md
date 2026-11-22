@@ -185,7 +185,7 @@ uv run corpus build-best-available-dense \
   --output-manifest ../var/corpus/best-available/dense/manifest.json
 ```
 
-After the runbook transfers and verifies each shard, certify the frozen five-second warm-search ceiling in the same worker image that serves predictions. This writes only the latency report and makes no provider call:
+After the runbook's native-zsh script transfers and verifies each shard, certify the frozen five-second warm-search ceiling in the same worker image that serves predictions. Certification deserializes the FAISS template and every candidate, requires a complete dense list for every query, and binds the report to the exact manifest and local platform. This writes only the latency report and makes no provider call:
 
 ```bash
 cd /absolute/path/to/Redacted_Document_LLM

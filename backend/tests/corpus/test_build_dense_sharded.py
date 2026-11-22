@@ -246,6 +246,42 @@ def test_benchmark_scales_fixed_and_row_dependent_work_separately(
     assert report.peak_gpu_memory_bytes is None
 
 
+def test_benchmark_charges_full_source_verification_to_setup_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chunks, corpus, _queries, _rows, scientific = _fixture(tmp_path, count=10)
+    profile = _profile(training_sample_count=5, shard_size_limit=2)
+    elapsed = [0.0]
+    original_open = dense_builder.ChunkOffsetIndex.open
+
+    def slow_verified_open(*args, **kwargs):
+        elapsed[0] += 10.0
+        return original_open(*args, **kwargs)
+
+    monkeypatch.setattr(dense_builder.time, "monotonic", lambda: elapsed[0])
+    monkeypatch.setattr(
+        dense_builder.ChunkOffsetIndex,
+        "open",
+        slow_verified_open,
+    )
+
+    report = benchmark_sharded_dense_build(
+        chunks,
+        corpus,
+        tmp_path / "benchmark-source-verification",
+        encoder=DeterministicEncoder(8),
+        scientific=scientific,
+        profile=profile,
+        sample_rows=5,
+        batch_size=2,
+    )
+
+    assert report.setup_seconds == 10.0
+    assert report.encoding_seconds == pytest.approx(1e-9)
+    assert report.projected_full_seconds < 10.001
+
+
 def test_embedding_phase_resumes_without_reencoding_verified_checkpoints(
     tmp_path: Path,
 ) -> None:
@@ -330,11 +366,38 @@ def test_build_recall_uses_the_auto_cuda_or_numpy_matrix_backend(
     assert set(backends) == {"auto"}
 
 
+def test_build_recall_refuses_an_incomplete_candidate_list(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest, output, encoder = _build(tmp_path)
+
+    class IncompleteCandidate:
+        def search(self, _query, _count):
+            return np.asarray([], dtype=np.int64)
+
+    monkeypatch.setattr(
+        dense_builder.FaissIvfPqIndex,
+        "load",
+        lambda *_args, **_kwargs: IncompleteCandidate(),
+    )
+
+    with pytest.raises(ValueError, match="complete.*result"):
+        dense_builder._certify_candidate_recall(
+            output,
+            manifest.shards,
+            ["public query 0"],
+            encoder=encoder,
+            profile=manifest.artifact_profile,
+            config=_scientific(),
+            block_rows=2,
+        )
+
+
 def test_corrupt_candidate_rebuilds_from_embeddings_without_encoding(
     tmp_path: Path,
 ) -> None:
     manifest, output, _ = _build(tmp_path)
-    (output / "manifest.json").unlink()
     candidate = output / manifest.shards[0].path / "candidate.faiss"
     candidate.write_bytes(candidate.read_bytes() + b"tamper")
     rebuilt_candidate_encoder = DeterministicEncoder(8, fail_after_rows=0)
@@ -343,6 +406,21 @@ def test_corrupt_candidate_rebuilds_from_embeddings_without_encoding(
 
     assert repaired.chunk_count == 5
     assert rebuilt_candidate_encoder.encoded_rows == 0
+
+
+def test_missing_published_shard_manifest_repairs_without_encoding(
+    tmp_path: Path,
+) -> None:
+    manifest, output, _ = _build(tmp_path)
+    shard_manifest = output / manifest.shards[0].path / "manifest.json"
+    shard_manifest.unlink()
+    repair_encoder = DeterministicEncoder(8, fail_after_rows=0)
+
+    repaired, _, _ = _build(tmp_path, encoder=repair_encoder)
+
+    assert repaired.chunk_count == 5
+    assert shard_manifest.is_file()
+    assert repair_encoder.encoded_rows == 0
 
 
 @pytest.mark.parametrize(

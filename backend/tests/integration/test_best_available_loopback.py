@@ -5,6 +5,8 @@ import hashlib
 import json
 import os
 import re
+import subprocess
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -41,7 +43,6 @@ from redacted_backend.models.openai_gateway import (
 )
 from redacted_backend.retrieval.bm25 import Bm25Index, OpenSearchHttpTransport
 from redacted_backend.retrieval.chunk_offsets import build_chunk_offsets
-from redacted_backend.retrieval.dense import BgeEncoder
 from redacted_backend.retrieval.dense_profile import (
     DenseArtifactProfile,
     dense_semantics_hash,
@@ -347,7 +348,9 @@ def _archive_chunk(document_id: str, text: str) -> CorpusChunk:
     )
 
 
-def test_live_opensearch_and_pinned_encoder_naturally_separate_dense_document() -> None:
+def test_live_opensearch_and_pinned_encoder_naturally_separate_dense_document(
+    tmp_path: Path,
+) -> None:
     url = os.environ.get("REDACTED_LIVE_OPENSEARCH_URL")
     if not url:
         pytest.skip("set REDACTED_LIVE_OPENSEARCH_URL for the local component smoke")
@@ -400,11 +403,167 @@ def test_live_opensearch_and_pinned_encoder_naturally_separate_dense_document() 
         }
         assert "dense-only-document" not in bm25_documents
 
-        encoder = BgeEncoder(scientific=scientific)
-        context_vector = encoder.encode_query("visible public archive context")
-        own_vector = encoder.encode_query("specific actors paris meeting")
+        dense_root = tmp_path / "live-dense"
+        shard_root = dense_root / "shard-00000"
+        shard_root.mkdir(parents=True)
+        profile = DenseArtifactProfile(
+            embedding_dimension=768,
+            ivf_nlist=1,
+            pq_subvectors=1,
+            pq_bits=1,
+            nprobe=1,
+            candidate_count_per_shard=3,
+            training_sample_count=32,
+            shard_size_limit=3,
+            max_artifact_bytes=1024 * 1024,
+            max_parallel_shards=1,
+        )
+        encoded_path = tmp_path / "pinned-bge-vectors.npz"
+        encoder_process = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import json,sys,numpy as np; "
+                    "from redacted_backend.retrieval.dense import BgeEncoder; "
+                    "from redacted_backend.scientific_config import ScientificConfig; "
+                    "encoder=BgeEncoder(scientific=ScientificConfig()); "
+                    "texts=json.loads(sys.argv[2]); "
+                    "np.savez(sys.argv[1], "
+                    "context=encoder.encode_query('visible public archive context'), "
+                    "own=encoder.encode_query('specific actors paris meeting'), "
+                    "dense=encoder.encode_query('semantic vector evidence from a separate diplomatic cable'), "
+                    "documents=encoder.encode_documents(texts))"
+                ),
+                str(encoded_path),
+                json.dumps([chunk.text for chunk in chunks]),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert encoder_process.returncode == 0, encoder_process.stderr
+        with np.load(encoded_path) as encoded:
+            context_vector = np.asarray(encoded["context"], dtype=np.float32)
+            own_vector = np.asarray(encoded["own"], dtype=np.float32)
+            dense_query_vector = np.asarray(encoded["dense"], dtype=np.float32)
+            vectors = np.asarray(encoded["documents"], dtype=np.float32)
         assert context_vector.shape == own_vector.shape == (768,)
         assert not np.array_equal(context_vector, own_vector)
+
+        rng = np.random.default_rng(20261122)
+        training = rng.normal(size=(32, 768)).astype(np.float32)
+        training /= np.linalg.norm(training, axis=1, keepdims=True)
+        template = dense_root / "candidate-template.faiss"
+        template_sha256 = train_ivfpq_template(
+            training,
+            template,
+            dimension=768,
+            profile=profile,
+        )
+
+        chunks_path = tmp_path / "live-chunks.jsonl"
+        chunks_path.write_text(
+            "".join(chunk.model_dump_json() + "\n" for chunk in chunks),
+            encoding="utf-8",
+        )
+        chunks_sha256 = hashlib.sha256(chunks_path.read_bytes()).hexdigest()
+        embeddings = shard_root / "embeddings.f16"
+        vectors.astype(np.float16).tofile(embeddings)
+        candidate_path = shard_root / "candidate.faiss"
+        candidate = FaissIvfPqIndex.create(template, profile=profile)
+        candidate.add(vectors)
+        candidate.save(candidate_path)
+        offsets_path = dense_root / "chunks.offsets.u64"
+        offsets = build_chunk_offsets(
+            chunks_path,
+            offsets_path,
+            expected_count=len(chunks),
+            expected_chunks_sha256=chunks_sha256,
+        )
+        recall = dense_root / "recall-report.json"
+        recall.write_bytes(b"{}\n")
+        template_hash = hashlib.sha256(template.read_bytes()).hexdigest()
+        assert template_hash == template_sha256
+        dense_shard = CompressedDenseShardManifest(
+            artifact_profile_hash=profile.manifest_hash(),
+            candidate_template_sha256=template_hash,
+            shard_id=0,
+            path=shard_root.name,
+            start_row=0,
+            end_row=len(chunks),
+            chunk_count=len(chunks),
+            embeddings_size_bytes=embeddings.stat().st_size,
+            embeddings_sha256=hashlib.sha256(embeddings.read_bytes()).hexdigest(),
+            candidate_index_size_bytes=candidate_path.stat().st_size,
+            candidate_index_sha256=hashlib.sha256(
+                candidate_path.read_bytes()
+            ).hexdigest(),
+        )
+        total_bytes = (
+            offsets.offsets_size_bytes
+            + template.stat().st_size
+            + recall.stat().st_size
+            + dense_shard.embeddings_size_bytes
+            + dense_shard.candidate_index_size_bytes
+        )
+        dense_manifest = CompressedShardedDenseIndexManifest(
+            model_name=scientific.embedding_model,
+            model_revision=scientific.embedding_model_revision,
+            embedding_dimension=768,
+            corpus_manifest_hash=corpus.manifest_hash(),
+            dense_semantics_hash=dense_semantics_hash(scientific),
+            chunks_sha256=chunks_sha256,
+            chunk_count=len(chunks),
+            artifact_profile=profile,
+            artifact_profile_hash=profile.manifest_hash(),
+            chunk_offsets_path=offsets_path.name,
+            chunk_offsets_format=profile.metadata_lookup_version,
+            chunk_offsets_size_bytes=offsets.offsets_size_bytes,
+            chunk_offsets_sha256=offsets.offsets_sha256,
+            candidate_template_path=template.name,
+            candidate_template_size_bytes=template.stat().st_size,
+            candidate_template_sha256=template_hash,
+            shard_size_limit=profile.shard_size_limit,
+            shards=[dense_shard],
+            dtype="float16",
+            metric="inner_product",
+            candidate_index=profile.candidate_index,
+            recall_report_path=recall.name,
+            recall_report_size_bytes=recall.stat().st_size,
+            recall_report_sha256=hashlib.sha256(recall.read_bytes()).hexdigest(),
+            recall_at_300=1.0,
+            recall_queries_sha256="5" * 64,
+            recall_query_count=100,
+            total_artifact_bytes=total_bytes,
+        )
+        (shard_root / "manifest.json").write_text(
+            dense_shard.model_dump_json() + "\n",
+            encoding="utf-8",
+        )
+        class PinnedBgeVectorEncoder:
+            def encode_query(self, text: str) -> NDArray[np.float32]:
+                assert text == (
+                    "semantic vector evidence from a separate diplomatic cable"
+                )
+                return dense_query_vector.copy()
+
+        with ShardedDenseIndex(
+            root=dense_root,
+            chunks_path=chunks_path,
+            manifest=dense_manifest,
+            encoder=PinnedBgeVectorEncoder(),
+            scientific=scientific,
+        ) as dense:
+            dense_results = dense.search(
+                "semantic vector evidence from a separate diplomatic cable",
+                candidates=3,
+                limit=1,
+                query_kind="context",
+            )
+        assert [item.document_id for item in dense_results] == [
+            "dense-only-document"
+        ]
     finally:
         try:
             urlopen(

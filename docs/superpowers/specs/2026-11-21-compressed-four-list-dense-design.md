@@ -223,6 +223,10 @@ Artifact building and retrieval verification use no OpenAI generation. Once oper
 - [x] Validate recall evidence, shard manifests, and FAISS wrapper headers before operational readiness.
 - [x] Align certification/serving tie-breaking and require complete dense lists.
 - [x] Make tuning/resume, benchmark projections, worker-image latency, and shard-by-shard transfer production-safe.
+- [x] Bind readiness to worker-deserialized FAISS evidence and the exact local serving platform.
+- [x] Verify offsets against pinned JSONL line starts and repair published artifact retries without re-encoding.
+- [x] Make the native-zsh transfer fail-fast, remaining-space-aware, traversal-safe, and top-manifest-last.
+- [x] Persist the RunPod toolchain across a benchmark stop and exercise pinned BGE vectors through real compressed FAISS retrieval.
 - [ ] Complete the capped cloud benchmark after explicit approval.
 - [ ] Complete the full cloud build after separate explicit approval.
 - [ ] Download and verify artifacts locally.

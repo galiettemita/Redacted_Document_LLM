@@ -44,6 +44,15 @@ class RowsCandidateIndex:
         return np.asarray(self.rows[:candidates], dtype=np.int64)
 
 
+def _load_template(
+    _path: Path,
+    *,
+    profile: DenseArtifactProfile,
+) -> RowsCandidateIndex:
+    del profile
+    return RowsCandidateIndex([], ntotal=0)
+
+
 def _profile(**updates: object) -> DenseArtifactProfile:
     values = {
         "embedding_dimension": 3,
@@ -216,6 +225,7 @@ def test_search_caches_every_shard_and_exactly_rescores_global_candidates(
         candidate_rows=[[0, -1, 2, 2], [0, 1, 2]],
     )
     loaded_paths: list[str] = []
+    loaded_templates: list[str] = []
 
     def load_candidate(
         path: Path,
@@ -244,12 +254,23 @@ def test_search_caches_every_shard_and_exactly_rescores_global_candidates(
         "redacted_backend.retrieval.chunk_offsets.ChunkOffsetIndex.read",
         counted_read,
     )
+
+    def load_template(
+        path: Path,
+        *,
+        profile: DenseArtifactProfile,
+    ) -> RowsCandidateIndex:
+        assert profile == manifest.artifact_profile
+        loaded_templates.append(path.name)
+        return RowsCandidateIndex([], ntotal=0)
+
     with ShardedDenseIndex(
         root=tmp_path,
         chunks_path=chunks_path,
         manifest=manifest,
         encoder=QueryEncoder(),
         candidate_loader=load_candidate,
+        template_loader=load_template,
         scientific=_scientific(),
     ) as index:
         first = index.search(
@@ -266,6 +287,7 @@ def test_search_caches_every_shard_and_exactly_rescores_global_candidates(
         )
 
     assert loaded_paths == ["shard-00000", "shard-00001"]
+    assert loaded_templates == ["candidate-template.faiss"]
     assert [item.chunk_id for item in first] == [
         chunk_z.id,
         chunk_a.id,
@@ -306,10 +328,45 @@ def test_search_rejects_out_of_range_candidate_rows(tmp_path: Path) -> None:
         manifest=manifest,
         encoder=QueryEncoder(),
         candidate_loader=loader,
+        template_loader=_load_template,
         scientific=_scientific(),
     ) as index:
         with pytest.raises(IncompatibleDenseIndexError, match="invalid.*row"):
             index.search("visible query", candidates=1, limit=1)
+
+
+def test_runtime_refuses_a_checksum_consistent_non_faiss_template(
+    tmp_path: Path,
+) -> None:
+    manifest, chunks_path, rows_by_path = _write_runtime_fixture(
+        tmp_path,
+        vectors_by_shard=[np.asarray([[1.0, 0.0, 0.0]])],
+        chunks=[_chunk("only")],
+        candidate_rows=[[0]],
+        profile=_profile(
+            training_sample_count=1,
+            shard_size_limit=1,
+            candidate_count_per_shard=1,
+        ),
+    )
+
+    def candidate_loader(
+        path: Path,
+        *,
+        profile: DenseArtifactProfile,
+    ) -> RowsCandidateIndex:
+        del profile
+        return RowsCandidateIndex(rows_by_path[path.parent.name], ntotal=1)
+
+    with pytest.raises(IncompatibleDenseIndexError, match="artifact format"):
+        ShardedDenseIndex(
+            root=tmp_path,
+            chunks_path=chunks_path,
+            manifest=manifest,
+            encoder=QueryEncoder(),
+            candidate_loader=candidate_loader,
+            scientific=_scientific(),
+        )
 
 
 class _ConcurrencyTracker:
@@ -384,6 +441,7 @@ def test_search_uses_no_more_than_four_parallel_shards(tmp_path: Path) -> None:
         manifest=manifest,
         encoder=QueryEncoder(),
         candidate_loader=loader,
+        template_loader=_load_template,
         scientific=_scientific(),
     ) as index:
         results = index.search("visible query", candidates=1, limit=6)

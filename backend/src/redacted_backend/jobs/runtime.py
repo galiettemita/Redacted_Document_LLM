@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import platform
 from pathlib import Path
 
 import numpy as np
@@ -209,12 +210,12 @@ def _build_best_available_orchestrator(
         latency = DenseLatencyReport.model_validate_json(
             latency_path.read_text(encoding="utf-8")
         )
-        latency.require_compatible(dense_manifest)
-        if (
-            latency.runtime_environment
-            != contract.latency_runtime_environment
-        ):
-            raise ValueError("Dense latency runtime environment mismatch")
+        latency.require_runtime_compatible(
+            dense_manifest,
+            runtime_environment=contract.latency_runtime_environment,
+            platform=platform.platform(),
+            machine=platform.machine(),
+        )
     except (OSError, ValueError) as error:
         raise RuntimeError("Dense latency report mismatch") from error
     try:

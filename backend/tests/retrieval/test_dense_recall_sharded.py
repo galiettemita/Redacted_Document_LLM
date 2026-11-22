@@ -236,6 +236,31 @@ def test_sharded_recall_compares_candidate_union_with_global_exact_top_k(
     assert recall == 1.0
 
 
+def test_sharded_recall_refuses_an_incomplete_candidate_list(tmp_path: Path) -> None:
+    manifest, _rows_by_path = _write_recall_fixture(tmp_path)
+
+    def loader(path: Path, *, profile: DenseArtifactProfile) -> Candidate:
+        del profile
+        shard_id = int(path.parent.name[-5:])
+        return Candidate(
+            [] if shard_id == 0 else [0],
+            ntotal=manifest.shards[shard_id].chunk_count,
+        )
+
+    with pytest.raises(ValueError, match="complete.*result"):
+        certify_sharded_dense_recall(
+            tmp_path,
+            manifest,
+            ["query"],
+            encoder=Encoder(),
+            candidate_loader=loader,
+            scientific=ScientificConfig(embedding_dimension=2),
+            limit=2,
+            block_rows=1,
+            matrix_backend="numpy",
+        )
+
+
 def test_auto_matrix_backend_avoids_torch_without_visible_cuda_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -145,13 +145,24 @@ class ChunkOffsetIndex:
             offsets_size = os.fstat(offsets_descriptor).st_size
             if offsets_size != expected_count * 8:
                 raise ChunkOffsetError("Chunk offset file has an invalid size")
-            if _sha256_descriptor(chunks_descriptor, chunks_size) != expected_chunks_sha256:
+            (
+                chunks_sha256,
+                derived_offsets_sha256,
+                derived_count,
+            ) = _source_identity(chunks_descriptor)
+            if chunks_sha256 != expected_chunks_sha256:
                 raise ChunkOffsetError("chunk checksum does not match the expected value")
+            if derived_count != expected_count:
+                raise ChunkOffsetError("Chunk count does not match the expected value")
             if (
                 _sha256_descriptor(offsets_descriptor, offsets_size)
                 != expected_offsets_sha256
             ):
                 raise ChunkOffsetError("Chunk offset checksum does not match expected")
+            if derived_offsets_sha256 != expected_offsets_sha256:
+                raise ChunkOffsetError(
+                    "Chunk offsets do not match the actual JSONL line starts"
+                )
             first_offset = _read_offset(offsets_descriptor, 0)
             last_offset = _read_offset(offsets_descriptor, expected_count - 1)
             if first_offset != 0 or last_offset >= chunks_size:
@@ -253,6 +264,23 @@ def _sha256_descriptor(descriptor: int, size: int) -> str:
         digest.update(value)
         offset += len(value)
     return digest.hexdigest()
+
+
+def _source_identity(descriptor: int) -> tuple[str, str, int]:
+    chunks_digest = hashlib.sha256()
+    offsets_digest = hashlib.sha256()
+    count = 0
+    with os.fdopen(os.dup(descriptor), "rb") as source:
+        source.seek(0)
+        while True:
+            offset = source.tell()
+            line = source.readline()
+            if not line:
+                break
+            chunks_digest.update(line)
+            offsets_digest.update(struct.pack("<Q", offset))
+            count += 1
+    return chunks_digest.hexdigest(), offsets_digest.hexdigest(), count
 
 
 def _fsync_directory(path: Path) -> None:

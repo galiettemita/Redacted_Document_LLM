@@ -13,6 +13,7 @@ from redacted_backend.retrieval.dense_sharded import (
 from redacted_backend.retrieval.types import (
     CompressedDenseShardManifest,
     CompressedShardedDenseIndexManifest,
+    DenseFaissVerification,
     DenseLatencyReport,
 )
 
@@ -78,10 +79,17 @@ class _Runtime:
     def __init__(self, manifest: CompressedShardedDenseIndexManifest) -> None:
         self.manifest = manifest
         self.calls: list[str] = []
+        self.faiss_verification = DenseFaissVerification(
+            dense_manifest_hash=manifest.manifest_hash(),
+            faiss_version=manifest.artifact_profile.faiss_version,
+            template_ntotal=0,
+            candidate_shard_count=len(manifest.shards),
+            candidate_row_count=manifest.chunk_count,
+        )
 
     def search(self, query: str):
         self.calls.append(query)
-        return []
+        return [object()]
 
 
 class _AlternatingClock:
@@ -126,6 +134,7 @@ def test_latency_certification_warms_once_and_publishes_all_timings(
     assert report.dense_manifest_hash == runtime.manifest.manifest_hash()
     assert report.recall_queries_sha256 == queries_sha256
     assert report.runtime_environment == "serving-worker-container"
+    assert report.faiss_verification == runtime.faiss_verification
     assert DenseLatencyReport.model_validate_json(
         output.read_text(encoding="utf-8")
     ) == report
@@ -150,6 +159,34 @@ def test_latency_certification_refuses_a_slow_query_without_publishing(
     assert not output.exists()
 
 
+def test_latency_certification_refuses_incomplete_dense_results(
+    tmp_path: Path,
+) -> None:
+    queries, queries_sha256 = _queries()
+    runtime = _Runtime(_manifest(queries_sha256))
+    runtime.search = lambda _query: []  # type: ignore[method-assign]
+    output = tmp_path / "latency.json"
+
+    with pytest.raises(DenseLatencyError, match="complete.*result"):
+        certify_dense_latency(runtime, queries, output)
+
+    assert not output.exists()
+
+
+def test_latency_certification_requires_faiss_deserialization_evidence(
+    tmp_path: Path,
+) -> None:
+    queries, queries_sha256 = _queries()
+    runtime = _Runtime(_manifest(queries_sha256))
+    del runtime.faiss_verification
+    output = tmp_path / "latency.json"
+
+    with pytest.raises(DenseLatencyError, match="FAISS.*verification"):
+        certify_dense_latency(runtime, queries, output)
+
+    assert not output.exists()
+
+
 def test_latency_certification_invalidates_stale_report_before_query_checks(
     tmp_path: Path,
 ) -> None:
@@ -169,6 +206,13 @@ def test_latency_report_rejects_nonfinite_measurements() -> None:
     with pytest.raises(ValueError, match="finite"):
         DenseLatencyReport(
             dense_manifest_hash=_manifest(queries_sha256).manifest_hash(),
+            faiss_verification=DenseFaissVerification(
+                dense_manifest_hash=_manifest(queries_sha256).manifest_hash(),
+                faiss_version=_manifest(queries_sha256).artifact_profile.faiss_version,
+                template_ntotal=0,
+                candidate_shard_count=1,
+                candidate_row_count=1,
+            ),
             recall_queries_sha256=queries_sha256,
             query_count=100,
             warm_search_seconds=[1.0] * 99 + [float("nan")],

@@ -1,4 +1,5 @@
 import hashlib
+import platform
 from collections.abc import Callable
 from typing import Protocol
 
@@ -375,16 +376,16 @@ def resolve_best_available_corpus_readiness(
         latency = DenseLatencyReport.model_validate_json(
             latency_path.read_text(encoding="utf-8")
         )
-        latency.require_compatible(dense)
+        latency.require_runtime_compatible(
+            dense,
+            runtime_environment=contract.latency_runtime_environment,
+            platform=platform.platform(),
+            machine=platform.machine(),
+        )
     except (OSError, ValidationError, ValueError):
         return ComponentReadiness(
             ready=False,
             detail="dense latency report invalid",
-        )
-    if latency.runtime_environment != contract.latency_runtime_environment:
-        return ComponentReadiness(
-            ready=False,
-            detail="dense latency runtime environment mismatch",
         )
     if not chunks_path.is_file():
         return ComponentReadiness(

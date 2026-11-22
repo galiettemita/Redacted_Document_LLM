@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import struct
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -181,6 +182,36 @@ def test_open_rejects_a_changed_chunk_file(tmp_path: Path) -> None:
             expected_count=1,
             expected_chunks_sha256=chunks_sha256,
             expected_offsets_sha256=report.offsets_sha256,
+        )
+
+
+def test_open_rejects_self_consistent_offsets_that_do_not_match_line_starts(
+    tmp_path: Path,
+) -> None:
+    chunks_path = tmp_path / "chunks.jsonl"
+    chunks_sha256 = _write_chunks(
+        chunks_path,
+        [_chunk(0), _chunk(1), _chunk(2), _chunk(3)],
+    )
+    offsets_path = tmp_path / "chunks.offsets.u64"
+    build_chunk_offsets(
+        chunks_path,
+        offsets_path,
+        expected_count=4,
+        expected_chunks_sha256=chunks_sha256,
+    )
+    values = list(struct.unpack("<QQQQ", offsets_path.read_bytes()))
+    values[1] = values[2]
+    corrupted = struct.pack("<QQQQ", *values)
+    offsets_path.write_bytes(corrupted)
+
+    with pytest.raises(ChunkOffsetError, match="line starts"):
+        ChunkOffsetIndex.open(
+            chunks_path,
+            offsets_path,
+            expected_count=4,
+            expected_chunks_sha256=chunks_sha256,
+            expected_offsets_sha256=hashlib.sha256(corrupted).hexdigest(),
         )
 
 

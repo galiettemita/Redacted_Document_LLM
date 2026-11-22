@@ -35,6 +35,7 @@ from redacted_backend.retrieval.faiss_ivfpq import (
 from redacted_backend.retrieval.types import (
     CompressedDenseShardManifest,
     CompressedShardedDenseIndexManifest,
+    DenseFaissVerification,
     DenseLatencyReport,
     DenseRecallReport,
     DenseShardManifest,
@@ -55,6 +56,7 @@ class CandidateIndex(Protocol):
 
 
 CandidateLoader = Callable[..., CandidateIndex]
+TemplateLoader = Callable[..., CandidateIndex]
 
 
 class ShardedDenseIndex:
@@ -66,6 +68,7 @@ class ShardedDenseIndex:
         manifest: CompressedShardedDenseIndexManifest,
         encoder: QueryEncoder,
         candidate_loader: CandidateLoader = FaissIvfPqIndex.load,
+        template_loader: TemplateLoader = FaissIvfPqIndex.create,
         profile: DenseArtifactProfile | None = None,
         scientific: ScientificConfig | None = None,
     ) -> None:
@@ -74,6 +77,7 @@ class ShardedDenseIndex:
         self.manifest = manifest
         self.encoder = encoder
         self.candidate_loader = candidate_loader
+        self.template_loader = template_loader
         self.scientific = scientific or ScientificConfig()
         self.profile = profile or manifest.artifact_profile
         self._closed = False
@@ -83,6 +87,14 @@ class ShardedDenseIndex:
         self._executor: ThreadPoolExecutor | None = None
         self._validate()
         try:
+            template = template_loader(
+                root / manifest.candidate_template_path,
+                profile=self.profile,
+            )
+            if int(template.ntotal) != 0:
+                raise IncompatibleDenseIndexError(
+                    "Dense candidate template contains rows"
+                )
             self._chunks = ChunkOffsetIndex.open(
                 chunks_path,
                 root / manifest.chunk_offsets_path,
@@ -109,6 +121,15 @@ class ShardedDenseIndex:
                         shape=(shard.chunk_count, manifest.embedding_dimension),
                     )
                 )
+            self.faiss_verification = DenseFaissVerification(
+                dense_manifest_hash=manifest.manifest_hash(),
+                faiss_version=self.profile.faiss_version,
+                template_ntotal=0,
+                candidate_shard_count=len(self._candidates),
+                candidate_row_count=sum(
+                    int(candidate.ntotal) for candidate in self._candidates
+                ),
+            ).require_compatible(manifest)
             self._executor = ThreadPoolExecutor(
                 max_workers=min(
                     self.profile.max_parallel_shards,
@@ -323,12 +344,24 @@ def certify_dense_latency(
     query_hash = hashlib.sha256(query_bytes).hexdigest()
     if query_hash != manifest.recall_queries_sha256:
         raise DenseLatencyError("Dense latency query hash mismatch")
-    runtime.search(queries[0])
+    try:
+        faiss_verification = DenseFaissVerification.model_validate(
+            runtime.faiss_verification
+        ).require_compatible(manifest)
+    except (AttributeError, ValueError) as error:
+        raise DenseLatencyError(
+            "Dense latency runtime has no valid FAISS artifact verification"
+        ) from error
+    expected_results = min(ScientificConfig().top_chunks_per_list, manifest.chunk_count)
+    if len(runtime.search(queries[0])) != expected_results:
+        raise DenseLatencyError(
+            "Dense latency warmup did not return a complete result list"
+        )
     timings: list[float] = []
     maximum = manifest.artifact_profile.max_warm_search_seconds
     for query in queries:
         started = clock()
-        runtime.search(query)
+        results = runtime.search(query)
         elapsed = clock() - started
         if not math.isfinite(elapsed) or elapsed <= 0:
             raise DenseLatencyError(
@@ -338,9 +371,14 @@ def certify_dense_latency(
             raise DenseLatencyError(
                 f"Dense warm search took {elapsed:.2f}s; maximum is {maximum:.1f}s"
             )
+        if len(results) != expected_results:
+            raise DenseLatencyError(
+                "Dense latency search did not return a complete result list"
+            )
         timings.append(elapsed)
     report = DenseLatencyReport(
         dense_manifest_hash=manifest.manifest_hash(),
+        faiss_verification=faiss_verification,
         recall_queries_sha256=query_hash,
         query_count=len(queries),
         warm_search_seconds=timings,
@@ -557,6 +595,10 @@ def certify_sharded_dense_recall(
         approximate,
         strict=True,
     ):
+        if len(approximate_ranking) != effective_limit:
+            raise ValueError(
+                "Sharded dense recall did not return a complete result list"
+            )
         expected = {row for _, row in exact_ranking}
         returned = {row for _, row in approximate_ranking}
         if not expected:

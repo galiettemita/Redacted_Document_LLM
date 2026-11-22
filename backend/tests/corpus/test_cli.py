@@ -34,6 +34,7 @@ from redacted_backend.retrieval.types import (
     Bm25IndexManifest,
     CompressedDenseShardManifest,
     CompressedShardedDenseIndexManifest,
+    DenseFaissVerification,
     DenseLatencyReport,
 )
 
@@ -571,6 +572,13 @@ def test_certify_best_available_dense_latency_cli_uses_frozen_profile_limit(
     output = tmp_path / "latency.json"
     report = DenseLatencyReport(
         dense_manifest_hash=manifest.manifest_hash(),
+        faiss_verification=DenseFaissVerification(
+            dense_manifest_hash=manifest.manifest_hash(),
+            faiss_version=manifest.artifact_profile.faiss_version,
+            template_ntotal=0,
+            candidate_shard_count=len(manifest.shards),
+            candidate_row_count=manifest.chunk_count,
+        ),
         recall_queries_sha256=manifest.recall_queries_sha256,
         query_count=100,
         warm_search_seconds=[0.1] * 100,
@@ -623,6 +631,38 @@ def test_certify_best_available_dense_latency_cli_uses_frozen_profile_limit(
     assert captured["load_kwargs"] == {}
     assert captured["certify"][1:] == (queries, output)
     assert captured["closed"] is True
+
+
+def test_latency_cli_invalidates_stale_report_before_runtime_loading(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "latency.json"
+    output.write_text("stale passing report", encoding="utf-8")
+    monkeypatch.setattr(
+        cli,
+        "_load_compressed_dense_runtime",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("load failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="load failed"):
+        cli.run(
+            [
+                "certify-best-available-dense-latency",
+                "--chunks",
+                str(tmp_path / "chunks.jsonl"),
+                "--dense-directory",
+                str(tmp_path / "dense"),
+                "--dense-manifest",
+                str(tmp_path / "dense/manifest.json"),
+                "--certification-queries",
+                str(tmp_path / "queries.txt"),
+                "--output",
+                str(output),
+            ]
+        )
+
+    assert not output.exists()
 
 
 def test_verify_best_available_dense_cli_is_local_and_provider_free(

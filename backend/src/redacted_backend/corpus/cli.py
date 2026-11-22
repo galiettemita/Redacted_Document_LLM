@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import platform
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
@@ -245,6 +246,8 @@ def run(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(report.model_dump(mode="json"), sort_keys=True, indent=2))
         return 0
     if args.command == "certify-best-available-dense-latency":
+        output_path = Path(args.output)
+        output_path.unlink(missing_ok=True)
         runtime = _load_compressed_dense_runtime(
             Path(args.chunks),
             Path(args.dense_directory),
@@ -254,7 +257,7 @@ def run(argv: Sequence[str] | None = None) -> int:
             report = certify_dense_latency(
                 runtime,
                 _read_nonempty_lines(Path(args.certification_queries)),
-                Path(args.output),
+                output_path,
             )
         finally:
             runtime.close()
@@ -518,9 +521,12 @@ def verify_best_available_dense(
     latency = DenseLatencyReport.model_validate_json(
         latency_report_path.read_text(encoding="utf-8")
     )
-    latency.require_compatible(dense)
-    if latency.runtime_environment != contract.latency_runtime_environment:
-        raise ValueError("Compressed dense latency runtime environment mismatch")
+    latency.require_runtime_compatible(
+        dense,
+        runtime_environment=contract.latency_runtime_environment,
+        platform=platform.platform(),
+        machine=platform.machine(),
+    )
     verify_compressed_dense_artifacts(dense_root, chunks_path, dense)
     return DenseVerificationReport(
         dense_manifest_hash=dense.manifest_hash(),
