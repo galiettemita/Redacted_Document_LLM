@@ -18,7 +18,10 @@ from redacted_backend.corpus.best_available import (
     BestAvailableSourceProfile,
 )
 from redacted_backend.corpus.build_bm25 import Bm25BuildReport
-from redacted_backend.corpus.build_dense_sharded import ShardedDenseBuildReport
+from redacted_backend.corpus.build_dense_sharded import (
+    DenseBuildBenchmarkReport,
+    ShardedDenseBuildReport,
+)
 from redacted_backend.corpus.historylab_export import CatalogEntry
 from redacted_backend.corpus.preflight import (
     PreflightReport,
@@ -26,10 +29,12 @@ from redacted_backend.corpus.preflight import (
     VolumeReport,
 )
 from redacted_backend.corpus.snapshot import SnapshotFile, SnapshotLock
+from redacted_backend.retrieval.dense_profile import DenseArtifactProfile
 from redacted_backend.retrieval.types import (
     Bm25IndexManifest,
-    DenseShardManifest,
-    ShardedDenseIndexManifest,
+    CompressedDenseShardManifest,
+    CompressedShardedDenseIndexManifest,
+    DenseLatencyReport,
 )
 
 REVISION = "411cf6f86b38342683e27148be167c6094d1a10c"
@@ -426,41 +431,10 @@ def test_build_best_available_dense_cli_reports_verified_sharded_manifest(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    shard = DenseShardManifest(
-        shard_id=0,
-        path="shard-00000",
-        start_row=0,
-        end_row=1,
-        chunk_count=1,
-        embeddings_sha256="1" * 64,
-        metadata_sha256="2" * 64,
-        offsets_sha256="3" * 64,
-        candidate_index_sha256="4" * 64,
-    )
-    manifest = ShardedDenseIndexManifest(
-        model_name="BAAI/bge-base-en-v1.5",
-        model_revision=REVISION,
-        embedding_dimension=768,
-        corpus_manifest_hash="5" * 64,
-        scientific_hash="6" * 64,
-        chunks_sha256="7" * 64,
-        chunk_count=1,
-        shard_size_limit=1_000_000,
-        shards=[shard],
-        dtype="float16",
-        metric="inner_product",
-        candidate_index="faiss-hnsw-flat-v1",
-        hnsw_m=32,
-        ef_construction=200,
-        ef_search=512,
-        candidate_count=2_000,
-        recall_at_300=1.0,
-        recall_queries_sha256="8" * 64,
-        recall_query_count=100,
-    )
+    manifest = _compressed_manifest_for_cli()
     report = ShardedDenseBuildReport(
         elapsed_seconds=2.5,
-        corpus_manifest_hash="5" * 64,
+        corpus_manifest_hash=manifest.corpus_manifest_hash,
         index_manifest=manifest,
     )
     captured: dict[str, object] = {}
@@ -496,6 +470,8 @@ def test_build_best_available_dense_cli_reports_verified_sharded_manifest(
             "32",
             "--shard-size",
             "1000000",
+            "--recall-block-rows",
+            "8192",
         ]
     )
 
@@ -506,4 +482,277 @@ def test_build_best_available_dense_cli_reports_verified_sharded_manifest(
         "certification_queries_path": tmp_path / "certification.txt",
         "batch_size": 32,
         "shard_size": 1_000_000,
+        "recall_block_rows": 8_192,
     }
+
+
+def test_benchmark_best_available_dense_cli_uses_exact_paths_and_100k_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    report = DenseBuildBenchmarkReport(
+        sample_rows=100_000,
+        production_chunk_count=14_549_269,
+        elapsed_seconds=10.0,
+        rows_per_second=10_000.0,
+        peak_rss_bytes=123,
+        embedding_bytes_per_row=1536.0,
+        candidate_bytes_per_row=100.0,
+        offset_bytes_per_row=8.0,
+        projected_full_artifact_bytes=24 * 1024**3,
+        projected_gpu_hours=0.5,
+    )
+    captured: dict[str, object] = {}
+
+    def fake_benchmark(*args, **kwargs) -> DenseBuildBenchmarkReport:
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return report
+
+    monkeypatch.setattr(
+        cli,
+        "benchmark_sharded_dense_build",
+        fake_benchmark,
+        raising=False,
+    )
+    chunks = tmp_path / "chunks.jsonl"
+    corpus_manifest = tmp_path / "corpus.json"
+    output = tmp_path / "benchmark"
+
+    exit_code = cli.run(
+        [
+            "benchmark-best-available-dense",
+            "--chunks",
+            str(chunks),
+            "--corpus-manifest",
+            str(corpus_manifest),
+            "--output-directory",
+            str(output),
+            "--batch-size",
+            "32",
+        ]
+    )
+
+    assert exit_code == 0
+    assert DenseBuildBenchmarkReport.model_validate_json(
+        capsys.readouterr().out
+    ) == report
+    assert captured == {
+        "args": (chunks, corpus_manifest, output),
+        "kwargs": {"sample_rows": 100_000, "batch_size": 32},
+    }
+
+
+def test_certify_best_available_dense_latency_cli_uses_frozen_profile_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    manifest = _compressed_manifest_for_cli()
+    queries = [f"certification query {index}" for index in range(100)]
+    queries_path = tmp_path / "recall-queries.txt"
+    queries_path.write_text("\n".join(queries) + "\n", encoding="utf-8")
+    output = tmp_path / "latency.json"
+    report = DenseLatencyReport(
+        dense_manifest_hash=manifest.manifest_hash(),
+        recall_queries_sha256=manifest.recall_queries_sha256,
+        query_count=100,
+        warm_search_seconds=[0.1] * 100,
+        max_observed_seconds=0.1,
+        maximum_allowed_seconds=5.0,
+        platform="test",
+        machine="test",
+    )
+    captured: dict[str, object] = {}
+
+    class Runtime:
+        def close(self) -> None:
+            captured["closed"] = True
+
+    def fake_loader(*args, **kwargs):
+        captured["load_args"] = args
+        captured["load_kwargs"] = kwargs
+        return Runtime()
+
+    def fake_certifier(runtime, received_queries, output_path):
+        captured["certify"] = (runtime, received_queries, output_path)
+        return report
+
+    monkeypatch.setattr(cli, "_load_compressed_dense_runtime", fake_loader, raising=False)
+    monkeypatch.setattr(cli, "certify_dense_latency", fake_certifier, raising=False)
+    chunks = tmp_path / "chunks.jsonl"
+    dense_root = tmp_path / "dense"
+    dense_manifest = dense_root / "manifest.json"
+
+    exit_code = cli.run(
+        [
+            "certify-best-available-dense-latency",
+            "--chunks",
+            str(chunks),
+            "--dense-directory",
+            str(dense_root),
+            "--dense-manifest",
+            str(dense_manifest),
+            "--certification-queries",
+            str(queries_path),
+            "--output",
+            str(output),
+        ]
+    )
+
+    assert exit_code == 0
+    assert DenseLatencyReport.model_validate_json(capsys.readouterr().out) == report
+    assert captured["load_args"] == (chunks, dense_root, dense_manifest)
+    assert captured["load_kwargs"] == {}
+    assert captured["certify"][1:] == (queries, output)
+    assert captured["closed"] is True
+
+
+def test_verify_best_available_dense_cli_is_local_and_provider_free(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    report = cli.DenseVerificationReport(
+        dense_manifest_hash="1" * 64,
+        corpus_manifest_hash="2" * 64,
+        chunk_count=14_549_269,
+        shard_count=15,
+        recall_query_count=100,
+        recall_at_300=0.99,
+        max_warm_search_seconds=4.5,
+        total_artifact_bytes=24 * 1024**3,
+    )
+    captured: dict[str, object] = {}
+
+    def fake_verify(*args):
+        captured["args"] = args
+        return report
+
+    monkeypatch.setattr(
+        cli,
+        "verify_best_available_dense",
+        fake_verify,
+        raising=False,
+    )
+    paths = [
+        tmp_path / "chunks.jsonl",
+        tmp_path / "corpus.json",
+        tmp_path / "dense",
+        tmp_path / "dense/manifest.json",
+        tmp_path / "recall-queries.txt",
+        tmp_path / "latency.json",
+    ]
+
+    exit_code = cli.run(
+        [
+            "verify-best-available-dense",
+            "--chunks",
+            str(paths[0]),
+            "--corpus-manifest",
+            str(paths[1]),
+            "--dense-directory",
+            str(paths[2]),
+            "--dense-manifest",
+            str(paths[3]),
+            "--certification-queries",
+            str(paths[4]),
+            "--latency-report",
+            str(paths[5]),
+        ]
+    )
+
+    assert exit_code == 0
+    assert cli.DenseVerificationReport.model_validate_json(
+        capsys.readouterr().out
+    ) == report
+    assert captured["args"] == tuple(paths)
+
+
+def test_production_dense_commands_do_not_expose_gate_or_profile_bypasses() -> None:
+    parser = cli._parser()
+    commands = next(
+        action
+        for action in parser._actions
+        if action.__class__.__name__ == "_SubParsersAction"
+    ).choices
+    build_options = {
+        option
+        for action in commands["build-best-available-dense"]._actions
+        for option in action.option_strings
+    }
+    latency_options = {
+        option
+        for action in commands["certify-best-available-dense-latency"]._actions
+        for option in action.option_strings
+    }
+
+    assert {"--batch-size", "--shard-size", "--recall-block-rows"} <= build_options
+    assert {
+        "--skip-checksums",
+        "--skip-recall",
+        "--skip-storage-gate",
+        "--nprobe",
+        "--ivf-nlist",
+        "--pq-subvectors",
+        "--candidate-count",
+    }.isdisjoint(build_options)
+    assert {"--maximum-seconds", "--latency-limit"}.isdisjoint(latency_options)
+
+
+def _compressed_manifest_for_cli() -> CompressedShardedDenseIndexManifest:
+    profile = DenseArtifactProfile(
+        embedding_dimension=2,
+        ivf_nlist=1,
+        pq_subvectors=1,
+        pq_bits=1,
+        nprobe=1,
+        candidate_count_per_shard=1,
+        training_sample_count=1,
+        shard_size_limit=1,
+        max_artifact_bytes=1024 * 1024,
+    )
+    shard = CompressedDenseShardManifest(
+        artifact_profile_hash=profile.manifest_hash(),
+        candidate_template_sha256="9" * 64,
+        shard_id=0,
+        path="shard-00000",
+        start_row=0,
+        end_row=1,
+        chunk_count=1,
+        embeddings_size_bytes=4,
+        embeddings_sha256="1" * 64,
+        candidate_index_size_bytes=8,
+        candidate_index_sha256="2" * 64,
+    )
+    return CompressedShardedDenseIndexManifest(
+        model_name="BAAI/bge-base-en-v1.5",
+        model_revision=REVISION,
+        embedding_dimension=2,
+        corpus_manifest_hash="3" * 64,
+        dense_semantics_hash="4" * 64,
+        chunks_sha256="5" * 64,
+        chunk_count=1,
+        artifact_profile=profile,
+        artifact_profile_hash=profile.manifest_hash(),
+        chunk_offsets_path="chunks.offsets.u64",
+        chunk_offsets_format=profile.metadata_lookup_version,
+        chunk_offsets_size_bytes=8,
+        chunk_offsets_sha256="6" * 64,
+        candidate_template_path="candidate-template.faiss",
+        candidate_template_size_bytes=8,
+        candidate_template_sha256="9" * 64,
+        shard_size_limit=1,
+        shards=[shard],
+        dtype="float16",
+        metric="inner_product",
+        candidate_index=profile.candidate_index,
+        recall_report_path="recall-report.json",
+        recall_report_size_bytes=8,
+        recall_report_sha256="7" * 64,
+        recall_at_300=1.0,
+        recall_queries_sha256="8" * 64,
+        recall_query_count=100,
+        total_artifact_bytes=36,
+    )

@@ -160,7 +160,18 @@ uv run corpus build-best-available-bm25 \
   --opensearch-url http://127.0.0.1:59200
 ```
 
-Build the bounded dense index. Each shard contains at most 1,000,000 consecutive chunks and publishes atomically. Certification combines the 50 frozen public application-shaped queries with 50 stable-hash title/opening-text queries from the verified corpus, scans the stored float16 embeddings exactly in bounded blocks, and refuses to publish the top manifest below `recall@300 = 0.98`:
+The compressed dense build is benchmark-first. The complete button-by-button cloud procedure, separate spending approvals, transfer steps, and shutdown choices are in [`docs/runbooks/runpod-compressed-dense-build.md`](docs/runbooks/runpod-compressed-dense-build.md). No RunPod resource or model call is needed to inspect these commands.
+
+Run the fixed 100,000-row benchmark before requesting approval for a full build:
+
+```bash
+uv run corpus benchmark-best-available-dense \
+  --chunks ../var/corpus/best-available/chunks.jsonl \
+  --corpus-manifest ../var/corpus/best-available/corpus-manifest.json \
+  --output-directory ../var/corpus/best-available/dense-benchmark
+```
+
+After the benchmark-derived full-build maximum is separately approved, build the resumable compressed index. Each shard contains at most 1,000,000 consecutive chunks and publishes atomically. Certification combines the 50 frozen public application-shaped queries with 50 stable-hash title/opening-text queries from the verified corpus, scans the stored float16 embeddings exactly in bounded blocks, and refuses to publish the top manifest below `recall@300 = 0.98` or above the 28 GiB artifact ceiling:
 
 ```bash
 uv run corpus build-best-available-dense \
@@ -170,6 +181,25 @@ uv run corpus build-best-available-dense \
   --certification-queries ../var/corpus/best-available/dense/recall-queries.txt \
   --output-directory ../var/corpus/best-available/dense \
   --output-manifest ../var/corpus/best-available/dense/manifest.json
+```
+
+After transferring the published artifacts to the Mac, certify the frozen five-second warm-search ceiling and verify every local artifact without a provider call:
+
+```bash
+uv run corpus certify-best-available-dense-latency \
+  --chunks ../var/corpus/best-available/chunks.jsonl \
+  --dense-directory ../var/corpus/best-available/dense \
+  --dense-manifest ../var/corpus/best-available/dense/manifest.json \
+  --certification-queries ../var/corpus/best-available/dense/recall-queries.txt \
+  --output ../var/corpus/best-available/dense/latency-report.json
+
+uv run corpus verify-best-available-dense \
+  --chunks ../var/corpus/best-available/chunks.jsonl \
+  --corpus-manifest ../var/corpus/best-available/corpus-manifest.json \
+  --dense-directory ../var/corpus/best-available/dense \
+  --dense-manifest ../var/corpus/best-available/dense/manifest.json \
+  --certification-queries ../var/corpus/best-available/dense/recall-queries.txt \
+  --latency-report ../var/corpus/best-available/dense/latency-report.json
 ```
 
 With all provider approvals still false, restart the API and worker and check `/v1/readiness`. The expected safe state is `best_available_foiarchive_v1.operational=true`, `approved=false`, and `ready=false`. Do not enable best-available generation from the artifact build alone. First count the exact own-query request and the resulting evidence-bound prediction request, show their expected and maximum combined cost, and obtain a new explicit approval for that two-stage call. Only then set the master and best-available flags; keep the other basis flags false unless separately approved:

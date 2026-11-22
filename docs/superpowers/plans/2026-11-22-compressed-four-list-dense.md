@@ -388,25 +388,25 @@ git push origin HEAD
 - Consumes: Task 4 build/benchmark, Task 5 latency certification, Task 6 verification.
 - Produces: `corpus benchmark-best-available-dense`, compressed `corpus build-best-available-dense`, `corpus certify-best-available-dense-latency`, and `corpus verify-best-available-dense`, plus a credential-safe RunPod runbook.
 
-- [ ] **Step 1: Write failing CLI contract tests**
+- [x] **Step 1: Write failing CLI contract tests**
 
 Assert exact path/number arguments reach each function and JSON stdout validates as `DenseBuildBenchmarkReport`, `ShardedDenseBuildReport`, `DenseLatencyReport`, or verification report. Assert benchmark defaults to exactly `100_000`, production build has no flag that can skip checksum/recall/storage gates, latency has no flag above `5.0`, and verification performs no provider calls.
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Step 2: Run and confirm failure**
 
 Run: `cd backend && uv run pytest -q tests/corpus/test_cli.py`
 
 Expected: FAIL because three commands and compressed arguments are absent.
 
-- [ ] **Step 3: Implement CLI commands**
+- [x] **Step 3: Implement CLI commands**
 
 Keep the frozen production profile internal; do not expose arbitrary IVF/PQ values on the production CLI. Allow only batch size, shard size up to 1,000,000, and bounded exact-scan block size as operational knobs. Print canonical JSON reports and use nonzero exit status for failed recall, latency, storage, or verification gates.
 
-- [ ] **Step 4: Write the RunPod runbook and local commands**
+- [x] **Step 4: Write the RunPod runbook and local commands**
 
 Document button-by-button account/pod/API-key/SSH steps, but mark them as future actions requiring the user's explicit benchmark approval. Specify 48-GiB-or-larger NVIDIA GPU, 150-GiB persistent workspace, no OpenAI key/user PDFs, public source download, benchmark-first stop, exact cost calculation from measured hours and selected live rate, full-build second approval, shard-by-shard checksum transfer, and pod/volume shutdown choices.
 
-- [ ] **Step 5: Run CLI tests and validate every documented local command with `--help` or no-spend fixtures**
+- [x] **Step 5: Run CLI tests and validate every documented local command with `--help` or no-spend fixtures**
 
 Run:
 
@@ -421,7 +421,7 @@ uv run corpus verify-best-available-dense --help
 
 Expected: PASS/exit `0`; no network or provider generation.
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add backend/src/redacted_backend/corpus/cli.py backend/tests/corpus/test_cli.py README.md docs/runbooks/runpod-compressed-dense-build.md
