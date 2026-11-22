@@ -209,6 +209,7 @@ Artifact building and retrieval verification use no OpenAI generation. Once oper
 - [x] Approve this design, including the five-second maximum per warm dense search.
 - [x] Write the implementation plan.
 - [x] Approve the implementation plan.
+- [x] Version the compressed artifact profile and schema-v2 manifests.
 - [ ] Implement profile/offset/candidate/runtime changes test-first.
 - [ ] Verify local suites and the fictional demo.
 - [ ] Complete the capped cloud benchmark after explicit approval.

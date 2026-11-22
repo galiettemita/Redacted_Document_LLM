@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from redacted_backend.retrieval.dense_profile import DenseArtifactProfile
+
 
 class PreparedContextQuery(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -152,6 +154,195 @@ class ShardedDenseIndexManifest(BaseModel):
             separators=(",", ":"),
         ).encode("utf-8")
         return hashlib.sha256(canonical).hexdigest()
+
+
+class CompressedDenseShardManifest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal["compressed-dense-shard-manifest-v1"] = (
+        "compressed-dense-shard-manifest-v1"
+    )
+    artifact_profile_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    candidate_template_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    shard_id: int = Field(ge=0)
+    path: str = Field(min_length=1)
+    start_row: int = Field(ge=0)
+    end_row: int = Field(gt=0)
+    chunk_count: int = Field(ge=1)
+    embeddings_size_bytes: int = Field(ge=1)
+    embeddings_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    candidate_index_size_bytes: int = Field(ge=1)
+    candidate_index_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def validate_range_and_path(self) -> CompressedDenseShardManifest:
+        _require_safe_relative_name(self.path, kind="directory")
+        if self.end_row - self.start_row != self.chunk_count:
+            raise ValueError(
+                "Compressed dense shard range must equal its chunk count"
+            )
+        return self
+
+
+class CompressedShardedDenseIndexManifest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal["sharded-dense-index-manifest-v2"] = (
+        "sharded-dense-index-manifest-v2"
+    )
+    retrieval_profile: Literal["best_available_foiarchive_v1"] = (
+        "best_available_foiarchive_v1"
+    )
+    model_name: str = Field(min_length=1)
+    model_revision: str = Field(pattern=r"^[0-9a-f]{40}$")
+    embedding_dimension: int = Field(ge=1)
+    corpus_manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    dense_semantics_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    chunks_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    chunk_count: int = Field(ge=1)
+    artifact_profile: DenseArtifactProfile
+    artifact_profile_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    chunk_offsets_path: str = Field(min_length=1)
+    chunk_offsets_format: Literal["shared-chunk-offsets-v1"]
+    chunk_offsets_size_bytes: int = Field(ge=1)
+    chunk_offsets_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    candidate_template_path: str = Field(min_length=1)
+    candidate_template_size_bytes: int = Field(ge=1)
+    candidate_template_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    shard_size_limit: int = Field(ge=1, le=1_000_000)
+    shards: list[CompressedDenseShardManifest] = Field(min_length=1)
+    dtype: Literal["float16"]
+    metric: Literal["inner_product"]
+    candidate_index: Literal["faiss-ivfpq-exact-rescore-v1"]
+    recall_report_path: str = Field(min_length=1)
+    recall_report_size_bytes: int = Field(ge=1)
+    recall_report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    recall_at_300: float = Field(ge=0, le=1)
+    recall_queries_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    recall_query_count: int = Field(ge=1)
+    total_artifact_bytes: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def validate_artifact_contract(self) -> CompressedShardedDenseIndexManifest:
+        profile = self.artifact_profile
+        if self.artifact_profile_hash != profile.manifest_hash():
+            raise ValueError("Dense artifact profile hash mismatch")
+        if self.embedding_dimension != profile.embedding_dimension:
+            raise ValueError("Dense artifact profile dimension mismatch")
+        if self.candidate_index != profile.candidate_index:
+            raise ValueError("Dense candidate index profile mismatch")
+        if self.metric != profile.metric:
+            raise ValueError("Dense candidate metric profile mismatch")
+        if self.chunk_offsets_format != profile.metadata_lookup_version:
+            raise ValueError("Dense offset format profile mismatch")
+        if self.chunk_offsets_size_bytes != self.chunk_count * 8:
+            raise ValueError("Dense offset byte size must equal chunk count times eight")
+        if self.shard_size_limit != profile.shard_size_limit:
+            raise ValueError("Dense shard size limit profile mismatch")
+        for value in (
+            self.chunk_offsets_path,
+            self.candidate_template_path,
+            self.recall_report_path,
+        ):
+            _require_safe_relative_name(value, kind="file")
+
+        expected_start = 0
+        for expected_id, shard in enumerate(self.shards):
+            if shard.shard_id != expected_id:
+                raise ValueError("Compressed dense shards need consecutive IDs")
+            if shard.start_row != expected_start:
+                raise ValueError("Compressed dense shard ranges must be consecutive")
+            if shard.chunk_count > self.shard_size_limit:
+                raise ValueError("Compressed dense shard exceeds the size limit")
+            if shard.artifact_profile_hash != self.artifact_profile_hash:
+                raise ValueError("Compressed dense shard profile hash mismatch")
+            if shard.candidate_template_sha256 != self.candidate_template_sha256:
+                raise ValueError("Compressed dense shard template hash mismatch")
+            expected_embedding_bytes = (
+                shard.chunk_count * self.embedding_dimension * 2
+            )
+            if shard.embeddings_size_bytes != expected_embedding_bytes:
+                raise ValueError("Compressed dense shard embedding size mismatch")
+            expected_start = shard.end_row
+        if expected_start != self.chunk_count:
+            raise ValueError(
+                "Compressed dense shard ranges must cover the exact chunk count"
+            )
+
+        listed_bytes = (
+            self.chunk_offsets_size_bytes
+            + self.candidate_template_size_bytes
+            + self.recall_report_size_bytes
+            + sum(
+                shard.embeddings_size_bytes + shard.candidate_index_size_bytes
+                for shard in self.shards
+            )
+        )
+        if self.total_artifact_bytes != listed_bytes:
+            raise ValueError("Dense total artifact byte count mismatch")
+        if self.total_artifact_bytes > profile.max_artifact_bytes:
+            raise ValueError("Dense artifacts exceed the profile storage ceiling")
+        return self
+
+    def manifest_hash(self) -> str:
+        canonical = json.dumps(
+            self.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(canonical).hexdigest()
+
+
+class DenseLatencyReport(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal["dense-latency-report-v1"] = (
+        "dense-latency-report-v1"
+    )
+    dense_manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    recall_queries_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    query_count: int = Field(ge=1)
+    warm_search_seconds: list[float] = Field(min_length=1)
+    max_observed_seconds: float = Field(gt=0)
+    maximum_allowed_seconds: float = Field(gt=0)
+    platform: str = Field(min_length=1)
+    machine: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_timings(self) -> DenseLatencyReport:
+        if len(self.warm_search_seconds) != self.query_count:
+            raise ValueError("Dense latency query count does not match timings")
+        if any(value <= 0 for value in self.warm_search_seconds):
+            raise ValueError("Dense latency timings must be positive")
+        if max(self.warm_search_seconds) != self.max_observed_seconds:
+            raise ValueError("Dense latency maximum does not match timings")
+        if self.max_observed_seconds > self.maximum_allowed_seconds:
+            raise ValueError("Dense latency maximum exceeds the allowed duration")
+        return self
+
+    def require_compatible(
+        self,
+        manifest: CompressedShardedDenseIndexManifest,
+    ) -> DenseLatencyReport:
+        if self.dense_manifest_hash != manifest.manifest_hash():
+            raise ValueError("Dense latency manifest hash mismatch")
+        if (
+            self.recall_queries_sha256 != manifest.recall_queries_sha256
+            or self.query_count != manifest.recall_query_count
+        ):
+            raise ValueError("Dense latency query identity mismatch")
+        if (
+            self.maximum_allowed_seconds
+            != manifest.artifact_profile.max_warm_search_seconds
+        ):
+            raise ValueError("Dense latency profile maximum mismatch")
+        return self
+
+
+def _require_safe_relative_name(value: str, *, kind: Literal["directory", "file"]) -> None:
+    path = PurePosixPath(value)
+    if path.is_absolute() or len(path.parts) != 1 or path.name in {"", ".", ".."}:
+        raise ValueError(f"Dense artifact path must be one safe relative {kind} name")
 
 
 class RankedChunk(BaseModel):

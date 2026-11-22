@@ -53,7 +53,7 @@
 - Consumes: `ScientificConfig` and the existing corpus/BM25 manifest hashes.
 - Produces: `DenseArtifactProfile`, `dense_semantics_hash(scientific: ScientificConfig) -> str`, `CompressedDenseShardManifest`, `CompressedShardedDenseIndexManifest`, and `DenseLatencyReport`.
 
-- [ ] **Step 1: Write failing profile and schema-v2 tests**
+- [x] **Step 1: Write failing profile and schema-v2 tests**
 
 Add tests asserting:
 
@@ -74,13 +74,13 @@ assert profile.manifest_hash() == DenseArtifactProfile().manifest_hash()
 
 Assert schema v2 rejects unsafe shard paths, nonconsecutive ranges, wrong artifact-profile hashes, unsupported candidate names, offset sizes other than `chunk_count * 8`, PQ subvector counts that do not divide 768, and latency reports whose dense-manifest/query hashes differ.
 
-- [ ] **Step 2: Run the focused tests and confirm they fail**
+- [x] **Step 2: Run the focused tests and confirm they fail**
 
 Run: `cd backend && uv run pytest -q tests/retrieval/test_dense_profile.py tests/retrieval/test_dense_sharded.py tests/retrieval/test_dense_recall_sharded.py tests/corpus/test_build_dense_sharded.py tests/corpus/test_cli.py tests/test_readiness.py`
 
 Expected: FAIL because the new profile and schema-v2 models do not exist.
 
-- [ ] **Step 3: Implement the immutable profile and manifest models**
+- [x] **Step 3: Implement the immutable profile and manifest models**
 
 In `dense_profile.py`, implement:
 
@@ -101,13 +101,13 @@ class DenseLatencyReport(BaseModel): ...
 
 Keep exact-paper `DenseIndexManifest` unchanged. Replace best-available test fixtures with schema v2; no production schema-v1 best-available artifact exists to migrate.
 
-- [ ] **Step 4: Run focused tests and confirm they pass**
+- [x] **Step 4: Run focused tests and confirm they pass**
 
 Run the Step 2 command.
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit and update the design checklist**
+- [x] **Step 5: Commit and update the design checklist**
 
 ```bash
 git add backend/src/redacted_backend/retrieval/dense_profile.py backend/src/redacted_backend/retrieval/types.py backend/tests docs/superpowers/specs/2026-11-21-compressed-four-list-dense-design.md
