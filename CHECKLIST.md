@@ -187,6 +187,12 @@
       - [x] Wire separate fail-closed best-available readiness and a basis-bound worker runtime through real two-stage query, four-list retrieval, prediction, persistence, retries, events, and Compose paths without any model-only downgrade.
       - [x] Pass the archive-assisted upload-to-SSE loopback with two fake provider stages, four non-empty retrieval lists, fused evidence, durable best-available provenance, and no real provider traffic.
       - [x] Document the production source link/import/BM25/sharded-dense/readiness commands and verify backend, frontend, migration, Compose, typecheck, and production build regressions with every paid approval false.
+      - [x] Replace the oversized float16 dense-artifact plan with deterministic signed-int8 directions, schema-v3 manifests, and a hard 16 GiB final-artifact ceiling.
+      - [x] Build and verify resumable one-byte embedding checkpoints, hard-linked final shards, dequantized FAISS training/addition, exact int8 recall certification, and truthful physical-byte projections.
+      - [x] Serve both independent dense lists from checksum-verified int8 artifacts, fail closed on incomplete rankings or old float16 manifests, and preserve the fictional demo.
+      - [x] Pin the real BGE loader to local CPU so benchmark and build measurements do not silently use the Mac GPU.
+      - [x] Re-run 469 backend tests, 92 frontend tests, typecheck, production build, Compose validation, and the full migration round-trip with every paid approval false.
+      - [ ] Complete the running 100,000-row real CPU benchmark, then start and verify the resumable 14,549,269-row production build only if the measured storage gate passes.
     - [x] With a real key configured and generation still disabled, count the exact one-passage request, show expected and maximum cost, and obtain explicit approval before the first paid model call.
       - [x] Align the production input-token request with the current provider schema by excluding generation-only fields, with a regression test and full backend/frontend verification.
       - [x] Count the selected one-passage closed-book request at 131 exact provider input tokens while every paid-generation approval remains disabled.

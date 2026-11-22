@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import sys
+import types
 from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
 import pytest
 
+import redacted_backend.retrieval.dense as dense_module
 from redacted_backend.corpus.chunker import CorpusChunk
 from redacted_backend.retrieval.dense import (
     BgeEncoder,
@@ -76,6 +79,34 @@ def test_bge_encoder_pins_revision_distinguishes_queries_and_normalizes() -> Non
     np.testing.assert_allclose(np.linalg.norm(documents, axis=1), [1.0, 1.0])
     np.testing.assert_allclose(np.linalg.norm(query), 1.0)
     np.testing.assert_allclose(documents[0], [0.6, 0.8])
+
+
+def test_production_sentence_transformer_is_explicitly_cpu_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    expected = RecordingSentenceModel()
+
+    def construct(model_name: str, **kwargs: object) -> RecordingSentenceModel:
+        captured["model_name"] = model_name
+        captured.update(kwargs)
+        return expected
+
+    monkeypatch.setitem(
+        sys.modules,
+        "sentence_transformers",
+        types.SimpleNamespace(SentenceTransformer=construct),
+    )
+
+    loaded = dense_module._load_sentence_transformer("model", "revision")
+
+    assert loaded is expected
+    assert captured == {
+        "model_name": "model",
+        "revision": "revision",
+        "trust_remote_code": False,
+        "device": "cpu",
+    }
 
 
 def test_dense_search_exactly_rescores_candidates_and_uses_stable_ties() -> None:

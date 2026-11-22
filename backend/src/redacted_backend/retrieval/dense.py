@@ -249,4 +249,5 @@ def _load_sentence_transformer(model_name: str, revision: str) -> SentenceModel:
         model_name,
         revision=revision,
         trust_remote_code=False,
+        device="cpu",
     )

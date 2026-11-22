@@ -144,7 +144,7 @@ Commit: `feat: serve int8 four-list retrieval`
 - Consumes: Tasks 1-3, the existing 14,549,269-passage artifact, and live BM25 index.
 - Produces: measured local benchmark, resumable real artifact build, operational/unapproved readiness, and exact two-stage model cost.
 
-- [ ] **Step 1: Run all regression gates**
+- [x] **Step 1: Run all regression gates**
 
 Run the full backend suite, frontend tests/typecheck/build, Compose config, migration round-trip, four-list loopback, and fictional-demo isolation with all paid flags false.
 
