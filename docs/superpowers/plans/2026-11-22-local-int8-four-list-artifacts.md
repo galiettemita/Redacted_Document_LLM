@@ -113,23 +113,23 @@ Commit: `feat: build resumable int8 dense shards`
 - Consumes: schema-v3 int8 artifacts from Task 2.
 - Produces: cached local four-list dense searches, recall/latency evidence, and fail-closed operational readiness.
 
-- [ ] **Step 1: Write failing runtime/readiness/transfer tests**
+- [x] **Step 1: Write failing runtime/readiness/transfer tests**
 
 Assert global candidate rescoring uses reconstructed unit vectors, stable ties remain unchanged, complete top-300 results are required, missing/corrupt int8 files fail, old v2 manifests fail, transfer validates schema v3 and `embeddings.i8`, and runtime performs both dense lists independently of BM25.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run: `cd backend && uv run pytest -q tests/retrieval/test_dense_sharded.py tests/retrieval/test_dense_recall_sharded.py tests/test_readiness.py tests/jobs/test_runtime_provider.py tests/corpus/test_dense_transfer_script.py`
 
-- [ ] **Step 3: Implement the minimal runtime and gate changes**
+- [x] **Step 3: Implement the minimal runtime and gate changes**
 
 Memory-map signed bytes, use Task 1 dequantization for every score path, verify exact size/checksum/name/schema/profile identity, and keep readiness closed until recall and same-host latency evidence pass.
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run the Step 2 command and require zero failures.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit: `feat: serve int8 four-list retrieval`
 

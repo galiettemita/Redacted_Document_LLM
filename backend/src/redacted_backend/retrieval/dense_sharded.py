@@ -32,6 +32,7 @@ from redacted_backend.retrieval.faiss_ivfpq import (
     FaissIvfPqIndex,
     inspect_ivfpq_artifact,
 )
+from redacted_backend.retrieval.int8_embeddings import dequantize_directions
 from redacted_backend.retrieval.types import (
     CompressedDenseShardManifest,
     CompressedShardedDenseIndexManifest,
@@ -119,8 +120,8 @@ class ShardedDenseIndex:
                 self._candidates.append(candidate)
                 self._embeddings.append(
                     np.memmap(
-                        directory / "embeddings.f16",
-                        dtype=np.float16,
+                        directory / manifest.embedding_file,
+                        dtype=np.int8,
                         mode="r",
                         shape=(shard.chunk_count, manifest.embedding_dimension),
                     )
@@ -198,6 +199,11 @@ class ShardedDenseIndex:
         ]
         scored = [value for future in futures for value in future.result()]
         ranked = self._materialize(scored, limit)
+        expected_count = min(limit, self.manifest.chunk_count)
+        if len(ranked) != expected_count:
+            raise IncompatibleDenseIndexError(
+                "Compressed dense search did not return a complete result list"
+            )
 
         query_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()
         index_hash = self.manifest.manifest_hash()
@@ -274,10 +280,9 @@ class ShardedDenseIndex:
         if not rows:
             return []
         row_array = np.asarray(rows, dtype=np.int64)
-        scores = (
-            np.asarray(self._embeddings[ordinal][row_array], dtype=np.float32)
-            @ query_vector
-        )
+        scores = dequantize_directions(
+            np.asarray(self._embeddings[ordinal][row_array], dtype=np.int8)
+        ) @ query_vector
         return [
             (float(score), shard.start_row + row)
             for row, score in zip(rows, scores, strict=True)
@@ -429,7 +434,7 @@ def _verify_compressed_artifacts(
         artifacts.extend(
             [
                 (
-                    root / shard.path / "embeddings.f16",
+                        root / shard.path / manifest.embedding_file,
                     shard.embeddings_size_bytes,
                     shard.embeddings_sha256,
                 ),
@@ -539,10 +544,13 @@ def certify_sharded_dense_recall(
             directory,
             shard.chunk_count,
             manifest.embedding_dimension,
+            manifest.embedding_file,
         )
         for start in range(0, shard.chunk_count, block_rows):
             end = min(start + block_rows, shard.chunk_count)
-            block_matrix = np.asarray(embeddings[start:end], dtype=np.float32)
+            block_matrix = dequantize_directions(
+                np.asarray(embeddings[start:end], dtype=np.int8)
+            )
             scores = _matrix_scores(block_matrix, query_vectors, matrix_backend)
             for query_index in range(len(queries)):
                 scored = [
@@ -586,7 +594,9 @@ def certify_sharded_dense_recall(
                 seen.add(row)
                 rows.append(row)
             row_array = np.asarray(rows, dtype=np.int64)
-            scores = np.asarray(embeddings[row_array], dtype=np.float32) @ query_vector
+            scores = dequantize_directions(
+                np.asarray(embeddings[row_array], dtype=np.int8)
+            ) @ query_vector
             candidates = [
                 (float(score), shard.start_row + row)
                 for row, score in zip(rows, scores, strict=True)
@@ -653,7 +663,7 @@ def verify_compressed_dense_artifacts_cached(
         stat = path.stat()
         signatures.append((name, stat.st_size, stat.st_mtime_ns))
     for shard in manifest.shards:
-        for name in ("manifest.json", "embeddings.f16", "candidate.faiss"):
+        for name in ("manifest.json", manifest.embedding_file, "candidate.faiss"):
             path = root / shard.path / name
             stat = path.stat()
             signatures.append((f"{shard.path}/{name}", stat.st_size, stat.st_mtime_ns))
@@ -787,10 +797,11 @@ def _open_embeddings(
     directory: Path,
     rows: int,
     dimension: int,
+    filename: str,
 ) -> np.memmap:
     return np.memmap(
-        directory / "embeddings.f16",
-        dtype=np.float16,
+        directory / filename,
+        dtype=np.int8,
         mode="r",
         shape=(rows, dimension),
     )

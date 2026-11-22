@@ -252,6 +252,8 @@ def verify_best_available_corpus_readiness(
         dense.artifact_profile != supported_profile
         or dense.artifact_profile_hash != supported_profile.manifest_hash()
         or dense.candidate_index != supported_profile.candidate_index
+        or dense.embedding_file != supported_profile.embedding_filename
+        or dense.dtype != supported_profile.embedding_dtype
     ):
         return ComponentReadiness(
             ready=False,
@@ -280,7 +282,7 @@ def verify_best_available_corpus_readiness(
             )
         if (
             shard.embeddings_size_bytes
-            != shard.chunk_count * dense.embedding_dimension * 2
+            != shard.chunk_count * dense.embedding_dimension
         ):
             return ComponentReadiness(
                 ready=False,

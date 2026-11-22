@@ -24,7 +24,7 @@ def _remote_fixture(root: Path) -> tuple[Path, dict[str, object]]:
         "candidate-template.faiss": b"template",
         "recall-report.json": b'{"recall":1}\n',
         "recall-queries.txt": b"query\n",
-        "shard-00000/embeddings.f16": b"embeddings",
+        "shard-00000/embeddings.i8": b"embeddings",
         "shard-00000/candidate.faiss": b"candidate",
     }
     for relative, value in files.items():
@@ -40,8 +40,8 @@ def _remote_fixture(root: Path) -> tuple[Path, dict[str, object]]:
         "start_row": 0,
         "end_row": 1,
         "chunk_count": 1,
-        "embeddings_size_bytes": len(files["shard-00000/embeddings.f16"]),
-        "embeddings_sha256": _sha256(files["shard-00000/embeddings.f16"]),
+        "embeddings_size_bytes": len(files["shard-00000/embeddings.i8"]),
+        "embeddings_sha256": _sha256(files["shard-00000/embeddings.i8"]),
         "candidate_index_size_bytes": len(files["shard-00000/candidate.faiss"]),
         "candidate_index_sha256": _sha256(files["shard-00000/candidate.faiss"]),
     }
@@ -49,11 +49,14 @@ def _remote_fixture(root: Path) -> tuple[Path, dict[str, object]]:
         len(files["chunks.offsets.u64"])
         + len(files["candidate-template.faiss"])
         + len(files["recall-report.json"])
-        + len(files["shard-00000/embeddings.f16"])
+        + len(files["shard-00000/embeddings.i8"])
         + len(files["shard-00000/candidate.faiss"])
     )
     manifest: dict[str, object] = {
-        "schema_version": "sharded-dense-index-manifest-v2",
+        "schema_version": "sharded-dense-index-manifest-v3",
+        "embedding_file": "embeddings.i8",
+        "dtype": "int8",
+        "candidate_index": "faiss-ivfpq-int8-rescore-v1",
         "chunk_offsets_path": "chunks.offsets.u64",
         "chunk_offsets_size_bytes": len(files["chunks.offsets.u64"]),
         "chunk_offsets_sha256": _sha256(files["chunks.offsets.u64"]),
@@ -219,6 +222,19 @@ def test_transfer_rejects_multiple_json_documents_before_rsync(
     assert not (tmp_path / "rsync.log").exists()
     assert not (tmp_path / "project/var/corpus/best-available/escaped-offsets").exists()
     assert not (tmp_path / "project/var/corpus/best-available/dense/manifest.json").exists()
+
+
+def test_transfer_rejects_old_float16_manifest_before_rsync(tmp_path: Path) -> None:
+    remote, manifest = _remote_fixture(tmp_path)
+    manifest["schema_version"] = "sharded-dense-index-manifest-v2"
+    manifest["embedding_file"] = "embeddings.f16"
+    manifest["dtype"] = "float16"
+    (remote / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = _run(tmp_path, available_bytes=HEADROOM_BYTES + 1024**2)
+
+    assert result.returncode != 0
+    assert not (tmp_path / "rsync.log").exists()
 
 
 def test_transfer_rejects_existing_symlink_destination_components(

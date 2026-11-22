@@ -48,7 +48,7 @@ def _manifest(queries_sha256: str) -> CompressedShardedDenseIndexManifest:
         start_row=0,
         end_row=1,
         chunk_count=1,
-        embeddings_size_bytes=4,
+        embeddings_size_bytes=2,
         embeddings_sha256="1" * 64,
         candidate_index_size_bytes=8,
         candidate_index_sha256="2" * 64,
@@ -72,7 +72,8 @@ def _manifest(queries_sha256: str) -> CompressedShardedDenseIndexManifest:
         candidate_template_sha256="9" * 64,
         shard_size_limit=1,
         shards=[shard],
-        dtype="float16",
+        embedding_file="embeddings.i8",
+        dtype="int8",
         metric="inner_product",
         candidate_index=profile.candidate_index,
         recall_report_path="recall-report.json",
@@ -81,7 +82,7 @@ def _manifest(queries_sha256: str) -> CompressedShardedDenseIndexManifest:
         recall_at_300=1.0,
         recall_queries_sha256=queries_sha256,
         recall_query_count=100,
-        total_artifact_bytes=36,
+        total_artifact_bytes=34,
     )
 
 

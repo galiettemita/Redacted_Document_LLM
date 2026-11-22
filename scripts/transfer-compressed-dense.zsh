@@ -102,7 +102,10 @@ jq -e -s '
   end |
   select(
   type == "object" and
-  .schema_version == "sharded-dense-index-manifest-v2" and
+  .schema_version == "sharded-dense-index-manifest-v3" and
+  .embedding_file == "embeddings.i8" and
+  .dtype == "int8" and
+  .candidate_index == "faiss-ivfpq-int8-rescore-v1" and
   .chunk_offsets_path == "chunks.offsets.u64" and
   .candidate_template_path == "candidate-template.faiss" and
   .recall_report_path == "recall-report.json" and
@@ -143,6 +146,7 @@ if [[ "$recall_queries_size" != <1-> ]]; then
 fi
 
 jq -c '
+  .embedding_file as $embedding_file |
   [
     {
       path: .chunk_offsets_path,
@@ -162,7 +166,7 @@ jq -c '
   ] + [
     .shards[] |
     {
-      path: (.path + "/embeddings.f16"),
+      path: (.path + "/" + $embedding_file),
       size: .embeddings_size_bytes,
       sha256: .embeddings_sha256
     },

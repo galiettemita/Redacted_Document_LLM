@@ -21,6 +21,7 @@ from redacted_backend.retrieval.dense_sharded import (
     certify_sharded_dense_recall,
     select_certification_queries,
 )
+from redacted_backend.retrieval.int8_embeddings import quantize_directions
 from redacted_backend.corpus.build_dense_sharded import _best_scores
 from redacted_backend.retrieval.types import (
     CompressedDenseShardManifest,
@@ -138,10 +139,12 @@ def _write_recall_fixture(
     ):
         directory = root / f"shard-{shard_id:05d}"
         directory.mkdir()
-        embeddings = directory / "embeddings.f16"
-        np.asarray(
-            [[score, 1.0 - score] for score in scores],
-            dtype=np.float16,
+        embeddings = directory / "embeddings.i8"
+        quantize_directions(
+            np.asarray(
+                [[score, 1.0 - score] for score in scores],
+                dtype=np.float32,
+            )
         ).tofile(embeddings)
         candidate = directory / "candidate.faiss"
         candidate.write_text(json.dumps(rows), encoding="utf-8")
@@ -194,7 +197,8 @@ def _write_recall_fixture(
             candidate_template_sha256=template_sha256,
             shard_size_limit=2,
             shards=shards,
-            dtype="float16",
+            embedding_file="embeddings.i8",
+            dtype="int8",
             metric="inner_product",
             candidate_index=profile.candidate_index,
             recall_report_path=recall.name,

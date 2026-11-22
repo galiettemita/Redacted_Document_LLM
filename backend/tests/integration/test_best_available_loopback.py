@@ -52,6 +52,10 @@ from redacted_backend.retrieval.faiss_ivfpq import (
     FaissIvfPqIndex,
     train_ivfpq_template,
 )
+from redacted_backend.retrieval.int8_embeddings import (
+    dequantize_directions,
+    quantize_directions,
+)
 from redacted_backend.retrieval.service import RealisticRetrievalService
 from redacted_backend.retrieval.types import (
     CompressedDenseShardManifest,
@@ -240,7 +244,7 @@ def _build_real_retrievers(
     training /= np.linalg.norm(training, axis=1, keepdims=True)
     template_path = dense_root / "candidate-template.faiss"
     template_sha256 = train_ivfpq_template(
-        training,
+        dequantize_directions(quantize_directions(training)),
         template_path,
         dimension=4,
         profile=profile,
@@ -255,11 +259,12 @@ def _build_real_retrievers(
     )
     shard_root = dense_root / "shard-00000"
     shard_root.mkdir()
-    embeddings_path = shard_root / "embeddings.f16"
-    vectors.astype(np.float16).tofile(embeddings_path)
+    embeddings_path = shard_root / "embeddings.i8"
+    quantized_vectors = quantize_directions(vectors)
+    quantized_vectors.tofile(embeddings_path)
     candidate_path = shard_root / "candidate.faiss"
     candidate = FaissIvfPqIndex.create(template_path, profile=profile)
-    candidate.add(vectors)
+    candidate.add(dequantize_directions(quantized_vectors))
     candidate.save(candidate_path)
     offsets_path = dense_root / "chunks.offsets.u64"
     offsets = build_chunk_offsets(
@@ -309,7 +314,8 @@ def _build_real_retrievers(
         candidate_template_sha256=template_sha256,
         shard_size_limit=profile.shard_size_limit,
         shards=[shard],
-        dtype="float16",
+        embedding_file="embeddings.i8",
+        dtype="int8",
         metric="inner_product",
         candidate_index=profile.candidate_index,
         recall_report_path=recall_path.name,
@@ -456,7 +462,7 @@ def test_live_opensearch_and_pinned_encoder_naturally_separate_dense_document(
         training /= np.linalg.norm(training, axis=1, keepdims=True)
         template = dense_root / "candidate-template.faiss"
         template_sha256 = train_ivfpq_template(
-            training,
+            dequantize_directions(quantize_directions(training)),
             template,
             dimension=768,
             profile=profile,
@@ -468,11 +474,12 @@ def test_live_opensearch_and_pinned_encoder_naturally_separate_dense_document(
             encoding="utf-8",
         )
         chunks_sha256 = hashlib.sha256(chunks_path.read_bytes()).hexdigest()
-        embeddings = shard_root / "embeddings.f16"
-        vectors.astype(np.float16).tofile(embeddings)
+        embeddings = shard_root / "embeddings.i8"
+        quantized_vectors = quantize_directions(vectors)
+        quantized_vectors.tofile(embeddings)
         candidate_path = shard_root / "candidate.faiss"
         candidate = FaissIvfPqIndex.create(template, profile=profile)
-        candidate.add(vectors)
+        candidate.add(dequantize_directions(quantized_vectors))
         candidate.save(candidate_path)
         offsets_path = dense_root / "chunks.offsets.u64"
         offsets = build_chunk_offsets(
@@ -526,7 +533,8 @@ def test_live_opensearch_and_pinned_encoder_naturally_separate_dense_document(
             candidate_template_sha256=template_hash,
             shard_size_limit=profile.shard_size_limit,
             shards=[dense_shard],
-            dtype="float16",
+            embedding_file="embeddings.i8",
+            dtype="int8",
             metric="inner_product",
             candidate_index=profile.candidate_index,
             recall_report_path=recall.name,

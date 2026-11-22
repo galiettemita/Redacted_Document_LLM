@@ -17,6 +17,10 @@ from redacted_backend.retrieval.dense_profile import (
     dense_semantics_hash,
 )
 from redacted_backend.retrieval.dense_sharded import ShardedDenseIndex
+from redacted_backend.retrieval.int8_embeddings import (
+    dequantize_directions,
+    quantize_directions,
+)
 from redacted_backend.retrieval.types import (
     CompressedDenseShardManifest,
     CompressedShardedDenseIndexManifest,
@@ -134,8 +138,8 @@ def _write_runtime_fixture(
     ):
         directory = root / f"shard-{shard_id:05d}"
         directory.mkdir()
-        embeddings = directory / "embeddings.f16"
-        np.asarray(vectors, dtype=np.float16).tofile(embeddings)
+        embeddings = directory / "embeddings.i8"
+        quantize_directions(np.asarray(vectors, dtype=np.float32)).tofile(embeddings)
         candidate = directory / "candidate.faiss"
         candidate.write_text(json.dumps(rows), encoding="utf-8")
         rows_by_path[directory.name] = rows
@@ -187,7 +191,8 @@ def _write_runtime_fixture(
         candidate_template_sha256=template_sha256,
         shard_size_limit=effective_profile.shard_size_limit,
         shards=shards,
-        dtype="float16",
+        embedding_file="embeddings.i8",
+        dtype="int8",
         metric="inner_product",
         candidate_index=effective_profile.candidate_index,
         recall_report_path=recall.name,
@@ -299,6 +304,10 @@ def test_search_caches_every_shard_and_exactly_rescores_global_candidates(
     assert second == first
     assert read_count == 10
     assert [item.rank for item in first] == [1, 2, 3, 4, 5]
+    expected_top_score = dequantize_directions(
+        quantize_directions(np.asarray([[0.95, 0.05, 0.0]], dtype=np.float32))
+    )[0, 0]
+    assert first[0].score == pytest.approx(float(expected_top_score))
     assert all(item.retriever == "dense" for item in first)
     assert all(item.query_kind == "context" for item in first)
     assert all(item.corpus_manifest_hash == "1" * 64 for item in first)
@@ -332,6 +341,36 @@ def test_search_rejects_out_of_range_candidate_rows(tmp_path: Path) -> None:
         scientific=_scientific(),
     ) as index:
         with pytest.raises(IncompatibleDenseIndexError, match="invalid.*row"):
+            index.search("visible query", candidates=1, limit=1)
+
+
+def test_search_refuses_an_incomplete_result_list(tmp_path: Path) -> None:
+    manifest, chunks_path, rows_by_path = _write_runtime_fixture(
+        tmp_path,
+        vectors_by_shard=[np.asarray([[1.0, 0.0, 0.0]])],
+        chunks=[_chunk("only")],
+        candidate_rows=[[]],
+        profile=_profile(
+            training_sample_count=1,
+            shard_size_limit=1,
+            candidate_count_per_shard=1,
+        ),
+    )
+
+    def loader(path: Path, *, profile: DenseArtifactProfile) -> RowsCandidateIndex:
+        del profile
+        return RowsCandidateIndex(rows_by_path[path.parent.name], ntotal=1)
+
+    with ShardedDenseIndex(
+        root=tmp_path,
+        chunks_path=chunks_path,
+        manifest=manifest,
+        encoder=QueryEncoder(),
+        candidate_loader=loader,
+        template_loader=_load_template,
+        scientific=_scientific(),
+    ) as index:
+        with pytest.raises(IncompatibleDenseIndexError, match="complete.*list"):
             index.search("visible query", candidates=1, limit=1)
 
 

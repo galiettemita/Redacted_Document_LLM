@@ -680,6 +680,8 @@ def test_best_available_manifest_mismatches_fail_closed(
     [
         "offset_checksum",
         "shard_size",
+        "embedding_checksum",
+        "missing_embedding",
         "shard_checksum",
         "template_checksum",
         "query_hash",
@@ -708,8 +710,13 @@ def test_best_available_external_mismatches_fail_before_live_bm25_probe(
         path = dense_root / dense.chunk_offsets_path
         path.write_bytes(b"1" * path.stat().st_size)
     elif case == "shard_size":
-        path = dense_root / dense.shards[0].path / "embeddings.f16"
+        path = dense_root / dense.shards[0].path / "embeddings.i8"
         path.write_bytes(path.read_bytes() + b"x")
+    elif case == "embedding_checksum":
+        path = dense_root / dense.shards[0].path / "embeddings.i8"
+        path.write_bytes(b"\2" * path.stat().st_size)
+    elif case == "missing_embedding":
+        (dense_root / dense.shards[0].path / "embeddings.i8").unlink()
     elif case == "shard_checksum":
         path = dense_root / dense.shards[0].path / "candidate.faiss"
         path.write_bytes(b"x" * path.stat().st_size)
@@ -749,6 +756,39 @@ def test_best_available_external_mismatches_fail_before_live_bm25_probe(
     )
 
     assert readiness.ready is False
+    assert probe_calls == 0
+
+
+def test_best_available_readiness_rejects_old_float16_manifest_before_probe(
+    tmp_path: Path,
+) -> None:
+    settings, corpus, _bm25, dense = _compatible_best_available_settings(tmp_path)
+    dense_path = settings.best_available_dense_manifest_path
+    assert dense_path is not None
+    value = dense.model_dump(mode="json")
+    value.update(
+        {
+            "schema_version": "sharded-dense-index-manifest-v2",
+            "embedding_file": "embeddings.f16",
+            "dtype": "float16",
+        }
+    )
+    dense_path.write_text(json.dumps(value), encoding="utf-8")
+    probe_calls = 0
+
+    def count(_url: str, _index: str) -> int:
+        nonlocal probe_calls
+        probe_calls += 1
+        return 1
+
+    readiness = resolve_best_available_corpus_readiness(
+        settings,
+        index_counter=count,
+        contract=_best_available_test_contract(corpus, dense),
+        worker_identity=_test_worker_identity(),
+    )
+
+    assert readiness.model_dump() == {"ready": False, "detail": "manifest invalid"}
     assert probe_calls == 0
 
 
@@ -996,8 +1036,8 @@ def _compatible_best_available_settings(
     template = dense_root / "candidate-template.faiss"
     _write_faiss_header_fixture(template, profile=profile, kind="template", ntotal=0)
     recall_report = dense_root / "recall-report.json"
-    embeddings = shard_directory / "embeddings.f16"
-    embeddings.write_bytes(b"\0" * (scientific.embedding_dimension * 2))
+    embeddings = shard_directory / "embeddings.i8"
+    embeddings.write_bytes(b"\1" * scientific.embedding_dimension)
     candidate = shard_directory / "candidate.faiss"
     _write_faiss_header_fixture(candidate, profile=profile, kind="candidate", ntotal=1)
     template_sha256 = hashlib.sha256(template.read_bytes()).hexdigest()
@@ -1056,7 +1096,8 @@ def _compatible_best_available_settings(
         candidate_template_sha256=template_sha256,
         shard_size_limit=1_000_000,
         shards=[shard],
-        dtype="float16",
+        embedding_file="embeddings.i8",
+        dtype="int8",
         metric="inner_product",
         candidate_index=profile.candidate_index,
         recall_report_path=recall_report.name,
