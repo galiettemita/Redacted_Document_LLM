@@ -212,6 +212,7 @@ Artifact building and retrieval verification use no OpenAI generation. Once oper
 - [x] Version the compressed artifact profile and schema-v2 manifests.
 - [x] Build and verify the shared checksum-bound chunk-offset index.
 - [x] Add the real FAISS IVF-PQ candidate adapter.
+- [x] Build resumable compressed embedding and candidate phases plus the bounded benchmark.
 - [ ] Implement profile/offset/candidate/runtime changes test-first.
 - [ ] Verify local suites and the fictional demo.
 - [ ] Complete the capped cloud benchmark after explicit approval.

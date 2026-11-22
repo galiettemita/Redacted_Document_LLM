@@ -215,7 +215,7 @@ git push origin HEAD
 - Consumes: Task 1 profile/models, Task 2 offsets, Task 3 template/index adapter, existing corpus manifest/chunk JSONL/certification queries/BGE encoder.
 - Produces: the existing public `build_sharded_dense_from_files(...) -> ShardedDenseBuildReport`, now returning `CompressedShardedDenseIndexManifest`; verified embedding checkpoints; a trained-template artifact; complete candidate shards; and a `DenseBuildBenchmarkReport` for bounded samples.
 
-- [ ] **Step 1: Rewrite builder tests to fail on the compressed contract**
+- [x] **Step 1: Rewrite builder tests to fail on the compressed contract**
 
 Assert a five-row fixture produces one global offsets file, embedding shards, one trained template, and candidate files—but no `metadata.jsonl` or per-shard offsets. Assert the manifest records profile/semantics hashes, exact ranges, sizes/checksums, and total artifact bytes below its ceiling.
 
@@ -229,13 +229,13 @@ assert rebuilt_candidate_encoder.encoded_rows == 0  # candidate corruption never
 
 Add actual-write failure, insufficient-free-space, incomplete temporary directory, stale chunk checksum, wrong training-row file, corrupt embedding checkpoint, corrupt candidate, and final-size-over-28-GiB tests.
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Step 2: Run and confirm failure**
 
 Run: `cd backend && uv run pytest -q tests/corpus/test_build_dense_sharded.py tests/corpus/test_dense_storage_budget.py`
 
 Expected: FAIL against metadata-copy/HNSW behavior.
 
-- [ ] **Step 3: Implement explicit build phases**
+- [x] **Step 3: Implement explicit build phases**
 
 Keep `build_sharded_dense_from_files` as the CLI boundary and split internal phases into focused helpers:
 
@@ -249,17 +249,17 @@ _publish_certified_manifest(...) -> CompressedShardedDenseIndexManifest
 
 Select 200,000 training rows by stable hash over `(chunk.id, global_row)`, store sorted little-endian row IDs, train from completed float16 shard memmaps as float32, and build every candidate without invoking the encoder. Check real free bytes before each allocation and surface the exact path/required/available byte counts.
 
-- [ ] **Step 4: Implement the bounded 100,000-row benchmark report**
+- [x] **Step 4: Implement the bounded 100,000-row benchmark report**
 
 Add `benchmark_sharded_dense_build(...) -> DenseBuildBenchmarkReport` that uses the same stable selection rule, pinned encoder, and real file writes; record sample rows, seconds, rows/second, peak process RSS when available, bytes/row by artifact type, projected full bytes, and projected GPU hours. Because the approved benchmark has 100,000 rows and the production training sample has 200,000, use all 100,000 benchmark rows for a non-publishable benchmark-only IVF-PQ training pass; never treat that template or its recall as production evidence. It must not extrapolate dollar cost because price comes from the selected pod at approval time.
 
-- [ ] **Step 5: Run builder, offset, candidate, and resume tests**
+- [x] **Step 5: Run builder, offset, candidate, and resume tests**
 
 Run: `cd backend && uv run pytest -q tests/corpus/test_build_dense_sharded.py tests/corpus/test_dense_storage_budget.py tests/retrieval/test_chunk_offsets.py tests/retrieval/test_faiss_ivfpq.py`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add backend/src/redacted_backend/corpus/build_dense_sharded.py backend/tests/corpus/test_build_dense_sharded.py backend/tests/corpus/test_dense_storage_budget.py
