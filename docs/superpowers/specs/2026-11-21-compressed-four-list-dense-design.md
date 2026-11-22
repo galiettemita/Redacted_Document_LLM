@@ -233,6 +233,7 @@ Artifact building and retrieval verification use no OpenAI generation. Once oper
 - [x] Correct the removed, never-enforced RunPod stop flags; put the benchmark behind a fail-fast command deadline, independent Mac and in-Pod stop schedulers, and an approved prepaid-balance ceiling with auto-pay off.
 - [x] Reject parent-directory symlink escapes and dense roots outside the canonical project root during transfer.
 - [x] Pin worker base images and bind latency to fingerprints of the actual Python, native retrieval libraries, and local model files.
+- [x] Remove 52 unreferenced historical project images without touching active images, containers, or volumes; record that Docker retained their layers as separately reclaimable build cache.
 - [ ] Complete the capped cloud benchmark after explicit approval.
 - [ ] Complete the full cloud build after separate explicit approval.
 - [ ] Download and verify artifacts locally.
