@@ -125,7 +125,7 @@ git push origin HEAD
 - Consumes: immutable `chunks.jsonl`, expected chunk count, and expected chunk SHA-256.
 - Produces: `build_chunk_offsets(chunks_path: Path, offsets_path: Path, *, expected_count: int, expected_chunks_sha256: str) -> ChunkOffsetsReport` and `ChunkOffsetIndex.open(...) -> ChunkOffsetIndex`, with `read(row: int, *, expected_chunk_id: str | None = None) -> CorpusChunk`.
 
-- [ ] **Step 1: Write failing offset build/read tests**
+- [x] **Step 1: Write failing offset build/read tests**
 
 Create fixtures with three `CorpusChunk` lines and assert:
 
@@ -139,23 +139,23 @@ assert index.read(2).id == chunks_fixture[2].id
 
 Add the Review Focus cases: wrong chunk hash, missing final newline, blank line, malformed JSON, wrong count, truncated offset bytes, negative/out-of-range row, and mismatched `expected_chunk_id` all raise a fail-closed error without returning a chunk.
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Step 2: Run and confirm failure**
 
 Run: `cd backend && uv run pytest -q tests/retrieval/test_chunk_offsets.py`
 
 Expected: FAIL because the module is absent.
 
-- [ ] **Step 3: Implement atomic offsets and thread-safe random reads**
+- [x] **Step 3: Implement atomic offsets and thread-safe random reads**
 
 Write offsets as little-endian unsigned 64-bit values to a temporary sibling, fsync, verify the exact count, then rename atomically. Use `os.pread` or an equivalent per-call immutable read path so concurrent runtime reads never share a mutable seek position. Hash the chunks while building rather than trusting a filename.
 
-- [ ] **Step 4: Run focused and corpus-manifest tests**
+- [x] **Step 4: Run focused and corpus-manifest tests**
 
 Run: `cd backend && uv run pytest -q tests/retrieval/test_chunk_offsets.py tests/corpus/test_build_dense_sharded.py`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit and push**
+- [x] **Step 5: Commit and push**
 
 ```bash
 git add backend/src/redacted_backend/retrieval/chunk_offsets.py backend/tests/retrieval/test_chunk_offsets.py
