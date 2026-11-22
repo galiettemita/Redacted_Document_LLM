@@ -217,7 +217,8 @@ Artifact building and retrieval verification use no OpenAI generation. Once oper
 - [x] Certify compressed recall and wire fail-closed schema-v2 readiness/runtime.
 - [x] Implement profile/offset/candidate/runtime changes test-first.
 - [x] Expose safe benchmark/build/latency/verification commands and a benchmark-first RunPod runbook.
-- [ ] Verify local suites and the fictional demo.
+- [x] Verify local suites and the fictional demo.
+- [x] Prove real compressed four-list independence and UI/demo isolation with no provider spend.
 - [ ] Complete the capped cloud benchmark after explicit approval.
 - [ ] Complete the full cloud build after separate explicit approval.
 - [ ] Download and verify artifacts locally.

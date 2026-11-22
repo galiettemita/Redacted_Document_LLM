@@ -432,9 +432,11 @@ git push origin HEAD
 ### Task 8: Preserve the real four-list product flow and fictional demo
 
 **Files:**
+- Modify: `backend/src/redacted_backend/retrieval/faiss_ivfpq.py`
 - Modify: `backend/tests/integration/test_best_available_loopback.py`
 - Modify: `backend/tests/retrieval/test_service.py`
 - Modify: `backend/tests/jobs/test_orchestrator.py`
+- Modify: `backend/tests/test_import_safety.py`
 - Modify: `src/features/workspace/DocumentWorkspace.test.tsx` only if the current prediction-ready assertions do not cover basis preservation.
 - Modify: `docs/superpowers/specs/2026-11-21-compressed-four-list-dense-design.md`
 
@@ -442,21 +444,21 @@ git push origin HEAD
 - Consumes: the completed compressed runtime/readiness and existing orchestrator/UI.
 - Produces: regression proof that the two dense lists are independent, all four raw lists persist/fuse, no UI/mock leakage occurs, and the implementation checklist is current.
 
-- [ ] **Step 1: Strengthen the no-provider four-list integration test**
+- [x] **Step 1: Strengthen the no-provider four-list integration test**
 
 Use real small BM25 and compressed-dense fixtures with an injected fake two-stage provider. Assert calls occur in the exact four-list shape, dense results include at least one document absent from both BM25 candidate sets, raw list provenance uses distinct BM25/dense manifest hashes, RRF persists, and the final SSE card remains `best_available_foiarchive_v1` without exposing query/evidence text.
 
-- [ ] **Step 2: Run the strengthened test and confirm it fails before fixture wiring**
+- [x] **Step 2: Run the strengthened test and confirm it fails before fixture wiring**
 
 Run: `cd backend && uv run pytest -q tests/integration/test_best_available_loopback.py tests/retrieval/test_service.py tests/jobs/test_orchestrator.py`
 
 Expected: FAIL until the real compressed fixture is connected.
 
-- [ ] **Step 3: Add only the fixture/wiring needed for the real no-spend loopback**
+- [x] **Step 3: Add only the fixture/wiring needed for the real no-spend loopback**
 
 Do not change production UI copy or reintroduce mock routes into `DocumentWorkspace`. Keep `FictionalDemoWorkspace` as the only consumer of invented document/prediction data.
 
-- [ ] **Step 4: Run all local verification**
+- [x] **Step 4: Run all local verification**
 
 Run:
 
@@ -472,7 +474,7 @@ git diff --check
 
 Expected: backend/frontend suites PASS, one Alembic head remains, build/typecheck/Compose/diff checks pass, and no paid-call flag changes.
 
-- [ ] **Step 5: Rebuild current-main API/worker with approvals false and smoke the demo**
+- [x] **Step 5: Rebuild current-main API/worker with approvals false and smoke the demo**
 
 Run the current Compose stack with the ignored artifact root, verify `/v1/health`, worker heartbeat, and that the fictional demo opens/closes while preserving an uploaded document. Until real dense artifacts exist, best-available remains fail closed; model-only stays operational/unapproved.
 

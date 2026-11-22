@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
 import struct
 import tempfile
 from pathlib import Path
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
-import faiss
 import numpy as np
 from numpy.typing import NDArray
 
@@ -28,6 +28,7 @@ def train_ivfpq_template(
     dimension: int,
     profile: DenseArtifactProfile,
 ) -> str:
+    faiss = _faiss_module()
     if dimension != profile.embedding_dimension:
         raise ValueError("Training dimension does not match the artifact profile")
     vectors = _validated_matrix(
@@ -82,6 +83,7 @@ class FaissIvfPqIndex:
         *,
         profile: DenseArtifactProfile,
     ) -> Self:
+        faiss = _faiss_module()
         template = _read_faiss_artifact(
             template_path,
             expected_kind="template",
@@ -210,6 +212,7 @@ def _write_faiss_artifact(
     profile: DenseArtifactProfile,
     faiss_version: str | None = None,
 ) -> None:
+    faiss = _faiss_module()
     serialized = np.asarray(faiss.serialize_index(index), dtype=np.uint8)
     payload = serialized.tobytes()
     metadata = {
@@ -246,6 +249,7 @@ def _read_faiss_artifact(
     expected_kind: _ArtifactKind,
     profile: DenseArtifactProfile,
 ) -> object:
+    faiss = _faiss_module()
     try:
         value = path.read_bytes()
     except OSError as error:
@@ -288,6 +292,7 @@ def _validate_metadata(
     expected_kind: _ArtifactKind,
     profile: DenseArtifactProfile,
 ) -> None:
+    faiss = _faiss_module()
     if metadata.get("schema_version") != "faiss-ivfpq-artifact-v1":
         raise IncompatibleDenseIndexError("FAISS IVF-PQ artifact schema mismatch")
     if metadata.get("kind") != expected_kind:
@@ -310,6 +315,7 @@ def _validate_index(
     metadata: dict[str, object],
     profile: DenseArtifactProfile,
 ) -> None:
+    faiss = _faiss_module()
     if not isinstance(index, faiss.IndexIVFPQ):
         raise IncompatibleDenseIndexError("FAISS artifact is not an IVF-PQ index")
     expected = {
@@ -334,6 +340,13 @@ def _validate_index(
     }
     if actual != expected:
         raise IncompatibleDenseIndexError("FAISS IVF-PQ index parameters mismatch")
+
+
+def _faiss_module() -> Any:
+    try:
+        return importlib.import_module("faiss")
+    except ModuleNotFoundError as error:
+        raise RuntimeError("FAISS is required for compressed dense index operations") from error
 
 
 def _write_bytes_atomic(path: Path, value: bytes) -> None:

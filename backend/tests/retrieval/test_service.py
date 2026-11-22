@@ -33,8 +33,16 @@ class RecordingRetriever:
 
 def test_realistic_service_makes_exactly_four_top_300_calls() -> None:
     results = [_ranked(index) for index in range(300)]
+    dense_only = _ranked(999).model_copy(
+        update={
+            "document_id": "dense-only-document",
+            "rank": 1,
+            "score": 1_000.0,
+            "index_manifest_hash": "4" * 64,
+        }
+    )
     bm25 = RecordingRetriever("bm25", results)
-    dense = RecordingRetriever("dense", results)
+    dense = RecordingRetriever("dense", [dense_only, *results[:299]])
     service = RealisticRetrievalService(bm25=bm25, dense=dense)
 
     trace = service.retrieve_realistic(_example(), "specific own query")
@@ -54,6 +62,21 @@ def test_realistic_service_makes_exactly_four_top_300_calls() -> None:
     assert len(trace.documents) == 100
     assert trace.serialized_documents.startswith("[DOCUMENT 1]\n[EXCERPT 1]")
     assert "[[TARGET]]" not in bm25.calls[0][0]
+    bm25_document_ids = {
+        chunk.document_id
+        for chunk in (*trace.lists.context_bm25, *trace.lists.own_bm25)
+    }
+    dense_document_ids = {
+        chunk.document_id
+        for chunk in (*trace.lists.context_dense, *trace.lists.own_dense)
+    }
+    assert "dense-only-document" not in bm25_document_ids
+    assert "dense-only-document" in dense_document_ids
+    assert any(
+        document.document_id == "dense-only-document"
+        for document in trace.documents
+    )
+    assert trace.fusion_version == "document-rrf-v1"
 
 
 def test_realistic_service_fails_instead_of_claiming_empty_evidence() -> None:
