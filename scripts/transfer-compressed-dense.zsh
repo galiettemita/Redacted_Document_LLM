@@ -24,12 +24,37 @@ if [[ "$SSH_KEY" != /* || "$SSH_KEY" == *[^A-Za-z0-9_./-]* || ! -f "$SSH_KEY" ]]
   exit 64
 fi
 
-DENSE_DIR="${DENSE_DIR:-$PROJECT_ROOT/var/corpus/best-available/dense}"
+PROJECT_ROOT_CANONICAL="${PROJECT_ROOT:A}"
+if [[ ! -d "$PROJECT_ROOT_CANONICAL" ]]; then
+  print -u2 -- "STOP: PROJECT_ROOT must name an existing directory"
+  exit 64
+fi
+
+if [[ -v DENSE_DIR ]]; then
+  DENSE_DIR="${DENSE_DIR:a}"
+else
+  DENSE_DIR="$PROJECT_ROOT_CANONICAL/var/corpus/best-available/dense"
+fi
+if [[ "$DENSE_DIR" != "$PROJECT_ROOT_CANONICAL"/* ]]; then
+  print -u2 -- "STOP: dense artifact directory must stay inside PROJECT_ROOT"
+  exit 64
+fi
+
+relative_dense="${DENSE_DIR#$PROJECT_ROOT_CANONICAL/}"
+current_destination="$PROJECT_ROOT_CANONICAL"
+for component in ${(s:/:)relative_dense}; do
+  current_destination="$current_destination/$component"
+  if [[ -L "$current_destination" ]]; then
+    print -u2 -- "STOP: symbolic-link dense-directory component rejected: $current_destination"
+    exit 64
+  fi
+done
+
 HEADROOM_BYTES=$((2 * 1024 * 1024 * 1024))
 mkdir -p "$DENSE_DIR"
 
-if [[ -L "$DENSE_DIR" ]]; then
-  print -u2 -- "STOP: dense artifact directory cannot be a symbolic link"
+if [[ "${DENSE_DIR:A}" != "$PROJECT_ROOT_CANONICAL"/* ]]; then
+  print -u2 -- "STOP: canonical dense artifact directory escaped PROJECT_ROOT"
   exit 64
 fi
 

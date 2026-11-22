@@ -76,7 +76,7 @@ The benchmark Pod must be created through `runpodctl` with a provider-side autom
 3. Click **Create API Key**.
 4. Name it `redacted-dense-build-temporary`.
 5. Select **Restricted**, not **All**.
-6. Leave unrelated APIs at **None**. Enable only the minimum Pod and network-volume permissions needed by the approved automation. If the displayed permission controls cannot express that narrow scope, cancel and use the console-plus-SSH workflow.
+6. Leave unrelated APIs at **None**. Enable only the minimum Pod and network-volume permissions needed by the approved automation. If the displayed permission controls cannot express that narrow scope, cancel and stop; do not deploy until a narrowly scoped key and the independent automatic-stop control are both available.
 7. Click **Create**.
 8. Click the new key once to copy it and save it in the password manager. Do not paste it into chat, Git, `.env`, or a Pod.
 9. After the work, return to **Credentials** → **API Keys**, click the trash icon, and confirm **Revoke Key**.

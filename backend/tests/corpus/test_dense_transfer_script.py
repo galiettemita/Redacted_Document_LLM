@@ -122,6 +122,7 @@ def _run(
     *,
     available_bytes: int,
     fail_rsync: bool = False,
+    dense_dir: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     remote, _manifest = _remote_fixture(root) if not (root / "remote").exists() else (
         root / "remote",
@@ -146,6 +147,8 @@ def _run(
         "FAKE_RSYNC_LOG": str(root / "rsync.log"),
         "FAIL_RSYNC": "1" if fail_rsync else "0",
     }
+    if dense_dir is not None:
+        environment["DENSE_DIR"] = str(dense_dir)
     return subprocess.run(
         ["/bin/zsh", str(SCRIPT)],
         env=environment,
@@ -234,6 +237,36 @@ def test_transfer_rejects_existing_symlink_destination_components(
     assert not (tmp_path / "rsync.log").exists()
     assert list(outside.iterdir()) == []
     assert not (dense / "manifest.json").exists()
+
+
+def test_transfer_rejects_symlink_above_dense_directory(tmp_path: Path) -> None:
+    _remote_fixture(tmp_path)
+    project = tmp_path / "project"
+    project.mkdir()
+    outside = tmp_path / "outside-parent"
+    outside.mkdir()
+    (project / "var").symlink_to(outside, target_is_directory=True)
+
+    result = _run(tmp_path, available_bytes=HEADROOM_BYTES + 1024**2)
+
+    assert result.returncode != 0
+    assert not (tmp_path / "rsync.log").exists()
+    assert list(outside.iterdir()) == []
+
+
+def test_transfer_rejects_dense_directory_outside_project(tmp_path: Path) -> None:
+    _remote_fixture(tmp_path)
+    outside = tmp_path / "outside-dense"
+
+    result = _run(
+        tmp_path,
+        available_bytes=HEADROOM_BYTES + 1024**2,
+        dense_dir=outside,
+    )
+
+    assert result.returncode != 0
+    assert not outside.exists()
+    assert not (tmp_path / "rsync.log").exists()
 
 
 def test_resume_requires_space_only_for_remaining_bytes(tmp_path: Path) -> None:

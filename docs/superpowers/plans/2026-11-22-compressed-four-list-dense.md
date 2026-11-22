@@ -512,6 +512,8 @@ git push origin HEAD
 - [x] Charge the benchmark's initial full-corpus hash verification to fixed setup time.
 - [x] Bind latency certification to the live worker build fingerprint and exact serving-host boot identity carried by its expiring heartbeat.
 - [x] Require both a fail-fast command timeout and an independent provider-side automatic Pod stop for the capped benchmark.
+- [x] Reject symlinks in every existing destination component above or below the dense directory and reject dense roots outside the canonical project root.
+- [x] Pin both worker base images by digest and include actual Python/native-library/model bytes in the non-configurable worker build fingerprint.
 
 ### Task 9: Cross the paid cloud and model boundaries only with explicit approvals
 
