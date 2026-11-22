@@ -160,7 +160,7 @@ uv run corpus build-best-available-bm25 \
   --opensearch-url http://127.0.0.1:59200
 ```
 
-The compressed dense build is benchmark-first. The complete button-by-button cloud procedure, separate spending approvals, transfer steps, and shutdown choices are in [`docs/runbooks/runpod-compressed-dense-build.md`](docs/runbooks/runpod-compressed-dense-build.md). No RunPod resource or model call is needed to inspect these commands.
+The compressed dense build is benchmark-first and runs locally on CPU. It does not require a cloud GPU, managed vector database, provider credential, or model call. Stored document directions use the versioned `symmetric-int8-direction-v1` representation; FAISS training, candidate insertion, recall certification, and final rescoring all dequantize and renormalize those same signed bytes to float32.
 
 Run the fixed 100,000-row benchmark before requesting approval for a full build:
 
@@ -171,9 +171,9 @@ uv run corpus benchmark-best-available-dense \
   --output-directory ../var/corpus/best-available/dense-benchmark
 ```
 
-The benchmark reports setup, encoding, IVF-PQ training, candidate insertion, and recall-certification probe time separately. Its projection scales row-dependent work by corpus rows and fixed candidate overhead by the expected shard count; use `projected_gpu_hours`, `peak_gpu_memory_bytes`, and the live pod rate for the capped approval.
+The benchmark reports setup, encoding, IVF-PQ training, candidate insertion, and recall-certification probe time separately. Its projection scales row-dependent work by corpus rows and fixed candidate overhead by the expected shard count. Record rows per second, peak resident memory, actual bytes per row, projected full-build time and bytes, and current free disk. Do not start the full build unless projected final artifacts are at most 16 GiB and at least 4 GiB of host disk would remain free.
 
-After the benchmark-derived full-build maximum is separately approved, build the resumable compressed index. Each shard contains at most 1,000,000 consecutive chunks and publishes atomically. Certification combines the 50 frozen public application-shaped queries with 50 stable-hash title/opening-text queries from the verified corpus, scans the stored float16 embeddings exactly in bounded blocks, and refuses to publish the top manifest below `recall@300 = 0.98` or above the 28 GiB artifact ceiling:
+After the measured storage gate passes, build the resumable compressed index. Each shard contains at most 1,000,000 consecutive chunks and publishes atomically. Completed `embeddings.i8` checkpoints are checksum-verified and hard-linked into final shards, so an interruption does not force re-encoding or duplicate their physical bytes. Certification combines the 50 frozen public application-shaped queries with 50 stable-hash title/opening-text queries from the verified corpus, scans the stored int8 directions exactly in bounded blocks, and refuses to publish the top manifest below `recall@300 = 0.98` or above the 16 GiB artifact ceiling:
 
 ```bash
 uv run corpus build-best-available-dense \
@@ -185,7 +185,7 @@ uv run corpus build-best-available-dense \
   --output-manifest ../var/corpus/best-available/dense/manifest.json
 ```
 
-After the runbook's native-zsh script transfers and verifies each shard, certify the frozen five-second warm-search ceiling in the same worker image that serves predictions. Certification deserializes the FAISS template and every candidate, requires a complete dense list for every query, and binds the report to the exact manifest and local platform. This writes only the latency report and makes no provider call:
+After the local build publishes and verifies every shard, certify the frozen five-second warm-search ceiling in the same worker image that serves predictions. Certification deserializes the FAISS template and every candidate, requires a complete dense list for every query, and binds the report to the exact manifest and local platform. This writes only the latency report and makes no provider call:
 
 ```bash
 cd /absolute/path/to/Redacted_Document_LLM
