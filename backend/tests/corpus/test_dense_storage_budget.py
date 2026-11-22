@@ -124,12 +124,13 @@ def test_benchmark_writes_nonpublishable_artifacts_and_projects_without_cost(
     assert report.publishable is False
     assert report.training_mode == "benchmark-only-all-sample-rows"
     assert report.rows_per_second > 0
-    assert report.embedding_bytes_per_row == 8
+    assert report.embedding_bytes_per_row == 4
     assert report.candidate_bytes_per_row > 0
     assert report.offset_bytes_per_row == 8
     assert report.projected_full_artifact_bytes > 0
     assert report.projected_gpu_hours >= 0
     assert "cost" not in report.model_dump(mode="json")
-    assert (tmp_path / "benchmark/sample-embeddings.f16").is_file()
+    assert (tmp_path / "benchmark/sample-embeddings.i8").is_file()
+    assert not (tmp_path / "benchmark/sample-embeddings.f16").exists()
     assert (tmp_path / "benchmark/candidate.faiss").is_file()
     assert not (tmp_path / "benchmark/manifest.json").exists()

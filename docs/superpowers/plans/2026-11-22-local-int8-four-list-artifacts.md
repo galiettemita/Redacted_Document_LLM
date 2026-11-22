@@ -75,23 +75,23 @@ Commit: `feat: version int8 dense artifacts`
 - Consumes: Task 1 codec/schema and existing verified chunks/corpus manifest.
 - Produces: `embeddings.i8` checkpoints/final hard links, dequantized FAISS inputs, and benchmark reports with `embedding_bytes_per_row == dimension`.
 
-- [ ] **Step 1: Write failing builder, resume, projection, and corruption tests**
+- [x] **Step 1: Write failing builder, resume, projection, and corruption tests**
 
 Cover one-byte row sizing, no float16 file, byte-identical resume, corrupt int8 rejection, candidate rebuild without re-encoding, hard-link publication, 16-GiB ceiling, and benchmark projection from physical int8 bytes.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run: `cd backend && uv run pytest -q tests/corpus/test_build_dense_sharded.py tests/corpus/test_dense_storage_budget.py tests/corpus/test_cli.py`
 
-- [ ] **Step 3: Implement the minimal int8 builder changes**
+- [x] **Step 3: Implement the minimal int8 builder changes**
 
 Quantize each encoded batch before writing. Open all stored rows as `np.int8`, call Task 1 dequantization before FAISS training/addition and recall math, publish `embeddings.i8`, and retain atomic/checksum/resume behavior.
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run the Step 2 command and require zero failures.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit: `feat: build resumable int8 dense shards`
 

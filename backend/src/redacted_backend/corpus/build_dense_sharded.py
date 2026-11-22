@@ -45,6 +45,10 @@ from redacted_backend.retrieval.faiss_ivfpq import (
     FaissIvfPqIndex,
     train_ivfpq_template,
 )
+from redacted_backend.retrieval.int8_embeddings import (
+    dequantize_directions,
+    quantize_directions,
+)
 from redacted_backend.retrieval.types import (
     CompressedDenseShardManifest,
     CompressedShardedDenseIndexManifest,
@@ -381,14 +385,14 @@ def benchmark_sharded_dense_build(
         expected_chunks_sha256=corpus.chunks_sha256,
     )
     selected_rows = _select_training_rows(chunks_path, sample_rows)
-    embeddings_path = output_directory / "sample-embeddings.f16"
+    embeddings_path = output_directory / "sample-embeddings.i8"
     _require_available_bytes(
         output_directory,
-        sample_rows * config.embedding_dimension * 2,
+        sample_rows * config.embedding_dimension,
     )
     embeddings = np.memmap(
         embeddings_path,
-        dtype=np.float16,
+        dtype=np.int8,
         mode="w+",
         shape=(sample_rows, config.embedding_dimension),
     )
@@ -406,13 +410,13 @@ def benchmark_sharded_dense_build(
             rows = selected_rows[start : start + batch_size]
             chunks = [chunk_index.read(row) for row in rows]
             vectors = _encode_documents(effective_encoder, chunks, config)
-            embeddings[start : start + len(vectors)] = vectors.astype(np.float16)
+            embeddings[start : start + len(vectors)] = quantize_directions(vectors)
         encoding_seconds = max(time.monotonic() - encoding_started, 1e-9)
     embeddings.flush()
     del embeddings
     _fsync_path(embeddings_path)
     training_started = time.monotonic()
-    training_vectors = _normalized_float32_embeddings(
+    training_vectors = _dequantized_float32_embeddings(
         embeddings_path,
         rows=sample_rows,
         dimension=config.embedding_dimension,
@@ -447,14 +451,16 @@ def benchmark_sharded_dense_build(
     ]
     benchmark_embeddings = np.memmap(
         embeddings_path,
-        dtype=np.float16,
+        dtype=np.int8,
         mode="r",
         shape=(sample_rows, config.embedding_dimension),
     )
     for start in range(0, sample_rows, 16_384):
         end = min(start + 16_384, sample_rows)
         probe_scores = _matrix_scores(
-            np.asarray(benchmark_embeddings[start:end], dtype=np.float32),
+            dequantize_directions(
+                np.asarray(benchmark_embeddings[start:end], dtype=np.int8)
+            ),
             probe_queries,
             "auto",
         )
@@ -722,18 +728,22 @@ def _train_candidate_template(
         if output_end == output_start:
             continue
         embeddings = np.memmap(
-            output_directory / _CHECKPOINT_ROOT / checkpoint.path / "embeddings.f16",
-            dtype=np.float16,
+            output_directory
+            / _CHECKPOINT_ROOT
+            / checkpoint.path
+            / profile.embedding_filename,
+            dtype=np.int8,
             mode="r",
             shape=(checkpoint.chunk_count, profile.embedding_dimension),
         )
         local_rows = rows[output_start:output_end] - checkpoint.start_row
-        training_vectors[output_start:output_end] = embeddings[local_rows]
+        training_vectors[output_start:output_end] = dequantize_directions(
+            np.asarray(embeddings[local_rows], dtype=np.int8)
+        )
         del embeddings
         output_start = output_end
     if output_start != len(rows):
         raise ValueError("Dense training rows fall outside embedding checkpoints")
-    training_vectors = _normalize_rows(training_vectors)
     _require_available_bytes(output_directory, max(training_vectors.nbytes // 16, 1))
     train_ivfpq_template(
         training_vectors,
@@ -788,9 +798,9 @@ def _build_candidate_shards(
                 output_directory
                 / _CHECKPOINT_ROOT
                 / checkpoint.path
-                / "embeddings.f16"
+                / profile.embedding_filename
             )
-            embeddings_path = temporary / "embeddings.f16"
+            embeddings_path = temporary / profile.embedding_filename
             os.link(source_embeddings, embeddings_path)
             candidate = FaissIvfPqIndex.create(
                 output_directory / template.path,
@@ -798,14 +808,16 @@ def _build_candidate_shards(
             )
             embeddings = np.memmap(
                 embeddings_path,
-                dtype=np.float16,
+                dtype=np.int8,
                 mode="r",
                 shape=(checkpoint.chunk_count, profile.embedding_dimension),
             )
             for start in range(0, checkpoint.chunk_count, batch_size):
                 end = min(start + batch_size, checkpoint.chunk_count)
                 candidate.add(
-                    _normalize_rows(np.asarray(embeddings[start:end], dtype=np.float32))
+                    dequantize_directions(
+                        np.asarray(embeddings[start:end], dtype=np.int8)
+                    )
                 )
             del embeddings
             candidate_path = temporary / "candidate.faiss"
@@ -907,7 +919,8 @@ def _publish_certified_manifest(
         candidate_template_sha256=template.sha256,
         shard_size_limit=profile.shard_size_limit,
         shards=shards,
-        dtype="float16",
+        embedding_file=profile.embedding_filename,
+        dtype=profile.embedding_dtype,
         metric=profile.metric,
         candidate_index=profile.candidate_index,
         recall_report_path=_RECALL_REPORT_NAME,
@@ -942,14 +955,16 @@ def _certify_candidate_recall(
     for shard in shards:
         directory = output_directory / shard.path
         embeddings = np.memmap(
-            directory / "embeddings.f16",
-            dtype=np.float16,
+            directory / profile.embedding_filename,
+            dtype=np.int8,
             mode="r",
             shape=(shard.chunk_count, profile.embedding_dimension),
         )
         for start in range(0, shard.chunk_count, block_rows):
             end = min(start + block_rows, shard.chunk_count)
-            block = np.asarray(embeddings[start:end], dtype=np.float32)
+            block = dequantize_directions(
+                np.asarray(embeddings[start:end], dtype=np.int8)
+            )
             scores = _matrix_scores(block, query_vectors, "auto")
             for query_index in range(len(queries)):
                 values = [
@@ -969,7 +984,9 @@ def _certify_candidate_recall(
                 query_vector,
                 min(profile.candidate_count_per_shard, shard.chunk_count),
             )
-            scores = np.asarray(embeddings[rows], dtype=np.float32) @ query_vector
+            scores = dequantize_directions(
+                np.asarray(embeddings[rows], dtype=np.int8)
+            ) @ query_vector
             values = [
                 (float(score), shard.start_row + int(row))
                 for row, score in zip(rows, scores, strict=True)
@@ -1051,7 +1068,7 @@ def _load_embedding_checkpoint(
     if not directory.exists():
         return None
     manifest_path = directory / "manifest.json"
-    embeddings_path = directory / "embeddings.f16"
+    embeddings_path = directory / profile.embedding_filename
     if not manifest_path.is_file() or not embeddings_path.is_file():
         raise ValueError(f"Incomplete embedding checkpoint: {directory}")
     checkpoint = EmbeddingShardCheckpoint.model_validate_json(
@@ -1066,7 +1083,7 @@ def _load_embedding_checkpoint(
         or checkpoint.chunk_count != expected_count
         or checkpoint.end_row != expected_start + expected_count
         or checkpoint.embeddings_size_bytes
-        != expected_count * profile.embedding_dimension * 2
+        != expected_count * profile.embedding_dimension
     ):
         raise ValueError("Completed embedding checkpoint is incompatible")
     if (
@@ -1092,7 +1109,7 @@ def _checkpoint_from_final_shard(
     if not final_directory.exists():
         return None
     manifest_path = final_directory / "manifest.json"
-    embeddings_path = final_directory / "embeddings.f16"
+    embeddings_path = final_directory / profile.embedding_filename
     if not manifest_path.is_file() or not embeddings_path.is_file():
         raise ValueError(f"Incomplete dense shard directory: {final_directory}")
     shard = CompressedDenseShardManifest.model_validate_json(
@@ -1102,7 +1119,7 @@ def _checkpoint_from_final_shard(
         shard.shard_id != shard_id
         or shard.start_row != start_row
         or shard.chunk_count != chunk_count
-        or shard.embeddings_size_bytes != chunk_count * profile.embedding_dimension * 2
+        or shard.embeddings_size_bytes != chunk_count * profile.embedding_dimension
         or embeddings_path.stat().st_size != shard.embeddings_size_bytes
         or _sha256_file(embeddings_path) != shard.embeddings_sha256
     ):
@@ -1114,7 +1131,7 @@ def _checkpoint_from_final_shard(
         )
     )
     try:
-        os.link(embeddings_path, temporary / "embeddings.f16")
+        os.link(embeddings_path, temporary / profile.embedding_filename)
         checkpoint = EmbeddingShardCheckpoint(
             dense_semantics_hash=semantics_hash,
             chunks_sha256=chunks_sha256,
@@ -1152,7 +1169,7 @@ def _encode_embedding_checkpoint(
     semantics_hash: str,
     batch_size: int,
 ) -> EmbeddingShardCheckpoint:
-    required_bytes = chunk_count * profile.embedding_dimension * 2
+    required_bytes = chunk_count * profile.embedding_dimension
     _require_available_bytes(checkpoint_root, required_bytes)
     temporary = Path(
         tempfile.mkdtemp(
@@ -1162,10 +1179,10 @@ def _encode_embedding_checkpoint(
     )
     final_directory = checkpoint_root / name
     try:
-        embeddings_path = temporary / "embeddings.f16"
+        embeddings_path = temporary / profile.embedding_filename
         embeddings = np.memmap(
             embeddings_path,
-            dtype=np.float16,
+            dtype=np.int8,
             mode="w+",
             shape=(chunk_count, profile.embedding_dimension),
         )
@@ -1178,7 +1195,7 @@ def _encode_embedding_checkpoint(
                 batch,
                 ScientificConfig(embedding_dimension=profile.embedding_dimension),
             )
-            embeddings[row : row + len(batch)] = vectors.astype(np.float16)
+            embeddings[row : row + len(batch)] = quantize_directions(vectors)
             row += len(batch)
         embeddings.flush()
         del embeddings
@@ -1216,7 +1233,7 @@ def _load_completed_candidate_shard(
     if not directory.exists():
         return None
     manifest_path = directory / "manifest.json"
-    embeddings_path = directory / "embeddings.f16"
+    embeddings_path = directory / profile.embedding_filename
     candidate_path = directory / "candidate.faiss"
     if (
         not manifest_path.is_file()
@@ -1300,7 +1317,7 @@ def _repair_missing_shard_manifests(
         manifest_path = root / shard.path / "manifest.json"
         if manifest_path.exists():
             continue
-        embeddings_path = root / shard.path / "embeddings.f16"
+        embeddings_path = root / shard.path / manifest.embedding_file
         if (
             not embeddings_path.is_file()
             or embeddings_path.stat().st_size != shard.embeddings_size_bytes
@@ -1352,7 +1369,7 @@ def _verify_published_artifacts(
         files.extend(
             [
                 (
-                    root / shard.path / "embeddings.f16",
+                    root / shard.path / manifest.embedding_file,
                     shard.embeddings_size_bytes,
                     shard.embeddings_sha256,
                 ),
@@ -1454,7 +1471,7 @@ def _encode_query(
     return vector
 
 
-def _normalized_float32_embeddings(
+def _dequantized_float32_embeddings(
     path: Path,
     *,
     rows: int,
@@ -1462,21 +1479,13 @@ def _normalized_float32_embeddings(
 ) -> NDArray[np.float32]:
     embeddings = np.memmap(
         path,
-        dtype=np.float16,
+        dtype=np.int8,
         mode="r",
         shape=(rows, dimension),
     )
-    values = np.asarray(embeddings, dtype=np.float32)
+    values = np.asarray(embeddings, dtype=np.int8)
     del embeddings
-    return _normalize_rows(values)
-
-
-def _normalize_rows(values: NDArray[np.float32]) -> NDArray[np.float32]:
-    matrix = np.ascontiguousarray(values, dtype=np.float32)
-    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-    if np.any(~np.isfinite(matrix)) or np.any(norms <= 0):
-        raise ValueError("Dense embedding checkpoint contains invalid vectors")
-    return np.ascontiguousarray(matrix / norms, dtype=np.float32)
+    return dequantize_directions(values)
 
 
 def _best_scores(

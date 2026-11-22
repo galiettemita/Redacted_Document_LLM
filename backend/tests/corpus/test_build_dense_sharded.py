@@ -23,6 +23,7 @@ from redacted_backend.retrieval.dense_profile import (
     dense_semantics_hash,
 )
 from redacted_backend.retrieval.faiss_ivfpq import FaissIvfPqIndex
+from redacted_backend.retrieval.int8_embeddings import dequantize_directions
 from redacted_backend.retrieval.types import (
     CompressedDenseShardManifest,
     CompressedShardedDenseIndexManifest,
@@ -181,7 +182,9 @@ def test_build_publishes_compressed_shards_without_duplicate_metadata(
 ) -> None:
     manifest, output, _ = _build(tmp_path)
 
-    assert manifest.schema_version == "sharded-dense-index-manifest-v2"
+    assert manifest.schema_version == "sharded-dense-index-manifest-v3"
+    assert manifest.embedding_file == "embeddings.i8"
+    assert manifest.dtype == "int8"
     assert manifest.chunk_count == 5
     assert manifest.artifact_profile_hash == _profile().manifest_hash()
     assert manifest.dense_semantics_hash == dense_semantics_hash(_scientific())
@@ -195,14 +198,13 @@ def test_build_publishes_compressed_shards_without_duplicate_metadata(
     ]
     for shard in manifest.shards:
         directory = output / shard.path
-        assert (directory / "embeddings.f16").stat().st_size == (
-            shard.chunk_count * 8 * 2
-        )
+        assert (directory / "embeddings.i8").stat().st_size == shard.chunk_count * 8
+        assert not (directory / "embeddings.f16").exists()
         assert (directory / "candidate.faiss").is_file()
         assert not (directory / "metadata.jsonl").exists()
         assert not (directory / "metadata.offsets.u64").exists()
         assert hashlib.sha256(
-            (directory / "embeddings.f16").read_bytes()
+            (directory / "embeddings.i8").read_bytes()
         ).hexdigest() == shard.embeddings_sha256
         assert hashlib.sha256(
             (directory / "candidate.faiss").read_bytes()
@@ -321,6 +323,9 @@ def test_embedding_phase_resumes_without_reencoding_verified_checkpoints(
         )
     assert first_encoder.encoded_rows == 2
     assert (output / "embedding-checkpoints/shard-00000/manifest.json").is_file()
+    completed_bytes = (
+        output / "embedding-checkpoints/shard-00000/embeddings.i8"
+    ).read_bytes()
 
     second_encoder = DeterministicEncoder(8)
     report = build_sharded_dense_from_files(
@@ -334,6 +339,7 @@ def test_embedding_phase_resumes_without_reencoding_verified_checkpoints(
 
     assert report.index_manifest.chunk_count == 5
     assert second_encoder.encoded_rows == 3
+    assert (output / "shard-00000/embeddings.i8").read_bytes() == completed_bytes
 
 
 def test_template_training_maps_each_embedding_shard_only_once(
@@ -532,12 +538,12 @@ def test_underfilled_candidate_rebuilds_from_embeddings_without_encoding(
         profile=manifest.artifact_profile,
     )
     embeddings = np.memmap(
-        directory / "embeddings.f16",
-        dtype=np.float16,
+        directory / "embeddings.i8",
+        dtype=np.int8,
         mode="r",
         shape=(first.chunk_count, manifest.embedding_dimension),
     )
-    candidate.add(np.asarray(embeddings[:1], dtype=np.float32))
+    candidate.add(dequantize_directions(np.asarray(embeddings[:1], dtype=np.int8)))
     del embeddings
     candidate.save(candidate_path)
     underfilled = first.model_copy(
@@ -584,7 +590,7 @@ def test_corrupt_embedding_checkpoint_fails_closed(tmp_path: Path) -> None:
             application_query_count=2,
             corpus_query_count=2,
         )
-    embedding = output / "embedding-checkpoints/shard-00000/embeddings.f16"
+    embedding = output / "embedding-checkpoints/shard-00000/embeddings.i8"
     embedding.write_bytes(embedding.read_bytes() + b"tamper")
 
     with pytest.raises(ValueError, match="embedding.*checksum"):
@@ -624,6 +630,9 @@ def test_candidate_write_failure_keeps_embeddings_but_does_not_publish(
         _build(tmp_path)
 
     assert (tmp_path / "dense/embedding-checkpoints/shard-00000/manifest.json").is_file()
+    checkpoint_embedding = tmp_path / "dense/embedding-checkpoints/shard-00000/embeddings.i8"
+    published_embedding = tmp_path / "dense/shard-00000/embeddings.i8"
+    assert checkpoint_embedding.stat().st_ino == published_embedding.stat().st_ino
     assert not (tmp_path / "dense/manifest.json").exists()
 
 
@@ -655,7 +664,7 @@ def test_incomplete_temporary_directory_is_never_reused(tmp_path: Path) -> None:
     output = tmp_path / "dense"
     stale = output / ".shard-00000.interrupted"
     stale.mkdir(parents=True)
-    (stale / "embeddings.f16").write_bytes(b"invented")
+    (stale / "embeddings.i8").write_bytes(b"invented")
 
     manifest, _, _ = _build(tmp_path)
 
