@@ -43,23 +43,23 @@
 - Consumes: normalized `NDArray[np.float32]` document rows.
 - Produces: `quantize_directions(values) -> NDArray[np.int8]`, `dequantize_directions(values) -> NDArray[np.float32]`, schema-v3 manifests, and the `symmetric-int8-direction-v1` artifact identity.
 
-- [ ] **Step 1: Write failing codec and manifest tests**
+- [x] **Step 1: Write failing codec and manifest tests**
 
 Assert deterministic literal bytes, unit-length reconstructed rows, bounded cosine loss, rejection of zero/nonfinite/wrong-rank input, one byte per dimension, schema-v3/int8 filenames, and rejection of old or mismatched artifact identities.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run: `cd backend && uv run pytest -q tests/retrieval/test_int8_embeddings.py tests/retrieval/test_dense_profile.py`
 
-- [ ] **Step 3: Implement the minimal codec and schemas**
+- [x] **Step 3: Implement the minimal codec and schemas**
 
 Use `np.rint`, explicit clipping, contiguous arrays, and one shared dequantization function. Set the production candidate identity to `faiss-ivfpq-int8-rescore-v1`, manifest schema to `sharded-dense-index-manifest-v3`, dtype to `int8`, and maximum artifact bytes to `16 * 1024**3`.
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run the Step 2 command and require zero failures.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit: `feat: version int8 dense artifacts`
 

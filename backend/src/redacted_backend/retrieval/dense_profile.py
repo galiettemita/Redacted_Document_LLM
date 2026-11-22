@@ -12,14 +12,19 @@ from redacted_backend.scientific_config import ScientificConfig
 class DenseArtifactProfile(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: Literal["compressed-dense-artifact-profile-v1"] = (
-        "compressed-dense-artifact-profile-v1"
+    schema_version: Literal["compressed-dense-artifact-profile-v2"] = (
+        "compressed-dense-artifact-profile-v2"
     )
-    candidate_index: Literal["faiss-ivfpq-exact-rescore-v1"] = (
-        "faiss-ivfpq-exact-rescore-v1"
+    candidate_index: Literal["faiss-ivfpq-int8-rescore-v1"] = (
+        "faiss-ivfpq-int8-rescore-v1"
     )
     faiss_version: Literal["1.16.0"] = "1.16.0"
     embedding_dimension: int = Field(default=768, ge=1)
+    embedding_storage: Literal["symmetric-int8-direction-v1"] = (
+        "symmetric-int8-direction-v1"
+    )
+    embedding_filename: Literal["embeddings.i8"] = "embeddings.i8"
+    embedding_dtype: Literal["int8"] = "int8"
     metric: Literal["inner_product"] = "inner_product"
     ivf_nlist: int = Field(default=4_096, ge=1)
     pq_subvectors: int = Field(default=96, ge=1)
@@ -36,7 +41,7 @@ class DenseArtifactProfile(BaseModel):
         "shared-chunk-offsets-v1"
     )
     max_parallel_shards: int = Field(default=4, ge=1)
-    max_artifact_bytes: int = Field(default=28 * 1024**3, ge=1)
+    max_artifact_bytes: int = Field(default=16 * 1024**3, ge=1)
     max_warm_search_seconds: float = Field(default=5.0, gt=0)
 
     @model_validator(mode="after")
@@ -94,6 +99,8 @@ def faiss_layout_hash(profile: DenseArtifactProfile) -> str:
             "candidate_index": profile.candidate_index,
             "faiss_version": profile.faiss_version,
             "embedding_dimension": profile.embedding_dimension,
+            "embedding_storage": profile.embedding_storage,
+            "embedding_dtype": profile.embedding_dtype,
             "metric": profile.metric,
             "ivf_nlist": profile.ivf_nlist,
             "pq_subvectors": profile.pq_subvectors,

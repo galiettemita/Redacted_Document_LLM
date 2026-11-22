@@ -188,8 +188,8 @@ class CompressedDenseShardManifest(BaseModel):
 class CompressedShardedDenseIndexManifest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: Literal["sharded-dense-index-manifest-v2"] = (
-        "sharded-dense-index-manifest-v2"
+    schema_version: Literal["sharded-dense-index-manifest-v3"] = (
+        "sharded-dense-index-manifest-v3"
     )
     retrieval_profile: Literal["best_available_foiarchive_v1"] = (
         "best_available_foiarchive_v1"
@@ -212,9 +212,10 @@ class CompressedShardedDenseIndexManifest(BaseModel):
     candidate_template_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     shard_size_limit: int = Field(ge=1, le=1_000_000)
     shards: list[CompressedDenseShardManifest] = Field(min_length=1)
-    dtype: Literal["float16"]
+    embedding_file: Literal["embeddings.i8"]
+    dtype: Literal["int8"]
     metric: Literal["inner_product"]
-    candidate_index: Literal["faiss-ivfpq-exact-rescore-v1"]
+    candidate_index: Literal["faiss-ivfpq-int8-rescore-v1"]
     recall_report_path: str = Field(min_length=1)
     recall_report_size_bytes: int = Field(ge=1)
     recall_report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -234,6 +235,10 @@ class CompressedShardedDenseIndexManifest(BaseModel):
             raise ValueError("Dense candidate index profile mismatch")
         if self.metric != profile.metric:
             raise ValueError("Dense candidate metric profile mismatch")
+        if self.embedding_file != profile.embedding_filename:
+            raise ValueError("Dense embedding_file profile mismatch")
+        if self.dtype != profile.embedding_dtype:
+            raise ValueError("Dense dtype profile mismatch")
         if self.chunk_offsets_format != profile.metadata_lookup_version:
             raise ValueError("Dense offset format profile mismatch")
         if self.chunk_offsets_size_bytes != self.chunk_count * 8:
@@ -244,6 +249,7 @@ class CompressedShardedDenseIndexManifest(BaseModel):
             self.chunk_offsets_path,
             self.candidate_template_path,
             self.recall_report_path,
+            self.embedding_file,
         ):
             _require_safe_relative_name(value, kind="file")
 
@@ -259,9 +265,7 @@ class CompressedShardedDenseIndexManifest(BaseModel):
                 raise ValueError("Compressed dense shard profile hash mismatch")
             if shard.candidate_template_sha256 != self.candidate_template_sha256:
                 raise ValueError("Compressed dense shard template hash mismatch")
-            expected_embedding_bytes = (
-                shard.chunk_count * self.embedding_dimension * 2
-            )
+            expected_embedding_bytes = shard.chunk_count * self.embedding_dimension
             if shard.embeddings_size_bytes != expected_embedding_bytes:
                 raise ValueError("Compressed dense shard embedding size mismatch")
             expected_start = shard.end_row

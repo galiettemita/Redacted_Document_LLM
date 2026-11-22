@@ -23,7 +23,11 @@ from redacted_backend.scientific_config import ScientificConfig
 def test_default_dense_artifact_profile_freezes_the_approved_build_contract() -> None:
     profile = DenseArtifactProfile()
 
-    assert profile.candidate_index == "faiss-ivfpq-exact-rescore-v1"
+    assert profile.schema_version == "compressed-dense-artifact-profile-v2"
+    assert profile.candidate_index == "faiss-ivfpq-int8-rescore-v1"
+    assert profile.embedding_storage == "symmetric-int8-direction-v1"
+    assert profile.embedding_filename == "embeddings.i8"
+    assert profile.embedding_dtype == "int8"
     assert profile.ivf_nlist == 4_096
     assert profile.pq_subvectors == 96
     assert profile.pq_bits == 8
@@ -31,7 +35,7 @@ def test_default_dense_artifact_profile_freezes_the_approved_build_contract() ->
     assert profile.candidate_count_per_shard == 4_000
     assert profile.training_sample_count == 200_000
     assert profile.max_parallel_shards == 4
-    assert profile.max_artifact_bytes == 28 * 1024**3
+    assert profile.max_artifact_bytes == 16 * 1024**3
     assert profile.max_warm_search_seconds == 5.0
     assert profile.manifest_hash() == DenseArtifactProfile().manifest_hash()
 
@@ -74,12 +78,16 @@ def test_phase_hashes_allow_search_tuning_without_reencoding() -> None:
     )
     layout_tuned = profile.model_copy(update={"pq_bits": 7})
     selection_tuned = profile.model_copy(update={"training_sample_count": 9})
+    quantizer_tuned = profile.model_copy(
+        update={"embedding_storage": "symmetric-int8-direction-v2"}
+    )
 
     assert faiss_layout_hash(search_tuned) == faiss_layout_hash(profile)
     assert dense_training_selection_hash(search_tuned) == (
         dense_training_selection_hash(profile)
     )
     assert faiss_layout_hash(layout_tuned) != faiss_layout_hash(profile)
+    assert faiss_layout_hash(quantizer_tuned) != faiss_layout_hash(profile)
     assert dense_training_selection_hash(selection_tuned) != (
         dense_training_selection_hash(profile)
     )
@@ -94,7 +102,7 @@ def _shard_data(profile: DenseArtifactProfile) -> dict[str, object]:
         "start_row": 0,
         "end_row": 2,
         "chunk_count": 2,
-        "embeddings_size_bytes": 2 * profile.embedding_dimension * 2,
+        "embeddings_size_bytes": 2 * profile.embedding_dimension,
         "embeddings_sha256": "1" * 64,
         "candidate_index_size_bytes": 32,
         "candidate_index_sha256": "2" * 64,
@@ -135,7 +143,8 @@ def _manifest_data(
         "candidate_template_sha256": "9" * 64,
         "shard_size_limit": profile.shard_size_limit,
         "shards": effective_shards,
-        "dtype": "float16",
+        "embedding_file": profile.embedding_filename,
+        "dtype": profile.embedding_dtype,
         "metric": "inner_product",
         "candidate_index": profile.candidate_index,
         "recall_report_path": "recall-report.json",
@@ -190,6 +199,9 @@ def test_compressed_shard_rejects_a_range_that_differs_from_its_count() -> None:
     [
         ({"artifact_profile_hash": "0" * 64}, "profile"),
         ({"candidate_index": "faiss-hnsw-flat-v1"}, "candidate"),
+        ({"schema_version": "sharded-dense-index-manifest-v2"}, "schema"),
+        ({"embedding_file": "embeddings.f16"}, "embedding_file"),
+        ({"dtype": "float16"}, "dtype"),
         ({"chunk_offsets_size_bytes": 8}, "offset"),
         ({"chunk_offsets_path": "../offsets"}, "safe relative file"),
     ],
@@ -208,7 +220,7 @@ def test_compressed_manifest_rejects_incompatible_top_level_values(
 
 def test_compressed_manifest_requires_consecutive_complete_shard_ranges() -> None:
     profile = _profile()
-    first = CompressedDenseShardManifest(**(_shard_data(profile) | {"end_row": 1, "chunk_count": 1, "embeddings_size_bytes": 16}))
+    first = CompressedDenseShardManifest(**(_shard_data(profile) | {"end_row": 1, "chunk_count": 1, "embeddings_size_bytes": 8}))
     second = CompressedDenseShardManifest(
         **(
             _shard_data(profile)
@@ -218,7 +230,7 @@ def test_compressed_manifest_requires_consecutive_complete_shard_ranges() -> Non
                 "start_row": 2,
                 "end_row": 3,
                 "chunk_count": 1,
-                "embeddings_size_bytes": 16,
+                "embeddings_size_bytes": 8,
             }
         )
     )
