@@ -27,6 +27,7 @@ class DenseArtifactProfile(BaseModel):
     nprobe: int = Field(default=256, ge=1)
     candidate_count_per_shard: int = Field(default=4_000, ge=1)
     training_sample_count: int = Field(default=200_000, ge=1)
+    training_seed: int = 1_234
     training_selection_version: Literal["stable-hash-row-v1"] = (
         "stable-hash-row-v1"
     )

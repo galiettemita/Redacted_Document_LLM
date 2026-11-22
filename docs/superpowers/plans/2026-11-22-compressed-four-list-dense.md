@@ -174,29 +174,29 @@ git push origin HEAD
 - Consumes: normalized float32 training/add vectors and `DenseArtifactProfile`.
 - Produces: `train_ivfpq_template(training_vectors: NDArray[np.float32], output_path: Path, *, dimension: int, profile: DenseArtifactProfile) -> str` and `FaissIvfPqIndex.create(template_path: Path, *, profile: DenseArtifactProfile)`, `.load(path, *, profile)`, `.add(vectors)`, `.search(query, candidates)`, and `.save(path)`.
 
-- [ ] **Step 1: Write failing real-FAISS tests**
+- [x] **Step 1: Write failing real-FAISS tests**
 
 Use a small test profile (`dimension=8`, `nlist=2`, `pq_subvectors=2`, adequate deterministic training rows) and assert a trained template can create two independent indexes, saved/loaded rankings are stable, `nprobe` is applied, row IDs are local insertion order, and candidate files are smaller than a float32 matrix for a sufficiently large fixture.
 
 Add tests that reject wrong dimensions, nonfinite/unnormalized vectors, untrained templates, wrong FAISS version/profile hash, over-add, and invalid requested candidate counts. Assert `search` removes FAISS `-1` sentinels and duplicates while preserving deterministic order.
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Step 2: Run and confirm failure**
 
 Run: `cd backend && uv run pytest -q tests/retrieval/test_faiss_ivfpq.py`
 
 Expected: FAIL because the adapter is absent.
 
-- [ ] **Step 3: Implement the adapter using `faiss.IndexIVFPQ`**
+- [x] **Step 3: Implement the adapter using `faiss.IndexIVFPQ`**
 
 Use `faiss.IndexFlatIP` as quantizer, `METRIC_INNER_PRODUCT`, frozen profile parameters, and `faiss.clone_index`/`reset` to create empty shard indexes from one trained template. Persist only through FAISS serialization, fsync after writes, and expose no mutable raw FAISS object outside the adapter.
 
-- [ ] **Step 4: Run adapter and legacy exact-paper dense tests**
+- [x] **Step 4: Run adapter and legacy exact-paper dense tests**
 
 Run: `cd backend && uv run pytest -q tests/retrieval/test_faiss_ivfpq.py tests/corpus/test_build_dense.py tests/retrieval/test_dense.py`
 
 Expected: PASS, proving the exact-paper HNSW path remains unchanged.
 
-- [ ] **Step 5: Commit and push**
+- [x] **Step 5: Commit and push**
 
 ```bash
 git add backend/src/redacted_backend/retrieval/faiss_ivfpq.py backend/tests/retrieval/test_faiss_ivfpq.py backend/uv.lock
