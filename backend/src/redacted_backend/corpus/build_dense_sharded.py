@@ -29,7 +29,10 @@ from redacted_backend.retrieval.dense_profile import (
     DenseArtifactProfile,
     dense_semantics_hash,
 )
-from redacted_backend.retrieval.dense_sharded import select_certification_queries
+from redacted_backend.retrieval.dense_sharded import (
+    _matrix_scores,
+    select_certification_queries,
+)
 from redacted_backend.retrieval.faiss_ivfpq import (
     FaissIvfPqIndex,
     train_ivfpq_template,
@@ -789,7 +792,7 @@ def _certify_candidate_recall(
         for start in range(0, shard.chunk_count, block_rows):
             end = min(start + block_rows, shard.chunk_count)
             block = np.asarray(embeddings[start:end], dtype=np.float32)
-            scores = block @ query_vectors.T
+            scores = _matrix_scores(block, query_vectors, "auto")
             for query_index in range(len(queries)):
                 values = [
                     (float(score), shard.start_row + start + row)

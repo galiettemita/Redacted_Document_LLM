@@ -204,14 +204,22 @@ def test_best_available_runtime_loads_only_its_separate_verified_artifacts(
             captured["index_name"] = kwargs["index_name"]
 
         def search(self, *_args, **_kwargs):
+            captured["bm25_probe_count"] = int(
+                captured.get("bm25_probe_count", 0)
+            ) + 1
             return []
 
     class FakeDense:
         def __init__(self, **kwargs) -> None:
             captured["dense_root"] = kwargs["root"]
+            captured["dense_chunks_path"] = kwargs["chunks_path"]
             captured["dense_manifest"] = kwargs["manifest"]
+            captured["candidate_loader"] = kwargs["candidate_loader"]
 
         def search(self, *_args, **_kwargs):
+            captured["dense_probe_count"] = int(
+                captured.get("dense_probe_count", 0)
+            ) + 1
             return []
 
     class FakeTransport:
@@ -238,3 +246,7 @@ def test_best_available_runtime_loads_only_its_separate_verified_artifacts(
     assert captured["dense_manifest"] == dense_manifest
     assert captured["index_name"] == "foiarchive-best-available-bm25-v1"
     assert captured["dense_root"] == settings.best_available_dense_artifact_directory
+    assert captured["dense_chunks_path"] == settings.best_available_chunks_path
+    assert captured["candidate_loader"] == runtime_module.FaissIvfPqIndex.load
+    assert captured["bm25_probe_count"] == 1
+    assert captured["dense_probe_count"] == 1

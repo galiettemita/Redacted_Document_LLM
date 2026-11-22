@@ -23,12 +23,13 @@ from redacted_backend.domain.readiness import (
 )
 from redacted_backend.retrieval.bm25 import OpenSearchHttpTransport
 from redacted_backend.retrieval.dense_sharded import (
-    verify_sharded_dense_artifacts_cached,
+    verify_compressed_dense_artifacts_cached,
 )
 from redacted_backend.retrieval.types import (
     Bm25IndexManifest,
+    CompressedShardedDenseIndexManifest,
+    DenseLatencyReport,
     DenseIndexManifest,
-    ShardedDenseIndexManifest,
 )
 from redacted_backend.scientific_config import ScientificConfig
 
@@ -294,7 +295,9 @@ def resolve_best_available_corpus_readiness(
         settings.best_available_bm25_manifest_path,
         settings.best_available_dense_manifest_path,
         settings.best_available_dense_artifact_directory,
+        settings.best_available_chunks_path,
         settings.best_available_recall_queries_path,
+        settings.best_available_latency_report_path,
     )
     if any(path is None for path in required):
         return ComponentReadiness(ready=False, detail="not configured")
@@ -302,12 +305,16 @@ def resolve_best_available_corpus_readiness(
     bm25_path = settings.best_available_bm25_manifest_path
     dense_path = settings.best_available_dense_manifest_path
     dense_root = settings.best_available_dense_artifact_directory
+    chunks_path = settings.best_available_chunks_path
     queries_path = settings.best_available_recall_queries_path
+    latency_path = settings.best_available_latency_report_path
     assert corpus_path is not None
     assert bm25_path is not None
     assert dense_path is not None
     assert dense_root is not None
+    assert chunks_path is not None
     assert queries_path is not None
+    assert latency_path is not None
     if not all(path.is_file() for path in (corpus_path, bm25_path, dense_path)):
         return ComponentReadiness(ready=False, detail="manifest not verified")
     try:
@@ -317,7 +324,7 @@ def resolve_best_available_corpus_readiness(
         index = Bm25IndexManifest.model_validate_json(
             bm25_path.read_text(encoding="utf-8")
         )
-        dense = ShardedDenseIndexManifest.model_validate_json(
+        dense = CompressedShardedDenseIndexManifest.model_validate_json(
             dense_path.read_text(encoding="utf-8")
         )
     except (OSError, ValidationError, ValueError):
@@ -351,8 +358,32 @@ def resolve_best_available_corpus_readiness(
             ready=False,
             detail="dense recall query artifact mismatch",
         )
+    if not latency_path.is_file():
+        return ComponentReadiness(
+            ready=False,
+            detail="dense latency report not available",
+        )
     try:
-        verify_sharded_dense_artifacts_cached(dense_root, dense)
+        latency = DenseLatencyReport.model_validate_json(
+            latency_path.read_text(encoding="utf-8")
+        )
+        latency.require_compatible(dense)
+    except (OSError, ValidationError, ValueError):
+        return ComponentReadiness(
+            ready=False,
+            detail="dense latency report invalid",
+        )
+    if not chunks_path.is_file():
+        return ComponentReadiness(
+            ready=False,
+            detail="dense chunks not available",
+        )
+    try:
+        verify_compressed_dense_artifacts_cached(
+            dense_root,
+            chunks_path,
+            dense,
+        )
     except (OSError, ValueError):
         return ComponentReadiness(
             ready=False,

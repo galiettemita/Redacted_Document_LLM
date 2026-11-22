@@ -7,10 +7,14 @@ from redacted_backend.corpus.best_available import (
 from redacted_backend.corpus.manifest import CorpusManifest
 from redacted_backend.domain.analysis import PredictionBasis
 from redacted_backend.retrieval.bm25 import index_definition_hash
+from redacted_backend.retrieval.dense_profile import (
+    DenseArtifactProfile,
+    dense_semantics_hash,
+)
 from redacted_backend.retrieval.types import (
     Bm25IndexManifest,
+    CompressedShardedDenseIndexManifest,
     DenseIndexManifest,
-    ShardedDenseIndexManifest,
 )
 from redacted_backend.scientific_config import ScientificConfig
 
@@ -138,7 +142,7 @@ def verify_corpus_readiness(
 def verify_best_available_corpus_readiness(
     corpus: BestAvailableCorpusManifest,
     index: Bm25IndexManifest,
-    dense: ShardedDenseIndexManifest,
+    dense: CompressedShardedDenseIndexManifest,
     scientific: ScientificConfig,
 ) -> ComponentReadiness:
     scientific_hash = scientific.manifest_hash()
@@ -210,10 +214,10 @@ def verify_best_available_corpus_readiness(
         return ComponentReadiness(ready=False, detail="dense model revision mismatch")
     if dense.embedding_dimension != scientific.embedding_dimension:
         return ComponentReadiness(ready=False, detail="dense dimension mismatch")
-    if dense.scientific_hash != scientific_hash:
+    if dense.dense_semantics_hash != dense_semantics_hash(scientific):
         return ComponentReadiness(
             ready=False,
-            detail="dense scientific manifest mismatch",
+            detail="dense semantic manifest mismatch",
         )
     if dense.corpus_manifest_hash != corpus_hash:
         return ComponentReadiness(ready=False, detail="dense corpus manifest mismatch")
@@ -221,14 +225,53 @@ def verify_best_available_corpus_readiness(
         return ComponentReadiness(ready=False, detail="dense chunk checksum mismatch")
     if dense.chunk_count != corpus.chunk_count:
         return ComponentReadiness(ready=False, detail="dense corpus count mismatch")
+    if dense.artifact_profile_hash != dense.artifact_profile.manifest_hash():
+        return ComponentReadiness(
+            ready=False,
+            detail="dense artifact profile hash mismatch",
+        )
+    supported_profile = DenseArtifactProfile()
     if (
-        dense.candidate_index != scientific.dense_index_version
-        or dense.hnsw_m != scientific.dense_hnsw_m
-        or dense.ef_construction != scientific.dense_ef_construction
-        or dense.ef_search != scientific.dense_ef_search
-        or dense.candidate_count != scientific.dense_candidate_count
+        dense.artifact_profile != supported_profile
+        or dense.artifact_profile_hash != supported_profile.manifest_hash()
+        or dense.candidate_index != supported_profile.candidate_index
     ):
-        return ComponentReadiness(ready=False, detail="dense index parameters mismatch")
+        return ComponentReadiness(
+            ready=False,
+            detail="unsupported dense artifact profile",
+        )
+    if dense.chunk_offsets_size_bytes != dense.chunk_count * 8:
+        return ComponentReadiness(ready=False, detail="dense offset size mismatch")
+    expected_start = 0
+    for expected_id, shard in enumerate(dense.shards):
+        if (
+            shard.shard_id != expected_id
+            or shard.start_row != expected_start
+            or shard.end_row - shard.start_row != shard.chunk_count
+            or shard.chunk_count > dense.shard_size_limit
+        ):
+            return ComponentReadiness(ready=False, detail="dense shard range mismatch")
+        if shard.artifact_profile_hash != dense.artifact_profile_hash:
+            return ComponentReadiness(
+                ready=False,
+                detail="dense artifact profile hash mismatch",
+            )
+        if shard.candidate_template_sha256 != dense.candidate_template_sha256:
+            return ComponentReadiness(
+                ready=False,
+                detail="dense candidate template mismatch",
+            )
+        if (
+            shard.embeddings_size_bytes
+            != shard.chunk_count * dense.embedding_dimension * 2
+        ):
+            return ComponentReadiness(
+                ready=False,
+                detail="dense shard embedding size mismatch",
+            )
+        expected_start = shard.end_row
+    if expected_start != dense.chunk_count:
+        return ComponentReadiness(ready=False, detail="dense shard range mismatch")
     if dense.recall_query_count != 100:
         return ComponentReadiness(
             ready=False,

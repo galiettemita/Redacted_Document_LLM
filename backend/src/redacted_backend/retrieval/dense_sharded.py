@@ -458,24 +458,27 @@ def select_certification_queries(
 
 def certify_sharded_dense_recall(
     root: Path,
-    manifest: ShardedDenseIndexManifest,
+    manifest: CompressedShardedDenseIndexManifest,
     queries: Sequence[str],
     *,
     encoder: QueryEncoder,
-    candidate_loader: CandidateLoader,
+    candidate_loader: CandidateLoader = FaissIvfPqIndex.load,
     scientific: ScientificConfig | None = None,
     limit: int = 300,
     block_rows: int = 16_384,
+    matrix_backend: Literal["auto", "numpy", "torch-cuda"] = "auto",
 ) -> float:
     if not queries or any(not query.strip() for query in queries):
         raise ValueError("Dense recall queries must contain visible, non-empty text")
     if block_rows < 1:
         raise ValueError("Dense recall block size must be positive")
+    if matrix_backend not in {"auto", "numpy", "torch-cuda"}:
+        raise ValueError("Unsupported dense recall matrix backend")
     config = scientific or ScientificConfig()
-    if manifest.scientific_hash != config.manifest_hash():
-        raise IncompatibleDenseIndexError("Dense scientific manifest mismatch")
+    if manifest.dense_semantics_hash != dense_semantics_hash(config):
+        raise IncompatibleDenseIndexError("Dense semantic manifest mismatch")
     effective_limit = min(limit, manifest.chunk_count)
-    verify_sharded_dense_artifacts(root, manifest)
+    _verify_compressed_artifacts(root, manifest)
     query_vectors = np.asarray(
         [
             _query_vector(encoder, query, manifest.embedding_dimension)
@@ -483,8 +486,8 @@ def certify_sharded_dense_recall(
         ],
         dtype=np.float32,
     )
-    exact: list[list[tuple[float, CorpusChunk]]] = [[] for _ in queries]
-    approximate: list[list[tuple[float, CorpusChunk]]] = [[] for _ in queries]
+    exact: list[list[tuple[float, int]]] = [[] for _ in queries]
+    approximate: list[list[tuple[float, int]]] = [[] for _ in queries]
     for shard in manifest.shards:
         directory = root / shard.path
         embeddings = _open_embeddings(
@@ -492,61 +495,62 @@ def certify_sharded_dense_recall(
             shard.chunk_count,
             manifest.embedding_dimension,
         )
-        offsets = _open_offsets(directory, shard.chunk_count)
-        with (directory / "metadata.jsonl").open("rb") as metadata:
-            for start in range(0, shard.chunk_count, block_rows):
-                end = min(start + block_rows, shard.chunk_count)
-                block_matrix = np.asarray(embeddings[start:end], dtype=np.float32)
-                scores = block_matrix @ query_vectors.T
-                block_chunks = [
-                    _read_chunk_at(metadata, int(offsets[row]))
-                    for row in range(start, end)
+        for start in range(0, shard.chunk_count, block_rows):
+            end = min(start + block_rows, shard.chunk_count)
+            block_matrix = np.asarray(embeddings[start:end], dtype=np.float32)
+            scores = _matrix_scores(block_matrix, query_vectors, matrix_backend)
+            for query_index in range(len(queries)):
+                scored = [
+                    (float(score), shard.start_row + start + row)
+                    for row, score in enumerate(scores[:, query_index])
                 ]
-                for query_index in range(len(queries)):
-                    scored = [
-                        (float(score), chunk)
-                        for score, chunk in zip(
-                            scores[:, query_index],
-                            block_chunks,
-                            strict=True,
-                        )
-                    ]
-                    exact[query_index] = _best_scored_chunks(
-                        (*exact[query_index], *scored),
-                        effective_limit,
-                    )
+                exact[query_index] = _best_scored_rows(
+                    (*exact[query_index], *scored),
+                    effective_limit,
+                )
 
-            index = candidate_loader(
-                directory / "candidate.faiss",
-                ef_search=manifest.ef_search,
+        index = candidate_loader(
+            directory / "candidate.faiss",
+            profile=manifest.artifact_profile,
+        )
+        if int(index.ntotal) != shard.chunk_count:
+            raise IncompatibleDenseIndexError(
+                "Dense candidate row count does not match its shard"
             )
-            for query_index, query_vector in enumerate(query_vectors):
-                rows = np.asarray(
-                    index.search(
-                        query_vector,
-                        min(manifest.candidate_count, shard.chunk_count),
+        for query_index, query_vector in enumerate(query_vectors):
+            raw_rows = np.asarray(
+                index.search(
+                    query_vector,
+                    min(
+                        manifest.artifact_profile.candidate_count_per_shard,
+                        shard.chunk_count,
                     ),
-                    dtype=np.int64,
-                ).reshape(-1)
-                rows = np.unique(rows)
-                if np.any(rows < 0) or np.any(rows >= shard.chunk_count):
+                ),
+                dtype=np.int64,
+            ).reshape(-1)
+            rows: list[int] = []
+            seen: set[int] = set()
+            for value in raw_rows:
+                row = int(value)
+                if row == -1 or row in seen:
+                    continue
+                if row < 0 or row >= shard.chunk_count:
                     raise IncompatibleDenseIndexError(
                         "Dense candidate index returned an invalid shard row"
                     )
-                scores = np.asarray(embeddings[rows], dtype=np.float32) @ query_vector
-                candidates = [
-                    (
-                        float(score),
-                        _read_chunk_at(metadata, int(offsets[int(row)])),
-                    )
-                    for row, score in zip(rows, scores, strict=True)
-                ]
-                approximate[query_index] = _best_scored_chunks(
-                    (*approximate[query_index], *candidates),
-                    effective_limit,
-                )
+                seen.add(row)
+                rows.append(row)
+            row_array = np.asarray(rows, dtype=np.int64)
+            scores = np.asarray(embeddings[row_array], dtype=np.float32) @ query_vector
+            candidates = [
+                (float(score), shard.start_row + row)
+                for row, score in zip(rows, scores, strict=True)
+            ]
+            approximate[query_index] = _best_scored_rows(
+                (*approximate[query_index], *candidates),
+                effective_limit,
+            )
         del embeddings
-        del offsets
 
     recalls: list[float] = []
     for exact_ranking, approximate_ranking in zip(
@@ -554,60 +558,115 @@ def certify_sharded_dense_recall(
         approximate,
         strict=True,
     ):
-        expected = {chunk.id for _, chunk in exact_ranking}
-        returned = {chunk.id for _, chunk in approximate_ranking}
+        expected = {row for _, row in exact_ranking}
+        returned = {row for _, row in approximate_ranking}
         if not expected:
             raise ValueError("Exact sharded dense ranking returned no results")
         recalls.append(len(expected & returned) / len(expected))
     return float(sum(recalls) / len(recalls))
 
 
-def verify_sharded_dense_artifacts(
+def verify_compressed_dense_artifacts(
     root: Path,
-    manifest: ShardedDenseIndexManifest,
+    chunks_path: Path,
+    manifest: CompressedShardedDenseIndexManifest,
 ) -> None:
-    for shard in manifest.shards:
-        _verify_shard_files(root, shard, manifest.embedding_dimension)
+    _verify_compressed_artifacts(root, manifest)
+    with ChunkOffsetIndex.open(
+        chunks_path,
+        root / manifest.chunk_offsets_path,
+        expected_count=manifest.chunk_count,
+        expected_chunks_sha256=manifest.chunks_sha256,
+        expected_offsets_sha256=manifest.chunk_offsets_sha256,
+    ):
+        pass
 
 
-def verify_sharded_dense_artifacts_cached(
+def verify_compressed_dense_artifacts_cached(
     root: Path,
-    manifest: ShardedDenseIndexManifest,
+    chunks_path: Path,
+    manifest: CompressedShardedDenseIndexManifest,
 ) -> None:
-    signatures: list[tuple[str, int, int]] = []
+    signatures: list[tuple[str, int, int]] = [
+        (
+            str(chunks_path.resolve()),
+            chunks_path.stat().st_size,
+            chunks_path.stat().st_mtime_ns,
+        )
+    ]
+    for name in (
+        manifest.chunk_offsets_path,
+        manifest.candidate_template_path,
+        manifest.recall_report_path,
+    ):
+        path = root / name
+        stat = path.stat()
+        signatures.append((name, stat.st_size, stat.st_mtime_ns))
     for shard in manifest.shards:
-        for name in (
-            "embeddings.f16",
-            "metadata.jsonl",
-            "metadata.offsets.u64",
-            "candidate.faiss",
-        ):
+        for name in ("embeddings.f16", "candidate.faiss"):
             path = root / shard.path / name
             stat = path.stat()
             signatures.append((f"{shard.path}/{name}", stat.st_size, stat.st_mtime_ns))
-    _verify_sharded_dense_artifacts_cached(
+    _verify_compressed_dense_artifacts_cached(
         str(root.resolve()),
+        str(chunks_path.resolve()),
         manifest.model_dump_json(),
         tuple(signatures),
     )
 
 
 @lru_cache(maxsize=8)
-def _verify_sharded_dense_artifacts_cached(
+def _verify_compressed_dense_artifacts_cached(
     root: str,
+    chunks_path: str,
     manifest_json: str,
     _signatures: tuple[tuple[str, int, int], ...],
 ) -> None:
-    manifest = ShardedDenseIndexManifest.model_validate_json(manifest_json)
-    verify_sharded_dense_artifacts(Path(root), manifest)
+    manifest = CompressedShardedDenseIndexManifest.model_validate_json(manifest_json)
+    verify_compressed_dense_artifacts(Path(root), Path(chunks_path), manifest)
 
 
-def verify_dense_shard_artifacts(
-    root: Path,
-    shard: DenseShardManifest,
-    embedding_dimension: int,
-) -> None:
-    _verify_shard_files(root, shard, embedding_dimension)
+def _matrix_scores(
+    embeddings: NDArray[np.float32],
+    queries: NDArray[np.float32],
+    backend: Literal["auto", "numpy", "torch-cuda"],
+) -> NDArray[np.float32]:
+    use_torch = backend == "torch-cuda"
+    if backend == "auto":
+        use_torch = _cuda_runtime_visible()
+    if not use_torch:
+        return np.asarray(embeddings @ queries.T, dtype=np.float32)
+    if not _cuda_runtime_visible():
+        raise RuntimeError("CUDA runtime is not visible for dense recall")
+    try:
+        import torch
+    except ImportError as error:
+        raise RuntimeError("Torch is required for CUDA dense recall") from error
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is not available for dense recall")
+    with torch.inference_mode():
+        matrix = torch.from_numpy(embeddings).to(device="cuda", dtype=torch.float32)
+        query_matrix = torch.from_numpy(queries).to(device="cuda", dtype=torch.float32)
+        return np.asarray((matrix @ query_matrix.T).cpu().numpy(), dtype=np.float32)
+
+
+def _cuda_runtime_visible() -> bool:
+    if platform.system() != "Linux":
+        return False
+    if Path("/dev/nvidiactl").exists() or Path("/proc/driver/nvidia/version").exists():
+        return True
+    for name in ("NVIDIA_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES"):
+        value = os.environ.get(name, "").strip().lower()
+        if value and value not in {"-1", "none", "void"}:
+            return True
+    return False
+
+
+def _best_scored_rows(
+    values: Sequence[tuple[float, int]],
+    limit: int,
+) -> list[tuple[float, int]]:
+    return sorted(values, key=lambda item: (-item[0], item[1]))[:limit]
 
 
 def _best_scored_chunks(

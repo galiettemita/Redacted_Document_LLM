@@ -10,6 +10,7 @@ import pytest
 from numpy.typing import NDArray
 
 import redacted_backend.corpus.build_dense_sharded as dense_builder
+from redacted_backend.retrieval import dense_sharded
 from redacted_backend.corpus.best_available import BestAvailableCorpusManifest
 from redacted_backend.corpus.build_dense_sharded import (
     StorageBudgetError,
@@ -272,6 +273,24 @@ def test_template_training_maps_each_embedding_shard_only_once(
     _build(tmp_path)
 
     assert checkpoint_reads == 3
+
+
+def test_build_recall_uses_the_auto_cuda_or_numpy_matrix_backend(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backends: list[str] = []
+
+    def tracked_scores(embeddings, queries, backend):
+        backends.append(backend)
+        return dense_sharded._matrix_scores(embeddings, queries, "numpy")
+
+    monkeypatch.setattr(dense_builder, "_matrix_scores", tracked_scores, raising=False)
+
+    _build(tmp_path)
+
+    assert backends
+    assert set(backends) == {"auto"}
 
 
 def test_corrupt_candidate_rebuilds_from_embeddings_without_encoding(

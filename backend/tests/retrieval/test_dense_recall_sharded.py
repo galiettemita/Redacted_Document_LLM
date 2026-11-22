@@ -2,19 +2,27 @@ from __future__ import annotations
 
 import hashlib
 import json
+import builtins
 from pathlib import Path
 
 import numpy as np
+import pytest
 from numpy.typing import NDArray
 
 from redacted_backend.corpus.chunker import CorpusChunk
+from redacted_backend.retrieval.dense import DenseRecallError, require_dense_recall
+from redacted_backend.retrieval.dense_profile import (
+    DenseArtifactProfile,
+    dense_semantics_hash,
+)
 from redacted_backend.retrieval.dense_sharded import (
+    _matrix_scores,
     certify_sharded_dense_recall,
     select_certification_queries,
 )
 from redacted_backend.retrieval.types import (
-    DenseShardManifest,
-    ShardedDenseIndexManifest,
+    CompressedDenseShardManifest,
+    CompressedShardedDenseIndexManifest,
 )
 from redacted_backend.scientific_config import ScientificConfig
 
@@ -26,8 +34,9 @@ class Encoder:
 
 
 class Candidate:
-    def __init__(self, rows: list[int]) -> None:
+    def __init__(self, rows: list[int], *, ntotal: int) -> None:
         self.rows = rows
+        self.ntotal = ntotal
 
     def search(
         self,
@@ -65,7 +74,10 @@ def test_certification_query_selection_is_stable_and_hashes_published_bytes(
         encoding="utf-8",
     )
     application = tmp_path / "application.txt"
-    application.write_text("visible public query A\nvisible public query B\n", encoding="utf-8")
+    application.write_text(
+        "visible public query A\nvisible public query B\n",
+        encoding="utf-8",
+    )
     output = tmp_path / "combined.txt"
 
     queries = select_certification_queries(
@@ -88,74 +100,117 @@ def test_certification_query_selection_is_stable_and_hashes_published_bytes(
     )
 
 
-def _write_recall_shard(
+def _write_recall_fixture(
     root: Path,
-    shard_id: int,
-    start: int,
-    scores: list[float],
-    candidate_rows: list[int],
-) -> DenseShardManifest:
-    directory = root / f"shard-{shard_id:05d}"
-    directory.mkdir(parents=True)
-    vectors = np.asarray([[score, 1.0 - score] for score in scores], dtype=np.float16)
-    embeddings = directory / "embeddings.f16"
-    vectors.tofile(embeddings)
-    metadata = directory / "metadata.jsonl"
-    offsets: list[int] = []
-    with metadata.open("wb") as destination:
-        for index in range(len(scores)):
-            offsets.append(destination.tell())
-            destination.write(_chunk(start + index).model_dump_json().encode() + b"\n")
-    offset_path = directory / "metadata.offsets.u64"
-    np.asarray(offsets, dtype="<u8").tofile(offset_path)
-    candidate = directory / "candidate.faiss"
-    candidate.write_text(json.dumps(candidate_rows), encoding="utf-8")
-    return DenseShardManifest(
-        shard_id=shard_id,
-        path=directory.name,
-        start_row=start,
-        end_row=start + len(scores),
-        chunk_count=len(scores),
-        embeddings_sha256=hashlib.sha256(embeddings.read_bytes()).hexdigest(),
-        metadata_sha256=hashlib.sha256(metadata.read_bytes()).hexdigest(),
-        offsets_sha256=hashlib.sha256(offset_path.read_bytes()).hexdigest(),
-        candidate_index_sha256=hashlib.sha256(candidate.read_bytes()).hexdigest(),
+) -> tuple[CompressedShardedDenseIndexManifest, dict[str, list[int]]]:
+    scientific = ScientificConfig(embedding_dimension=2)
+    profile = DenseArtifactProfile(
+        embedding_dimension=2,
+        ivf_nlist=1,
+        pq_subvectors=1,
+        pq_bits=1,
+        nprobe=1,
+        candidate_count_per_shard=2,
+        training_sample_count=4,
+        shard_size_limit=2,
+        max_artifact_bytes=1024 * 1024,
+    )
+    template = root / "candidate-template.faiss"
+    template.write_bytes(b"template")
+    template_sha256 = hashlib.sha256(template.read_bytes()).hexdigest()
+    offsets = root / "chunks.offsets.u64"
+    offsets.write_bytes(np.asarray([0, 1, 2, 3], dtype="<u8").tobytes())
+    recall = root / "recall-report.json"
+    recall.write_bytes(b"{}\n")
+    rows_by_path: dict[str, list[int]] = {}
+    shards: list[CompressedDenseShardManifest] = []
+    for shard_id, (scores, rows) in enumerate(
+        (([0.9, 0.1], [0]), ([0.8, 0.7], [0, 1]))
+    ):
+        directory = root / f"shard-{shard_id:05d}"
+        directory.mkdir()
+        embeddings = directory / "embeddings.f16"
+        np.asarray(
+            [[score, 1.0 - score] for score in scores],
+            dtype=np.float16,
+        ).tofile(embeddings)
+        candidate = directory / "candidate.faiss"
+        candidate.write_text(json.dumps(rows), encoding="utf-8")
+        rows_by_path[directory.name] = rows
+        shards.append(
+            CompressedDenseShardManifest(
+                artifact_profile_hash=profile.manifest_hash(),
+                candidate_template_sha256=template_sha256,
+                shard_id=shard_id,
+                path=directory.name,
+                start_row=shard_id * 2,
+                end_row=shard_id * 2 + 2,
+                chunk_count=2,
+                embeddings_size_bytes=embeddings.stat().st_size,
+                embeddings_sha256=hashlib.sha256(
+                    embeddings.read_bytes()
+                ).hexdigest(),
+                candidate_index_size_bytes=candidate.stat().st_size,
+                candidate_index_sha256=hashlib.sha256(
+                    candidate.read_bytes()
+                ).hexdigest(),
+            )
+        )
+    listed_bytes = (
+        offsets.stat().st_size
+        + template.stat().st_size
+        + recall.stat().st_size
+        + sum(
+            shard.embeddings_size_bytes + shard.candidate_index_size_bytes
+            for shard in shards
+        )
+    )
+    return (
+        CompressedShardedDenseIndexManifest(
+            model_name=scientific.embedding_model,
+            model_revision=scientific.embedding_model_revision,
+            embedding_dimension=2,
+            corpus_manifest_hash="1" * 64,
+            dense_semantics_hash=dense_semantics_hash(scientific),
+            chunks_sha256="3" * 64,
+            chunk_count=4,
+            artifact_profile=profile,
+            artifact_profile_hash=profile.manifest_hash(),
+            chunk_offsets_path=offsets.name,
+            chunk_offsets_format=profile.metadata_lookup_version,
+            chunk_offsets_size_bytes=offsets.stat().st_size,
+            chunk_offsets_sha256=hashlib.sha256(offsets.read_bytes()).hexdigest(),
+            candidate_template_path=template.name,
+            candidate_template_size_bytes=template.stat().st_size,
+            candidate_template_sha256=template_sha256,
+            shard_size_limit=2,
+            shards=shards,
+            dtype="float16",
+            metric="inner_product",
+            candidate_index=profile.candidate_index,
+            recall_report_path=recall.name,
+            recall_report_size_bytes=recall.stat().st_size,
+            recall_report_sha256=hashlib.sha256(recall.read_bytes()).hexdigest(),
+            recall_at_300=1.0,
+            recall_queries_sha256="4" * 64,
+            recall_query_count=1,
+            total_artifact_bytes=listed_bytes,
+        ),
+        rows_by_path,
     )
 
 
-def test_sharded_recall_compares_candidate_union_with_streamed_global_exact_top_k(
+def test_sharded_recall_compares_candidate_union_with_global_exact_top_k(
     tmp_path: Path,
 ) -> None:
-    scientific = ScientificConfig().model_copy(
-        update={"embedding_dimension": 2, "dense_candidate_count": 2}
-    )
-    first = _write_recall_shard(tmp_path, 0, 0, [0.9, 0.1], [0])
-    second = _write_recall_shard(tmp_path, 1, 2, [0.8, 0.7], [0, 1])
-    manifest = ShardedDenseIndexManifest(
-        model_name="BAAI/bge-base-en-v1.5",
-        model_revision="a5beb1e3e68b9ab74eb54cfd186867f64f240e1a",
-        embedding_dimension=2,
-        corpus_manifest_hash="1" * 64,
-        scientific_hash=scientific.manifest_hash(),
-        chunks_sha256="3" * 64,
-        chunk_count=4,
-        shard_size_limit=2,
-        shards=[first, second],
-        dtype="float16",
-        metric="inner_product",
-        candidate_index="faiss-hnsw-flat-v1",
-        hnsw_m=32,
-        ef_construction=200,
-        ef_search=512,
-        candidate_count=2,
-        recall_at_300=1.0,
-        recall_queries_sha256="4" * 64,
-        recall_query_count=1,
-    )
+    manifest, rows_by_path = _write_recall_fixture(tmp_path)
 
-    def loader(path: Path, *, ef_search: int) -> Candidate:
-        del ef_search
-        return Candidate(json.loads(path.read_text(encoding="utf-8")))
+    def loader(path: Path, *, profile: DenseArtifactProfile) -> Candidate:
+        assert profile == manifest.artifact_profile
+        return Candidate(
+            rows_by_path[path.parent.name],
+            ntotal=manifest.shards[int(path.parent.name[-5:])].chunk_count,
+        )
 
     recall = certify_sharded_dense_recall(
         tmp_path,
@@ -163,9 +218,40 @@ def test_sharded_recall_compares_candidate_union_with_streamed_global_exact_top_
         ["query"],
         encoder=Encoder(),
         candidate_loader=loader,
-        scientific=scientific,
+        scientific=ScientificConfig(embedding_dimension=2),
         limit=2,
         block_rows=1,
+        matrix_backend="numpy",
     )
 
     assert recall == 1.0
+
+
+def test_auto_matrix_backend_avoids_torch_without_visible_cuda_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    embeddings = np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+    queries = np.asarray([[1.0, 0.0]], dtype=np.float32)
+    original_import = builtins.__import__
+
+    def guarded_import(name, *args, **kwargs):
+        if name == "torch":
+            raise AssertionError("auto mode imported torch without a CUDA runtime")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(
+        "redacted_backend.retrieval.dense_sharded._cuda_runtime_visible",
+        lambda: False,
+        raising=False,
+    )
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+
+    scores = _matrix_scores(embeddings, queries, "auto")
+
+    assert scores.tolist() == [[1.0], [0.0]]
+
+
+def test_recall_gate_publishes_at_point_98_and_refuses_below_it() -> None:
+    require_dense_recall(0.98, minimum=0.98)
+    with pytest.raises(DenseRecallError, match="0.9799"):
+        require_dense_recall(0.9799, minimum=0.98)

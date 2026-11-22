@@ -23,12 +23,17 @@ from redacted_backend.jobs.orchestrator import AnalysisOrchestrator
 from redacted_backend.models.openai_gateway import OpenAIGateway, OpenAIHttpTransport
 from redacted_backend.retrieval.bm25 import Bm25Index, OpenSearchHttpTransport
 from redacted_backend.retrieval.dense import BgeEncoder, DenseIndex
-from redacted_backend.retrieval.dense_sharded import ShardedDenseIndex
+from redacted_backend.retrieval.dense_sharded import (
+    ShardedDenseIndex,
+    verify_compressed_dense_artifacts,
+)
+from redacted_backend.retrieval.faiss_ivfpq import FaissIvfPqIndex
 from redacted_backend.retrieval.service import RealisticRetrievalService
 from redacted_backend.retrieval.types import (
     Bm25IndexManifest,
+    CompressedShardedDenseIndexManifest,
+    DenseLatencyReport,
     DenseIndexManifest,
-    ShardedDenseIndexManifest,
 )
 from redacted_backend.scientific_config import ScientificConfig
 
@@ -138,7 +143,11 @@ def _build_best_available_orchestrator(
         "best-available dense artifact directory": (
             settings.best_available_dense_artifact_directory
         ),
+        "best-available chunks": settings.best_available_chunks_path,
         "best-available recall queries": settings.best_available_recall_queries_path,
+        "best-available latency report": (
+            settings.best_available_latency_report_path
+        ),
     }
     missing = [name for name, path in required_paths.items() if path is None]
     if missing:
@@ -149,12 +158,16 @@ def _build_best_available_orchestrator(
     bm25_path = settings.best_available_bm25_manifest_path
     dense_path = settings.best_available_dense_manifest_path
     dense_root = settings.best_available_dense_artifact_directory
+    chunks_path = settings.best_available_chunks_path
     queries_path = settings.best_available_recall_queries_path
+    latency_path = settings.best_available_latency_report_path
     assert corpus_path is not None
     assert bm25_path is not None
     assert dense_path is not None
     assert dense_root is not None
+    assert chunks_path is not None
     assert queries_path is not None
+    assert latency_path is not None
 
     corpus = BestAvailableCorpusManifest.model_validate_json(
         corpus_path.read_text(encoding="utf-8")
@@ -162,7 +175,7 @@ def _build_best_available_orchestrator(
     bm25_manifest = Bm25IndexManifest.model_validate_json(
         bm25_path.read_text(encoding="utf-8")
     )
-    dense_manifest = ShardedDenseIndexManifest.model_validate_json(
+    dense_manifest = CompressedShardedDenseIndexManifest.model_validate_json(
         dense_path.read_text(encoding="utf-8")
     )
     manifest_readiness = verify_best_available_corpus_readiness(
@@ -184,6 +197,21 @@ def _build_best_available_orchestrator(
         or query_count != dense_manifest.recall_query_count
     ):
         raise RuntimeError("Dense recall query artifact mismatch")
+    try:
+        latency = DenseLatencyReport.model_validate_json(
+            latency_path.read_text(encoding="utf-8")
+        )
+        latency.require_compatible(dense_manifest)
+    except (OSError, ValueError) as error:
+        raise RuntimeError("Dense latency report mismatch") from error
+    try:
+        verify_compressed_dense_artifacts(
+            dense_root,
+            chunks_path,
+            dense_manifest,
+        )
+    except (OSError, ValueError) as error:
+        raise RuntimeError("Dense artifacts failed verification") from error
 
     transport = OpenSearchHttpTransport(settings.opensearch_url)
     if transport.count(bm25_manifest.index_name) != bm25_manifest.chunk_count:
@@ -197,9 +225,10 @@ def _build_best_available_orchestrator(
     )
     dense = ShardedDenseIndex(
         root=dense_root,
+        chunks_path=chunks_path,
         manifest=dense_manifest,
         encoder=BgeEncoder(scientific=scientific),
-        candidate_loader=FaissHnswIndex.load,
+        candidate_loader=FaissIvfPqIndex.load,
         scientific=scientific,
     )
     bm25.search("worker readiness probe", limit=1, query_kind="context")

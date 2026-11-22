@@ -3,6 +3,7 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 
 import redacted_backend.api.readiness as readiness_api
@@ -16,6 +17,7 @@ from redacted_backend.corpus.best_available import (
     BEST_AVAILABLE_BM25_INDEX_NAME,
     BestAvailableCorpusManifest,
 )
+from redacted_backend.corpus.chunker import CorpusChunk
 from redacted_backend.corpus.manifest import CorpusManifest
 from redacted_backend.domain.readiness import (
     verify_best_available_corpus_readiness,
@@ -25,11 +27,16 @@ from redacted_backend.domain.analysis import PredictionBasis
 from redacted_backend.domain.readiness import ComponentReadiness
 from redacted_backend.main import create_app
 from redacted_backend.retrieval.bm25 import index_definition_hash
+from redacted_backend.retrieval.dense_profile import (
+    DenseArtifactProfile,
+    dense_semantics_hash,
+)
 from redacted_backend.retrieval.types import (
     Bm25IndexManifest,
+    CompressedDenseShardManifest,
+    CompressedShardedDenseIndexManifest,
+    DenseLatencyReport,
     DenseIndexManifest,
-    DenseShardManifest,
-    ShardedDenseIndexManifest,
 )
 from redacted_backend.scientific_config import ScientificConfig
 
@@ -391,6 +398,21 @@ def test_best_available_readiness_verifies_separate_shards_queries_and_live_inde
         dense,
         ScientificConfig(),
     ).ready is True
+    ready = ComponentReadiness(ready=True, detail="ready")
+    unavailable = ComponentReadiness(ready=False, detail="not configured")
+    basis = readiness_api.resolve_prediction_basis_readiness(
+        settings.model_copy(update={"openai_api_key": "configured"}),
+        database=ready,
+        worker=ready,
+        corpus=unavailable,
+        best_available_corpus=readiness,
+    )[PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1]
+    assert basis.model_dump() == {
+        "operational": True,
+        "approved": False,
+        "ready": False,
+        "detail": "operational; spending not approved",
+    }
 
 
 def test_best_available_readiness_fails_closed_on_corruption_or_live_count(
@@ -425,6 +447,139 @@ def test_best_available_readiness_fails_closed_on_corruption_or_live_count(
         "ready": False,
         "detail": "BM25 live index count mismatch",
     }
+
+
+@pytest.mark.parametrize(
+    ("case", "detail"),
+    [
+        ("unsupported_profile", "unsupported dense artifact profile"),
+        ("profile_hash", "dense artifact profile hash mismatch"),
+        ("semantics", "dense semantic manifest mismatch"),
+        ("chunks", "dense chunk checksum mismatch"),
+        ("offset_size", "dense offset size mismatch"),
+        ("shard_range", "dense shard range mismatch"),
+        ("candidate_template", "dense candidate template mismatch"),
+        ("recall_count", "dense recall query count mismatch"),
+        ("recall_value", "dense recall@300 is below 0.9800"),
+    ],
+)
+def test_best_available_manifest_mismatches_fail_closed(
+    tmp_path: Path,
+    case: str,
+    detail: str,
+) -> None:
+    _settings, corpus, bm25, dense = _compatible_best_available_settings(
+        tmp_path / case
+    )
+    if case == "unsupported_profile":
+        unsupported = dense.artifact_profile.model_copy(update={"nprobe": 512})
+        dense = dense.model_copy(
+            update={
+                "artifact_profile": unsupported,
+                "artifact_profile_hash": unsupported.manifest_hash(),
+            }
+        )
+    elif case == "profile_hash":
+        dense = dense.model_copy(update={"artifact_profile_hash": "0" * 64})
+    elif case == "semantics":
+        dense = dense.model_copy(update={"dense_semantics_hash": "0" * 64})
+    elif case == "chunks":
+        dense = dense.model_copy(update={"chunks_sha256": "0" * 64})
+    elif case == "offset_size":
+        dense = dense.model_copy(update={"chunk_offsets_size_bytes": 16})
+    elif case == "shard_range":
+        bad_shard = dense.shards[0].model_copy(update={"start_row": 1})
+        dense = dense.model_copy(update={"shards": [bad_shard]})
+    elif case == "candidate_template":
+        bad_shard = dense.shards[0].model_copy(
+            update={"candidate_template_sha256": "0" * 64}
+        )
+        dense = dense.model_copy(update={"shards": [bad_shard]})
+    elif case == "recall_count":
+        dense = dense.model_copy(update={"recall_query_count": 99})
+    elif case == "recall_value":
+        dense = dense.model_copy(update={"recall_at_300": 0.9799})
+
+    assert verify_best_available_corpus_readiness(
+        corpus,
+        bm25,
+        dense,
+        ScientificConfig(),
+    ).model_dump() == {"ready": False, "detail": detail}
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "offset_checksum",
+        "shard_size",
+        "shard_checksum",
+        "template_checksum",
+        "query_hash",
+        "latency_manifest",
+        "latency_query",
+        "latency_count",
+        "latency_maximum",
+        "missing_chunks",
+    ],
+)
+def test_best_available_external_mismatches_fail_before_live_bm25_probe(
+    tmp_path: Path,
+    case: str,
+) -> None:
+    settings, _corpus, _bm25, dense = _compatible_best_available_settings(
+        tmp_path / case
+    )
+    dense_root = settings.best_available_dense_artifact_directory
+    latency_path = settings.best_available_latency_report_path
+    queries_path = settings.best_available_recall_queries_path
+    assert dense_root is not None
+    assert latency_path is not None
+    assert queries_path is not None
+    if case == "offset_checksum":
+        path = dense_root / dense.chunk_offsets_path
+        path.write_bytes(b"1" * path.stat().st_size)
+    elif case == "shard_size":
+        path = dense_root / dense.shards[0].path / "embeddings.f16"
+        path.write_bytes(path.read_bytes() + b"x")
+    elif case == "shard_checksum":
+        path = dense_root / dense.shards[0].path / "candidate.faiss"
+        path.write_bytes(b"x" * path.stat().st_size)
+    elif case == "template_checksum":
+        path = dense_root / dense.candidate_template_path
+        path.write_bytes(b"x" * path.stat().st_size)
+    elif case == "query_hash":
+        queries_path.write_text("changed\n", encoding="utf-8")
+    elif case.startswith("latency_"):
+        latency = DenseLatencyReport.model_validate_json(
+            latency_path.read_text(encoding="utf-8")
+        )
+        updates = {
+            "latency_manifest": {"dense_manifest_hash": "0" * 64},
+            "latency_query": {"recall_queries_sha256": "0" * 64},
+            "latency_count": {"query_count": 99},
+            "latency_maximum": {"maximum_allowed_seconds": 4.0},
+        }[case]
+        latency_path.write_text(
+            latency.model_copy(update=updates).model_dump_json(),
+            encoding="utf-8",
+        )
+    elif case == "missing_chunks":
+        settings = settings.model_copy(update={"best_available_chunks_path": None})
+    probe_calls = 0
+
+    def count(_url: str, _index: str) -> int:
+        nonlocal probe_calls
+        probe_calls += 1
+        return 1
+
+    readiness = resolve_best_available_corpus_readiness(
+        settings,
+        index_counter=count,
+    )
+
+    assert readiness.ready is False
+    assert probe_calls == 0
 
 
 def _compatible_readiness_settings(
@@ -612,10 +767,26 @@ def _compatible_best_available_settings(
     Settings,
     BestAvailableCorpusManifest,
     Bm25IndexManifest,
-    ShardedDenseIndexManifest,
+    CompressedShardedDenseIndexManifest,
 ]:
     scientific = ScientificConfig()
     tmp_path.mkdir(parents=True, exist_ok=True)
+    chunk = CorpusChunk(
+        id=hashlib.sha256(b"best-available-chunk").hexdigest(),
+        document_id="best-available-document",
+        ordinal=0,
+        text="public archive passage",
+        word_count=3,
+        title="Public archive title",
+        corpus="historylab-unlabeled",
+        source_url=None,
+        classification=None,
+        authored=None,
+        doc_lang=None,
+    )
+    chunks_path = tmp_path / "chunks.jsonl"
+    chunks_path.write_text(chunk.model_dump_json() + "\n", encoding="utf-8")
+    chunks_sha256 = hashlib.sha256(chunks_path.read_bytes()).hexdigest()
     corpus = BestAvailableCorpusManifest(
         source_profile_hash="1" * 64,
         source_sha256="2" * 64,
@@ -633,7 +804,7 @@ def _compatible_best_available_settings(
         document_count=1,
         chunk_count=1,
         corpus_counts={"historylab-unlabeled": 1},
-        chunks_sha256="5" * 64,
+        chunks_sha256=chunks_sha256,
     )
     bm25 = Bm25IndexManifest(
         index_name=BEST_AVAILABLE_BM25_INDEX_NAME,
@@ -649,65 +820,99 @@ def _compatible_best_available_settings(
     dense_root = tmp_path / "best-dense"
     shard_directory = dense_root / "shard-00000"
     shard_directory.mkdir(parents=True)
-    artifacts = {
-        "embeddings.f16": b"\0" * (scientific.embedding_dimension * 2),
-        "metadata.jsonl": b'{}\n',
-        "metadata.offsets.u64": b"\0" * 8,
-        "candidate.faiss": b"candidate-fixture",
-    }
-    for name, value in artifacts.items():
-        (shard_directory / name).write_bytes(value)
-    shard = DenseShardManifest(
+    profile = DenseArtifactProfile()
+    offsets = dense_root / "chunks.offsets.u64"
+    offsets.write_bytes(b"\0" * 8)
+    template = dense_root / "candidate-template.faiss"
+    template.write_bytes(b"template-fixture")
+    recall_report = dense_root / "recall-report.json"
+    recall_report.write_bytes(b"{}\n")
+    embeddings = shard_directory / "embeddings.f16"
+    embeddings.write_bytes(b"\0" * (scientific.embedding_dimension * 2))
+    candidate = shard_directory / "candidate.faiss"
+    candidate.write_bytes(b"candidate-fixture")
+    template_sha256 = hashlib.sha256(template.read_bytes()).hexdigest()
+    shard = CompressedDenseShardManifest(
+        artifact_profile_hash=profile.manifest_hash(),
+        candidate_template_sha256=template_sha256,
         shard_id=0,
         path=shard_directory.name,
         start_row=0,
         end_row=1,
         chunk_count=1,
-        embeddings_sha256=hashlib.sha256(artifacts["embeddings.f16"]).hexdigest(),
-        metadata_sha256=hashlib.sha256(artifacts["metadata.jsonl"]).hexdigest(),
-        offsets_sha256=hashlib.sha256(
-            artifacts["metadata.offsets.u64"]
-        ).hexdigest(),
-        candidate_index_sha256=hashlib.sha256(
-            artifacts["candidate.faiss"]
-        ).hexdigest(),
+        embeddings_size_bytes=embeddings.stat().st_size,
+        embeddings_sha256=hashlib.sha256(embeddings.read_bytes()).hexdigest(),
+        candidate_index_size_bytes=candidate.stat().st_size,
+        candidate_index_sha256=hashlib.sha256(candidate.read_bytes()).hexdigest(),
     )
     queries = "".join(f"public certification query {index}\n" for index in range(100))
     queries_path = tmp_path / "best-recall-queries.txt"
     queries_path.write_text(queries, encoding="utf-8")
-    dense = ShardedDenseIndexManifest(
+    total_bytes = (
+        offsets.stat().st_size
+        + template.stat().st_size
+        + recall_report.stat().st_size
+        + embeddings.stat().st_size
+        + candidate.stat().st_size
+    )
+    dense = CompressedShardedDenseIndexManifest(
         model_name=scientific.embedding_model,
         model_revision=scientific.embedding_model_revision,
         embedding_dimension=scientific.embedding_dimension,
         corpus_manifest_hash=corpus.manifest_hash(),
-        scientific_hash=scientific.manifest_hash(),
+        dense_semantics_hash=dense_semantics_hash(scientific),
         chunks_sha256=corpus.chunks_sha256,
         chunk_count=1,
+        artifact_profile=profile,
+        artifact_profile_hash=profile.manifest_hash(),
+        chunk_offsets_path=offsets.name,
+        chunk_offsets_format=profile.metadata_lookup_version,
+        chunk_offsets_size_bytes=offsets.stat().st_size,
+        chunk_offsets_sha256=hashlib.sha256(offsets.read_bytes()).hexdigest(),
+        candidate_template_path=template.name,
+        candidate_template_size_bytes=template.stat().st_size,
+        candidate_template_sha256=template_sha256,
         shard_size_limit=1_000_000,
         shards=[shard],
         dtype="float16",
         metric="inner_product",
-        candidate_index=scientific.dense_index_version,
-        hnsw_m=scientific.dense_hnsw_m,
-        ef_construction=scientific.dense_ef_construction,
-        ef_search=scientific.dense_ef_search,
-        candidate_count=scientific.dense_candidate_count,
+        candidate_index=profile.candidate_index,
+        recall_report_path=recall_report.name,
+        recall_report_size_bytes=recall_report.stat().st_size,
+        recall_report_sha256=hashlib.sha256(
+            recall_report.read_bytes()
+        ).hexdigest(),
         recall_at_300=0.99,
         recall_queries_sha256=hashlib.sha256(queries.encode("utf-8")).hexdigest(),
         recall_query_count=100,
+        total_artifact_bytes=total_bytes,
+    )
+    latency = DenseLatencyReport(
+        dense_manifest_hash=dense.manifest_hash(),
+        recall_queries_sha256=dense.recall_queries_sha256,
+        query_count=100,
+        warm_search_seconds=[1.0] * 100,
+        max_observed_seconds=1.0,
+        maximum_allowed_seconds=profile.max_warm_search_seconds,
+        platform="test-platform",
+        machine="test-machine",
     )
     corpus_path = tmp_path / "best-corpus.json"
     bm25_path = tmp_path / "best-bm25.json"
     dense_path = tmp_path / "best-dense.json"
+    latency_path = tmp_path / "best-latency.json"
     corpus_path.write_text(corpus.model_dump_json(), encoding="utf-8")
     bm25_path.write_text(bm25.model_dump_json(), encoding="utf-8")
     dense_path.write_text(dense.model_dump_json(), encoding="utf-8")
+    latency_path.write_text(latency.model_dump_json(), encoding="utf-8")
     settings = Settings(
         best_available_corpus_manifest_path=corpus_path,
         best_available_bm25_manifest_path=bm25_path,
         best_available_dense_manifest_path=dense_path,
         best_available_dense_artifact_directory=dense_root,
+        best_available_chunks_path=chunks_path,
         best_available_recall_queries_path=queries_path,
+        best_available_latency_report_path=latency_path,
         opensearch_url="http://search.test:9200",
     )
     return settings, corpus, bm25, dense

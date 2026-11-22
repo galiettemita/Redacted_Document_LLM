@@ -214,7 +214,8 @@ Artifact building and retrieval verification use no OpenAI generation. Once oper
 - [x] Add the real FAISS IVF-PQ candidate adapter.
 - [x] Build resumable compressed embedding and candidate phases plus the bounded benchmark.
 - [x] Serve cached, bounded-parallel local dense searches and latency certification.
-- [ ] Implement profile/offset/candidate/runtime changes test-first.
+- [x] Certify compressed recall and wire fail-closed schema-v2 readiness/runtime.
+- [x] Implement profile/offset/candidate/runtime changes test-first.
 - [ ] Verify local suites and the fictional demo.
 - [ ] Complete the capped cloud benchmark after explicit approval.
 - [ ] Complete the full cloud build after separate explicit approval.

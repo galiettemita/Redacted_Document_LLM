@@ -330,7 +330,7 @@ git push origin HEAD
 - Consumes: Tasks 1–5 artifacts/runtime and the existing live BM25/corpus/model/worker gates.
 - Produces: compressed exact-scan recall certification, schema-v2 API/worker verification, `REDACTED_BEST_AVAILABLE_CHUNKS_PATH`, `REDACTED_BEST_AVAILABLE_LATENCY_REPORT_PATH`, and operational/unapproved best-available readiness.
 
-- [ ] **Step 1: Write failing recall/readiness/runtime tests**
+- [x] **Step 1: Write failing recall/readiness/runtime tests**
 
 Adapt recall fixtures to global offsets and IVF-PQ loader semantics. Assert exact streamed top-300 is compared to candidate-union exact-rescore top-300 and that `0.9799` refuses publication while `0.98` passes.
 
@@ -343,21 +343,21 @@ Add one readiness assertion per Review Focus mismatch: unsupported profile, prof
 
 Assert runtime construction passes `chunks_path`, uses `FaissIvfPqIndex.load`, performs one BM25 and one dense readiness probe, and remains lazy/cached by immutable prediction basis.
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Step 2: Run and confirm failure**
 
 Run: `cd backend && uv run pytest -q tests/retrieval/test_dense_recall_sharded.py tests/test_readiness.py tests/jobs/test_runtime_provider.py`
 
 Expected: FAIL because readiness/runtime require schema-v1 HNSW artifacts and have no latency report/chunk path.
 
-- [ ] **Step 3: Implement compressed recall certification**
+- [x] **Step 3: Implement compressed recall certification**
 
 Retain one bounded pass per shard for all 100 exact queries, but materialize only row IDs/scores until final comparison. Permit a CUDA torch matrix backend in cloud builds and NumPy fallback in tests/local verification; both must produce deterministic top-300 IDs under the same score/ID tie rule.
 
-- [ ] **Step 4: Implement settings, Compose, readiness, and worker wiring**
+- [x] **Step 4: Implement settings, Compose, readiness, and worker wiring**
 
 Add optional `Path` settings for chunks and latency report, mount no new writable directories, and pass the existing ignored artifact root read-only. Validate schema-v2 and every external file before live BM25 count. Cache checksum verification by manifest plus file size/mtime signatures in the API; reconstruct and verify once again in the worker.
 
-- [ ] **Step 5: Run focused tests and Compose validation**
+- [x] **Step 5: Run focused tests and Compose validation**
 
 Run:
 
@@ -368,7 +368,7 @@ cd .. && docker compose config --quiet
 
 Expected: all tests PASS and Compose exits `0`.
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add backend/src/redacted_backend/retrieval/dense_sharded.py backend/src/redacted_backend/domain/readiness.py backend/src/redacted_backend/api/readiness.py backend/src/redacted_backend/config.py backend/src/redacted_backend/jobs/runtime.py compose.yaml .env.example backend/tests
