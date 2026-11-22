@@ -97,6 +97,7 @@ fi
 source_path="${@[-2]}"
 destination="${@[-1]}"
 relative="${source_path#*:$REMOTE_DENSE/}"
+print -- "$relative" >> "$FAKE_RSYNC_LOG"
 mkdir -p "${destination:h}"
 cp "$FAKE_REMOTE_DENSE/$relative" "$destination"
 """,
@@ -142,6 +143,7 @@ def _run(
         "REMOTE_DENSE": "/workspace/redacted-build/best-available/dense",
         "FAKE_REMOTE_DENSE": str(remote),
         "FAKE_AVAILABLE_BYTES": str(available_bytes),
+        "FAKE_RSYNC_LOG": str(root / "rsync.log"),
         "FAIL_RSYNC": "1" if fail_rsync else "0",
     }
     return subprocess.run(
@@ -193,7 +195,45 @@ def test_transfer_rejects_unsafe_manifest_paths_before_rsync(tmp_path: Path) -> 
     result = _run(tmp_path, available_bytes=HEADROOM_BYTES + 1024**2)
 
     assert result.returncode != 0
+    assert not (tmp_path / "rsync.log").exists()
     assert not (tmp_path / "project/var/corpus/best-available/dense/manifest.json").exists()
+
+
+def test_transfer_rejects_multiple_json_documents_before_rsync(
+    tmp_path: Path,
+) -> None:
+    remote, manifest = _remote_fixture(tmp_path)
+    malicious = dict(manifest)
+    malicious["chunk_offsets_path"] = "../escaped-offsets"
+    (remote / "manifest.json").write_text(
+        json.dumps(malicious) + "\n" + json.dumps(manifest) + "\n",
+        encoding="utf-8",
+    )
+
+    result = _run(tmp_path, available_bytes=HEADROOM_BYTES + 1024**2)
+
+    assert result.returncode != 0
+    assert not (tmp_path / "rsync.log").exists()
+    assert not (tmp_path / "project/var/corpus/best-available/escaped-offsets").exists()
+    assert not (tmp_path / "project/var/corpus/best-available/dense/manifest.json").exists()
+
+
+def test_transfer_rejects_existing_symlink_destination_components(
+    tmp_path: Path,
+) -> None:
+    _remote_fixture(tmp_path)
+    dense = tmp_path / "project/var/corpus/best-available/dense"
+    outside = tmp_path / "outside"
+    dense.mkdir(parents=True)
+    outside.mkdir()
+    (dense / "shard-00000").symlink_to(outside, target_is_directory=True)
+
+    result = _run(tmp_path, available_bytes=HEADROOM_BYTES + 1024**2)
+
+    assert result.returncode != 0
+    assert not (tmp_path / "rsync.log").exists()
+    assert list(outside.iterdir()) == []
+    assert not (dense / "manifest.json").exists()
 
 
 def test_resume_requires_space_only_for_remaining_bytes(tmp_path: Path) -> None:

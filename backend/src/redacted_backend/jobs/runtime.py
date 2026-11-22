@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import platform
 from pathlib import Path
 
 import numpy as np
@@ -38,6 +37,10 @@ from redacted_backend.retrieval.types import (
     DenseLatencyReport,
     DenseIndexManifest,
 )
+from redacted_backend.runtime_identity import (
+    WorkerRuntimeIdentity,
+    current_worker_runtime_identity,
+)
 from redacted_backend.scientific_config import ScientificConfig
 
 
@@ -49,6 +52,7 @@ def build_analysis_orchestrator(
     best_available_contract: BestAvailableRetrievalContract = (
         PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT
     ),
+    worker_identity: WorkerRuntimeIdentity | None = None,
 ) -> AnalysisOrchestrator:
     if settings.database_url is None and database is None:
         raise RuntimeError("Analysis worker database is not configured")
@@ -84,6 +88,7 @@ def build_analysis_orchestrator(
             gateway=gateway,
             scientific=scientific,
             contract=best_available_contract,
+            worker_identity=worker_identity,
         )
     if not settings.allow_paper_exact_calls:
         raise RuntimeError("Analysis worker paper-exact access is not approved")
@@ -141,6 +146,7 @@ def _build_best_available_orchestrator(
     gateway: OpenAIGateway,
     scientific: ScientificConfig,
     contract: BestAvailableRetrievalContract,
+    worker_identity: WorkerRuntimeIdentity | None,
 ) -> AnalysisOrchestrator:
     required_paths = {
         "best-available corpus manifest": (
@@ -207,14 +213,17 @@ def _build_best_available_orchestrator(
     ):
         raise RuntimeError("Dense recall query artifact mismatch")
     try:
+        active_worker_identity = worker_identity or current_worker_runtime_identity()
         latency = DenseLatencyReport.model_validate_json(
             latency_path.read_text(encoding="utf-8")
         )
         latency.require_runtime_compatible(
             dense_manifest,
             runtime_environment=contract.latency_runtime_environment,
-            platform=platform.platform(),
-            machine=platform.machine(),
+            platform=active_worker_identity.platform,
+            machine=active_worker_identity.machine,
+            worker_build_id=active_worker_identity.worker_build_id,
+            serving_host_id=active_worker_identity.serving_host_id,
         )
     except (OSError, ValueError) as error:
         raise RuntimeError("Dense latency report mismatch") from error

@@ -4,7 +4,6 @@ import argparse
 import hashlib
 import json
 import os
-import platform
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
@@ -60,6 +59,7 @@ from redacted_backend.retrieval.types import (
     CompressedShardedDenseIndexManifest,
     DenseLatencyReport,
 )
+from redacted_backend.runtime_identity import current_worker_runtime_identity
 from redacted_backend.scientific_config import ScientificConfig
 
 
@@ -521,11 +521,14 @@ def verify_best_available_dense(
     latency = DenseLatencyReport.model_validate_json(
         latency_report_path.read_text(encoding="utf-8")
     )
+    worker_identity = current_worker_runtime_identity()
     latency.require_runtime_compatible(
         dense,
         runtime_environment=contract.latency_runtime_environment,
-        platform=platform.platform(),
-        machine=platform.machine(),
+        platform=worker_identity.platform,
+        machine=worker_identity.machine,
+        worker_build_id=worker_identity.worker_build_id,
+        serving_host_id=worker_identity.serving_host_id,
     )
     verify_compressed_dense_artifacts(dense_root, chunks_path, dense)
     return DenseVerificationReport(

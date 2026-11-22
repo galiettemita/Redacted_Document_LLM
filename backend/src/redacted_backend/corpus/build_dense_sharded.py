@@ -345,6 +345,8 @@ def benchmark_sharded_dense_build(
     batch_size: int = 64,
     contract: BestAvailableRetrievalContract | None = None,
 ) -> DenseBuildBenchmarkReport:
+    started = time.monotonic()
+    setup_started = started
     if sample_rows < 1:
         raise ValueError("Dense benchmark sample rows must be positive")
     if batch_size < 1:
@@ -371,8 +373,6 @@ def benchmark_sharded_dense_build(
         raise ValueError("Dense benchmark profile dimension mismatch")
     output_directory.mkdir(parents=True, exist_ok=True)
     _reset_peak_gpu_memory()
-    started = time.monotonic()
-    setup_started = time.monotonic()
     offsets_path = output_directory / _OFFSETS_NAME
     offsets = build_chunk_offsets(
         chunks_path,
@@ -1301,21 +1301,11 @@ def _repair_missing_shard_manifests(
         if manifest_path.exists():
             continue
         embeddings_path = root / shard.path / "embeddings.f16"
-        candidate_path = root / shard.path / "candidate.faiss"
         if (
             not embeddings_path.is_file()
             or embeddings_path.stat().st_size != shard.embeddings_size_bytes
             or _sha256_file(embeddings_path) != shard.embeddings_sha256
-            or not candidate_path.is_file()
-            or candidate_path.stat().st_size != shard.candidate_index_size_bytes
-            or _sha256_file(candidate_path) != shard.candidate_index_sha256
         ):
-            return
-        candidate = FaissIvfPqIndex.load(
-            candidate_path,
-            profile=manifest.artifact_profile,
-        )
-        if candidate.ntotal != shard.chunk_count:
             return
         _write_json_atomic(manifest_path, shard.model_dump(mode="json"))
 

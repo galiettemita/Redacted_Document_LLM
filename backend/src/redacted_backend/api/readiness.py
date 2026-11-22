@@ -1,5 +1,4 @@
 import hashlib
-import platform
 from collections.abc import Callable
 from typing import Protocol
 
@@ -36,6 +35,7 @@ from redacted_backend.retrieval.types import (
     DenseLatencyReport,
     DenseIndexManifest,
 )
+from redacted_backend.runtime_identity import WorkerHeartbeat, WorkerRuntimeIdentity
 from redacted_backend.scientific_config import ScientificConfig
 
 
@@ -195,19 +195,53 @@ def resolve_worker_readiness(
     *,
     client_factory: Callable[[str], HeartbeatClient] | None = None,
 ) -> ComponentReadiness:
-    if settings.redis_url is None:
-        return ComponentReadiness(ready=False, detail="not configured")
-    factory = client_factory or (lambda url: Redis.from_url(url))
-    try:
-        value = factory(settings.redis_url).get(settings.worker_heartbeat_key)
-    except (RedisError, OSError, ValueError):
-        return ComponentReadiness(ready=False, detail="heartbeat probe failed")
-    if value != b"ready":
+    heartbeat, detail = _read_worker_heartbeat(
+        settings,
+        client_factory=client_factory,
+    )
+    if heartbeat is None:
+        if detail == "not configured":
+            return ComponentReadiness(ready=False, detail=detail)
+        if detail == "heartbeat probe failed":
+            return ComponentReadiness(ready=False, detail=detail)
         return ComponentReadiness(
             ready=False,
             detail="heartbeat missing or expired",
         )
     return ComponentReadiness(ready=True, detail="heartbeat current")
+
+
+def _read_worker_heartbeat(
+    settings: Settings,
+    *,
+    client_factory: Callable[[str], HeartbeatClient] | None = None,
+) -> tuple[WorkerHeartbeat | None, str]:
+    if settings.redis_url is None:
+        return None, "not configured"
+    factory = client_factory or (lambda url: Redis.from_url(url))
+    try:
+        value = factory(settings.redis_url).get(settings.worker_heartbeat_key)
+    except (RedisError, OSError, ValueError):
+        return None, "heartbeat probe failed"
+    if value is None:
+        return None, "heartbeat missing or expired"
+    try:
+        heartbeat = WorkerHeartbeat.model_validate_json(value)
+    except (ValidationError, ValueError):
+        return None, "heartbeat missing or expired"
+    return heartbeat, "heartbeat current"
+
+
+def resolve_live_worker_identity(
+    settings: Settings,
+    *,
+    client_factory: Callable[[str], HeartbeatClient] | None = None,
+) -> WorkerRuntimeIdentity | None:
+    heartbeat, _detail = _read_worker_heartbeat(
+        settings,
+        client_factory=client_factory,
+    )
+    return heartbeat.identity if heartbeat is not None else None
 
 
 def resolve_database_readiness(database: Database | None) -> ComponentReadiness:
@@ -297,6 +331,7 @@ def resolve_best_available_corpus_readiness(
     contract: BestAvailableRetrievalContract = (
         PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT
     ),
+    worker_identity: WorkerRuntimeIdentity | None = None,
 ) -> ComponentReadiness:
     required = (
         settings.best_available_corpus_manifest_path,
@@ -372,6 +407,13 @@ def resolve_best_available_corpus_readiness(
             ready=False,
             detail="dense latency report not available",
         )
+    if worker_identity is None:
+        worker_identity = resolve_live_worker_identity(settings)
+    if worker_identity is None:
+        return ComponentReadiness(
+            ready=False,
+            detail="serving worker identity unavailable",
+        )
     try:
         latency = DenseLatencyReport.model_validate_json(
             latency_path.read_text(encoding="utf-8")
@@ -379,8 +421,10 @@ def resolve_best_available_corpus_readiness(
         latency.require_runtime_compatible(
             dense,
             runtime_environment=contract.latency_runtime_environment,
-            platform=platform.platform(),
-            machine=platform.machine(),
+            platform=worker_identity.platform,
+            machine=worker_identity.machine,
+            worker_build_id=worker_identity.worker_build_id,
+            serving_host_id=worker_identity.serving_host_id,
         )
     except (OSError, ValidationError, ValueError):
         return ComponentReadiness(

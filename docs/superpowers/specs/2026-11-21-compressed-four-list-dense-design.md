@@ -227,6 +227,10 @@ Artifact building and retrieval verification use no OpenAI generation. Once oper
 - [x] Verify offsets against pinned JSONL line starts and repair published artifact retries without re-encoding.
 - [x] Make the native-zsh transfer fail-fast, remaining-space-aware, traversal-safe, and top-manifest-last.
 - [x] Persist the RunPod toolchain across a benchmark stop and exercise pinned BGE vectors through real compressed FAISS retrieval.
+- [x] Harden transfer against multiple JSON documents and symbolic-link destinations.
+- [x] Recover combined missing-manifest/corrupt-candidate retries without re-encoding verified embeddings.
+- [x] Include initial source hashing in benchmark setup and bind latency evidence to the live worker build plus serving host boot.
+- [x] Put the benchmark behind both a fail-fast command deadline and an independently enforced provider-side Pod stop.
 - [ ] Complete the capped cloud benchmark after explicit approval.
 - [ ] Complete the full cloud build after separate explicit approval.
 - [ ] Download and verify artifacts locally.

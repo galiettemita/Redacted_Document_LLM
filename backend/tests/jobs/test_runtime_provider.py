@@ -20,6 +20,7 @@ from redacted_backend.jobs.runtime_provider import (
 from tests.test_readiness import (
     _best_available_test_contract,
     _compatible_best_available_settings,
+    _test_worker_identity,
 )
 
 
@@ -245,6 +246,7 @@ def test_best_available_runtime_loads_only_its_separate_verified_artifacts(
             corpus,
             dense_manifest,
         ),
+        worker_identity=_test_worker_identity(),
     )
 
     assert runtime.retrieval is not None

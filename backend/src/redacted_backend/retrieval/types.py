@@ -337,6 +337,8 @@ class DenseLatencyReport(BaseModel):
     platform: str = Field(min_length=1)
     machine: str = Field(min_length=1)
     runtime_environment: str = Field(min_length=1)
+    worker_build_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    serving_host_id: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="after")
     def validate_timings(self) -> DenseLatencyReport:
@@ -383,6 +385,8 @@ class DenseLatencyReport(BaseModel):
         runtime_environment: str,
         platform: str,
         machine: str,
+        worker_build_id: str,
+        serving_host_id: str,
     ) -> DenseLatencyReport:
         self.require_compatible(manifest)
         if self.runtime_environment != runtime_environment:
@@ -391,6 +395,10 @@ class DenseLatencyReport(BaseModel):
             raise ValueError("Dense latency platform mismatch")
         if self.machine != machine:
             raise ValueError("Dense latency machine mismatch")
+        if self.worker_build_id != worker_build_id:
+            raise ValueError("Dense latency worker build mismatch")
+        if self.serving_host_id != serving_host_id:
+            raise ValueError("Dense latency serving host mismatch")
         return self
 
 

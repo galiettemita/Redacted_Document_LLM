@@ -45,6 +45,16 @@ from redacted_backend.retrieval.types import (
     DenseIndexManifest,
 )
 from redacted_backend.scientific_config import ScientificConfig
+from redacted_backend.runtime_identity import WorkerHeartbeat, WorkerRuntimeIdentity
+
+
+def _test_worker_identity() -> WorkerRuntimeIdentity:
+    return WorkerRuntimeIdentity(
+        worker_build_id="a" * 64,
+        serving_host_id="b" * 64,
+        platform=runtime_platform.platform(),
+        machine=runtime_platform.machine(),
+    )
 
 
 def test_readiness_never_equates_http_health_with_prediction_readiness() -> None:
@@ -134,10 +144,11 @@ def test_worker_readiness_requires_a_live_expiring_heartbeat() -> None:
             return self.value
 
     settings = Settings(redis_url="redis://worker.test/0")
+    heartbeat = WorkerHeartbeat(identity=_test_worker_identity()).model_dump_json().encode()
 
     ready = resolve_worker_readiness(
         settings,
-        client_factory=lambda _url: FakeRedis(b"ready"),
+        client_factory=lambda _url: FakeRedis(heartbeat),
     )
     stale = resolve_worker_readiness(
         settings,
@@ -149,6 +160,11 @@ def test_worker_readiness_requires_a_live_expiring_heartbeat() -> None:
         "ready": False,
         "detail": "heartbeat missing or expired",
     }
+    legacy = resolve_worker_readiness(
+        settings,
+        client_factory=lambda _url: FakeRedis(b"ready"),
+    )
+    assert legacy.ready is False
 
 
 def test_model_readiness_requires_access_and_explicit_paid_call_approval() -> None:
@@ -394,6 +410,7 @@ def test_best_available_readiness_verifies_separate_shards_queries_and_live_inde
             else -1
         ),
         contract=contract,
+        worker_identity=_test_worker_identity(),
     )
 
     assert readiness.model_dump() == {
@@ -451,10 +468,37 @@ def test_best_available_readiness_rejects_latency_from_another_platform(
         settings,
         index_counter=lambda *_args: pytest.fail("live index should not be probed"),
         contract=_best_available_test_contract(corpus, dense),
+        worker_identity=_test_worker_identity(),
     )
 
     assert result.ready is False
     assert result.detail == "dense latency report invalid"
+
+
+@pytest.mark.parametrize(
+    "identity_update",
+    [
+        {"worker_build_id": "c" * 64},
+        {"serving_host_id": "c" * 64},
+    ],
+)
+def test_best_available_readiness_rejects_latency_from_another_worker(
+    tmp_path: Path,
+    identity_update: dict[str, str],
+) -> None:
+    settings, corpus, _bm25, dense = _compatible_best_available_settings(tmp_path)
+
+    result = resolve_best_available_corpus_readiness(
+        settings,
+        index_counter=lambda *_args: pytest.fail("live index should not be probed"),
+        contract=_best_available_test_contract(corpus, dense),
+        worker_identity=_test_worker_identity().model_copy(update=identity_update),
+    )
+
+    assert result.model_dump() == {
+        "ready": False,
+        "detail": "dense latency report invalid",
+    }
 
 
 def test_best_available_readiness_fails_closed_on_corruption_or_live_count(
@@ -466,6 +510,7 @@ def test_best_available_readiness_fails_closed_on_corruption_or_live_count(
         settings,
         index_counter=lambda _url, _name: bm25.chunk_count,
         contract=contract,
+        worker_identity=_test_worker_identity(),
     ).ready is True
     shard_root = settings.best_available_dense_artifact_directory
     assert shard_root is not None
@@ -475,6 +520,7 @@ def test_best_available_readiness_fails_closed_on_corruption_or_live_count(
         settings,
         index_counter=lambda _url, _name: bm25.chunk_count,
         contract=contract,
+        worker_identity=_test_worker_identity(),
     )
     assert corrupt.model_dump() == {
         "ready": False,
@@ -489,6 +535,7 @@ def test_best_available_readiness_fails_closed_on_corruption_or_live_count(
         settings,
         index_counter=lambda _url, _name: bm25.chunk_count + 1,
         contract=contract,
+        worker_identity=_test_worker_identity(),
     )
     assert mismatch.model_dump() == {
         "ready": False,
@@ -558,6 +605,7 @@ def test_best_available_readiness_parses_scientific_artifacts(
         settings,
         index_counter=lambda _url, _name: bm25.chunk_count,
         contract=contract,
+        worker_identity=_test_worker_identity(),
     )
 
     assert readiness.model_dump() == {
@@ -697,6 +745,7 @@ def test_best_available_external_mismatches_fail_before_live_bm25_probe(
         settings,
         index_counter=count,
         contract=contract,
+        worker_identity=_test_worker_identity(),
     )
 
     assert readiness.ready is False
@@ -1041,6 +1090,8 @@ def _compatible_best_available_settings(
         platform=runtime_platform.platform(),
         machine=runtime_platform.machine(),
         runtime_environment="test-worker",
+        worker_build_id="a" * 64,
+        serving_host_id="b" * 64,
     )
     corpus_path = tmp_path / "best-corpus.json"
     bm25_path = tmp_path / "best-bm25.json"
@@ -1135,6 +1186,8 @@ def _rewrite_dense_fixture(
             platform=runtime_platform.platform(),
             machine=runtime_platform.machine(),
             runtime_environment="test-worker",
+            worker_build_id="a" * 64,
+            serving_host_id="b" * 64,
         ).model_dump_json(),
         encoding="utf-8",
     )

@@ -253,13 +253,23 @@ def test_benchmark_charges_full_source_verification_to_setup_once(
     chunks, corpus, _queries, _rows, scientific = _fixture(tmp_path, count=10)
     profile = _profile(training_sample_count=5, shard_size_limit=2)
     elapsed = [0.0]
+    original_load = dense_builder._load_verified_corpus
     original_open = dense_builder.ChunkOffsetIndex.open
+
+    def slow_manifest_verification(*args, **kwargs):
+        elapsed[0] += 7.0
+        return original_load(*args, **kwargs)
 
     def slow_verified_open(*args, **kwargs):
         elapsed[0] += 10.0
         return original_open(*args, **kwargs)
 
     monkeypatch.setattr(dense_builder.time, "monotonic", lambda: elapsed[0])
+    monkeypatch.setattr(
+        dense_builder,
+        "_load_verified_corpus",
+        slow_manifest_verification,
+    )
     monkeypatch.setattr(
         dense_builder.ChunkOffsetIndex,
         "open",
@@ -277,9 +287,9 @@ def test_benchmark_charges_full_source_verification_to_setup_once(
         batch_size=2,
     )
 
-    assert report.setup_seconds == 10.0
+    assert report.setup_seconds == 17.0
     assert report.encoding_seconds == pytest.approx(1e-9)
-    assert report.projected_full_seconds < 10.001
+    assert 17.0 <= report.projected_full_seconds < 17.001
 
 
 def test_embedding_phase_resumes_without_reencoding_verified_checkpoints(
@@ -420,6 +430,27 @@ def test_missing_published_shard_manifest_repairs_without_encoding(
 
     assert repaired.chunk_count == 5
     assert shard_manifest.is_file()
+    assert repair_encoder.encoded_rows == 0
+
+
+def test_missing_manifest_and_corrupt_candidate_repair_without_encoding(
+    tmp_path: Path,
+) -> None:
+    manifest, output, _ = _build(tmp_path)
+    shard_root = output / manifest.shards[0].path
+    shard_manifest = shard_root / "manifest.json"
+    candidate = shard_root / "candidate.faiss"
+    shard_manifest.unlink()
+    candidate.write_bytes(candidate.read_bytes() + b"tamper")
+    repair_encoder = DeterministicEncoder(8, fail_after_rows=0)
+
+    repaired, _, _ = _build(tmp_path, encoder=repair_encoder)
+
+    assert repaired.chunk_count == 5
+    assert shard_manifest.is_file()
+    assert hashlib.sha256(candidate.read_bytes()).hexdigest() == (
+        manifest.shards[0].candidate_index_sha256
+    )
     assert repair_encoder.encoded_rows == 0
 
 

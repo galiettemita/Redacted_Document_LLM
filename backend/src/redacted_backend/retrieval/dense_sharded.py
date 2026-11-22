@@ -42,6 +42,10 @@ from redacted_backend.retrieval.types import (
     RankedChunk,
     ShardedDenseIndexManifest,
 )
+from redacted_backend.runtime_identity import (
+    WorkerRuntimeIdentity,
+    current_worker_runtime_identity,
+)
 from redacted_backend.scientific_config import ScientificConfig
 
 
@@ -330,8 +334,9 @@ def certify_dense_latency(
     output_path: Path,
     *,
     clock: Callable[[], float] = time.monotonic,
-    platform_name: Callable[[], str] = platform.platform,
-    machine_name: Callable[[], str] = platform.machine,
+    runtime_identity: Callable[[], WorkerRuntimeIdentity] = (
+        current_worker_runtime_identity
+    ),
     runtime_environment: Callable[[], str] | None = None,
 ) -> DenseLatencyReport:
     manifest = runtime.manifest
@@ -376,6 +381,7 @@ def certify_dense_latency(
                 "Dense latency search did not return a complete result list"
             )
         timings.append(elapsed)
+    identity = runtime_identity()
     report = DenseLatencyReport(
         dense_manifest_hash=manifest.manifest_hash(),
         faiss_verification=faiss_verification,
@@ -384,9 +390,11 @@ def certify_dense_latency(
         warm_search_seconds=timings,
         max_observed_seconds=max(timings),
         maximum_allowed_seconds=maximum,
-        platform=platform_name(),
-        machine=machine_name(),
+        platform=identity.platform,
+        machine=identity.machine,
         runtime_environment=(runtime_environment or _runtime_environment)(),
+        worker_build_id=identity.worker_build_id,
+        serving_host_id=identity.serving_host_id,
     )
     report.require_compatible(manifest)
     _write_bytes_atomic(

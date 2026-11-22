@@ -587,6 +587,8 @@ def test_certify_best_available_dense_latency_cli_uses_frozen_profile_limit(
         platform="test",
         machine="test",
         runtime_environment="serving-worker-container",
+        worker_build_id="a" * 64,
+        serving_host_id="b" * 64,
     )
     captured: dict[str, object] = {}
 

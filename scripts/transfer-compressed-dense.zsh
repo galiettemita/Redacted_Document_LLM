@@ -28,16 +28,55 @@ DENSE_DIR="${DENSE_DIR:-$PROJECT_ROOT/var/corpus/best-available/dense}"
 HEADROOM_BYTES=$((2 * 1024 * 1024 * 1024))
 mkdir -p "$DENSE_DIR"
 
+if [[ -L "$DENSE_DIR" ]]; then
+  print -u2 -- "STOP: dense artifact directory cannot be a symbolic link"
+  exit 64
+fi
+
+reject_symlink_components() {
+  local relative_path=$1
+  local current="$DENSE_DIR"
+  local component
+  for component in ${(s:/:)relative_path}; do
+    current="$current/$component"
+    if [[ -L "$current" ]]; then
+      print -u2 -- "STOP: symbolic-link destination component rejected: $relative_path"
+      return 1
+    fi
+  done
+}
+
 incoming_tmp="$DENSE_DIR/.incoming-manifest.json.tmp"
 incoming="$DENSE_DIR/.incoming-manifest.json"
 plan="$DENSE_DIR/.transfer-files.jsonl"
 shard_tmp="$DENSE_DIR/.incoming-shard.json.tmp"
-trap 'rm -f "$incoming_tmp" "$plan" "$shard_tmp"' EXIT
+trap 'rm -f "$incoming_tmp" "$incoming" "$plan" "$shard_tmp"' EXIT
+
+for internal_path in \
+  ".incoming-manifest.json.tmp" \
+  ".incoming-manifest.json" \
+  ".transfer-files.jsonl" \
+  ".incoming-shard.json.tmp" \
+  "manifest.json"; do
+  reject_symlink_components "$internal_path"
+done
 
 ssh -p "$SSH_PORT" -i "$SSH_KEY" -- "$REMOTE" \
   "cat -- '$REMOTE_DENSE/manifest.json'" > "$incoming_tmp"
 
-jq -e '
+jq -e -s '
+  def sha256:
+    type == "string" and length == 64 and test("^[0-9a-f]+$");
+  def shard_path:
+    type == "string" and length == 11 and startswith("shard-") and
+    (.[6:] | test("^[0-9]{5}$"));
+  if length != 1 then
+    error("expected exactly one dense manifest JSON object")
+  else
+    .[0]
+  end |
+  select(
+  type == "object" and
   .schema_version == "sharded-dense-index-manifest-v2" and
   .chunk_offsets_path == "chunks.offsets.u64" and
   .candidate_template_path == "candidate-template.faiss" and
@@ -46,17 +85,18 @@ jq -e '
   (.candidate_template_size_bytes | type == "number" and . > 0 and floor == .) and
   (.recall_report_size_bytes | type == "number" and . > 0 and floor == .) and
   (.total_artifact_bytes | type == "number" and . > 0 and floor == .) and
-  (.chunk_offsets_sha256 | test("^[0-9a-f]{64}$")) and
-  (.candidate_template_sha256 | test("^[0-9a-f]{64}$")) and
-  (.recall_report_sha256 | test("^[0-9a-f]{64}$")) and
-  (.recall_queries_sha256 | test("^[0-9a-f]{64}$")) and
+  (.chunk_offsets_sha256 | sha256) and
+  (.candidate_template_sha256 | sha256) and
+  (.recall_report_sha256 | sha256) and
+  (.recall_queries_sha256 | sha256) and
   (.shards | type == "array" and length > 0) and
+  (([.shards[].path] | unique | length) == (.shards | length)) and
   all(.shards[];
-    (.path | test("^shard-[0-9]{5}$")) and
+    (.path | shard_path) and
     (.embeddings_size_bytes | type == "number" and . > 0 and floor == .) and
     (.candidate_index_size_bytes | type == "number" and . > 0 and floor == .) and
-    (.embeddings_sha256 | test("^[0-9a-f]{64}$")) and
-    (.candidate_index_sha256 | test("^[0-9a-f]{64}$"))
+    (.embeddings_sha256 | sha256) and
+    (.candidate_index_sha256 | sha256)
   ) and
   (
     .chunk_offsets_size_bytes +
@@ -64,8 +104,8 @@ jq -e '
     .recall_report_size_bytes +
     ([.shards[] | .embeddings_size_bytes + .candidate_index_size_bytes] | add)
   ) == .total_artifact_bytes
-' "$incoming_tmp" >/dev/null
-mv "$incoming_tmp" "$incoming"
+  )
+' "$incoming_tmp" > "$incoming"
 
 recall_queries_size=$(
   ssh -p "$SSH_PORT" -i "$SSH_KEY" -- "$REMOTE" \
@@ -127,6 +167,7 @@ while IFS= read -r record; do
   relative_path=$(printf '%s' "$record" | jq -er '.path')
   expected_size=$(printf '%s' "$record" | jq -er '.size')
   expected_sha256=$(printf '%s' "$record" | jq -er '.sha256')
+  reject_symlink_components "$relative_path"
   target="$DENSE_DIR/$relative_path"
   if file_is_verified "$target" "$expected_size" "$expected_sha256"; then
     continue
@@ -152,7 +193,9 @@ transfer_file() {
   local expected_size=$2
   local expected_sha256=$3
   local target="$DENSE_DIR/$relative_path"
+  reject_symlink_components "$relative_path"
   mkdir -p "${target:h}"
+  reject_symlink_components "$relative_path"
   if file_is_verified "$target" "$expected_size" "$expected_sha256"; then
     return 0
   fi
@@ -175,7 +218,9 @@ done < "$plan"
 
 jq -c '.shards[]' "$incoming" | while IFS= read -r shard; do
   shard_path=$(printf '%s' "$shard" | jq -er '.path')
+  reject_symlink_components "$shard_path/manifest.json"
   mkdir -p "$DENSE_DIR/$shard_path"
+  reject_symlink_components "$shard_path/manifest.json"
   printf '%s' "$shard" | jq -S . > "$shard_tmp"
   mv "$shard_tmp" "$DENSE_DIR/$shard_path/manifest.json"
 done

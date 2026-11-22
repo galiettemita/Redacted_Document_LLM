@@ -4,7 +4,7 @@ This runbook builds the real `best_available_foiarchive_v1` compressed dense art
 
 No step that creates storage, starts a Pod, or spends money may be performed until the user approves the exact benchmark cap in dollars. The benchmark approval does not authorize the full build. The full build needs a second approval after the benchmark report exists.
 
-The RunPod labels below were checked against the official documentation on 2026-11-22: [first Pod](https://docs.runpod.io/get-started), [credentials](https://docs.runpod.io/get-started/credentials), [billing](https://docs.runpod.io/accounts-billing/billing), [network volumes](https://docs.runpod.io/storage/network-volumes), and [Pod management](https://docs.runpod.io/pods/manage-pods).
+The RunPod labels below were checked against the official documentation on 2026-11-22: [first Pod](https://docs.runpod.io/get-started), [credentials](https://docs.runpod.io/get-started/credentials), [billing](https://docs.runpod.io/accounts-billing/billing), [network volumes](https://docs.runpod.io/storage/network-volumes), [Pod management](https://docs.runpod.io/pods/manage-pods), and the [RunPod CLI](https://docs.runpod.io/runpodctl/overview).
 
 ## Fixed safety and scientific rules
 
@@ -15,6 +15,7 @@ The RunPod labels below were checked against the official documentation on 2026-
 - Run exactly the 100,000-row benchmark first.
 - Record the live total hourly rate shown by RunPod before deployment.
 - Stop the Pod immediately after the benchmark finishes.
+- Create the benchmark Pod only with a provider-side automatic stop equal to the approved total Pod duration. A command timeout inside SSH is an additional limit, not a substitute.
 - Do not run the full build until the user approves its separately calculated maximum cost.
 - Publication still requires all checksums, recall@300 of at least `0.98`, artifacts no larger than 28 GiB, and all 100 local warm searches no slower than 5.0 seconds.
 
@@ -66,9 +67,9 @@ Add only the public key to RunPod:
 6. Name it `redacted-dense-build-mac`.
 7. Paste the public-key line and click **Save**.
 
-### Optional restricted API key
+### Create a restricted API key for the automatic-stop deployment
 
-The console-plus-SSH workflow does not require an API key. Create one only if automation is explicitly chosen later.
+The benchmark Pod must be created through `runpodctl` with a provider-side automatic stop. The API key stays on the Mac and is never copied to the Pod or chat.
 
 1. Open **Credentials**.
 2. Select **API Keys**.
@@ -79,6 +80,17 @@ The console-plus-SSH workflow does not require an API key. Create one only if au
 7. Click **Create**.
 8. Click the new key once to copy it and save it in the password manager. Do not paste it into chat, Git, `.env`, or a Pod.
 9. After the work, return to **Credentials** → **API Keys**, click the trash icon, and confirm **Revoke Key**.
+
+On the Mac, install and configure the official CLI:
+
+```bash
+brew install runpod/runpodctl/runpodctl
+runpodctl doctor
+runpodctl version
+runpodctl pod create --help | grep -F -- '--stop-after'
+```
+
+When `runpodctl doctor` asks for the API key, paste it directly into Mac Terminal. Do not put it in a shell-history command. The last command must display `--stop-after`. If it does not, stop: do not create a Pod until the CLI/provider exposes an independently enforced automatic-stop control.
 
 ## Phase 2: Price the benchmark before creating billable resources
 
@@ -92,7 +104,7 @@ The console-plus-SSH workflow does not require an API key. Create one only if au
 
 State the benchmark proposal in this exact form, filling in real numbers:
 
-> One 100,000-row benchmark on [GPU] at $[running rate]/hour, limited to [hours] hours, plus at most $[storage allowance] of volume storage. Maximum benchmark spend: $[exact total].
+> One 100,000-row benchmark on [GPU] at $[running rate]/hour. The Pod will have a provider-enforced automatic stop after [exact duration], and the benchmark command will have a shorter [exact duration] timeout. Including at most $[storage allowance] of volume storage, the maximum benchmark spend is $[exact total].
 
 Proceed only after the user replies with an explicit approval naming that maximum dollar amount.
 
@@ -110,17 +122,34 @@ These clicks spend money. They are future actions, not part of local implementat
 6. Choose **Standard** unless the approved quote explicitly used High-Performance storage.
 7. Recheck the approved cap, then click **Create Network Volume**.
 
-### Deploy the Pod
+### Deploy the Pod with the provider-side hard stop
 
-1. Click **+ New** → **Pod**.
-2. Choose the same official PyTorch/CUDA template used for the quote.
-3. Set **Pod name** to `redacted-dense-benchmark`.
-4. Enable **SSH terminal access** and use the saved public key.
-5. Choose the already-priced, currently available NVIDIA GPU with at least 48 GiB VRAM; set GPU count to `1`.
-6. Under persistent storage, select **Network Volume** and choose `redacted-dense-build`. Confirm it mounts at `/workspace`.
-7. Use a 30 GiB container disk; all recoverable work must stay under `/workspace`.
-8. Confirm the Summary rate is no higher than the approved rate.
-9. Click **Deploy Pod**. If the rate is higher or the GPU is unavailable, cancel and request a revised cap.
+Do not click **Deploy Pod** in the console. In Mac Terminal, use `runpodctl template search pytorch`, `runpodctl gpu list`, and `runpodctl network-volume list` to copy the exact already-priced template ID, GPU ID, and network-volume ID. Then set the approved values without including an API key:
+
+```bash
+RUNPOD_TEMPLATE_ID='EXACT_PRICED_TEMPLATE_ID'
+RUNPOD_GPU_ID='EXACT_PRICED_GPU_ID'
+RUNPOD_NETWORK_VOLUME_ID='EXACT_NETWORK_VOLUME_ID'
+APPROVED_POD_DURATION='EXACT_APPROVED_DURATION'
+export RUNPOD_TEMPLATE_ID RUNPOD_GPU_ID RUNPOD_NETWORK_VOLUME_ID APPROVED_POD_DURATION
+```
+
+Re-run `runpodctl pod create --help` and confirm `--stop-after` is still supported. Then create exactly one Pod:
+
+```bash
+runpodctl pod create \
+  --template-id "$RUNPOD_TEMPLATE_ID" \
+  --gpu-id "$RUNPOD_GPU_ID" \
+  --gpu-count 1 \
+  --name redacted-dense-benchmark \
+  --network-volume-id "$RUNPOD_NETWORK_VOLUME_ID" \
+  --container-disk-in-gb 30 \
+  --ssh \
+  --stop-after "$APPROVED_POD_DURATION" \
+  --wait
+```
+
+If creation or `--wait` reports any error, immediately run `runpodctl pod list --all`. A failed wait can leave a billable Pod behind. Stop any `redacted-dense-benchmark` Pod with `runpodctl pod stop POD_ID` before diagnosing. If the live rate is higher than the approved rate, stop it immediately and request a revised cap.
 
 ### Connect over SSH
 
@@ -184,18 +213,24 @@ uv run --no-sync corpus build-best-available-chunks \
 ## Phase 5: Run only the fixed benchmark, then stop
 
 ```bash
+set -euo pipefail
+APPROVED_BENCHMARK_COMMAND_SECONDS=EXACT_APPROVED_COMMAND_SECONDS
 mkdir -p /workspace/redacted-build/benchmark
-uv run --no-sync corpus benchmark-best-available-dense \
+timeout --signal=TERM --kill-after=300s \
+  "${APPROVED_BENCHMARK_COMMAND_SECONDS}s" \
+  uv run --no-sync corpus benchmark-best-available-dense \
   --chunks /workspace/redacted-build/best-available/chunks.jsonl \
   --corpus-manifest /workspace/redacted-build/best-available/corpus-manifest.json \
   --output-directory /workspace/redacted-build/benchmark \
   | tee /workspace/redacted-build/dense-benchmark-report.json
 ```
 
-When the command exits successfully:
+`set -o pipefail` makes a benchmark or timeout failure remain a failure even if `tee` succeeds. The command timeout kills a hung benchmark; the provider-side `--stop-after` remains the independent backstop if SSH disconnects or the shell itself fails.
+
+On every exit—success, timeout, error, or interrupt—stop the Pod immediately from another Mac Terminal with `runpodctl pod stop POD_ID`, then verify `runpodctl pod get POD_ID` reports it stopped. The automatic stop is the backstop, not the normal shutdown. Only after a successful exit:
 
 1. Copy `dense-benchmark-report.json` to the Mac using the SSH host and port from **Connect**.
-2. Open **Pods**, expand the Pod, click **Stop** (square icon), and confirm. Do not leave the GPU running while reviewing results.
+2. Confirm again that the Pod is stopped. Do not leave the GPU running while reviewing results.
 3. Validate the JSON as `DenseBuildBenchmarkReport`.
 4. Record the separate `setup_seconds`, `encoding_seconds`, `training_seconds`, `candidate_add_seconds`, and `certification_probe_seconds` measurements, plus `rows_per_second`, `peak_rss_bytes`, `peak_gpu_memory_bytes`, `projected_shard_count`, `projected_full_artifact_bytes`, and `projected_gpu_hours`. The projection scales row work by corpus rows, fixed candidate overhead by shard count, and certification by both rows and the frozen 100-query count.
 5. Reject the plan if projected artifacts exceed 28 GiB.

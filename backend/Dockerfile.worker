@@ -13,6 +13,7 @@ WORKDIR /app
 
 COPY --from=uv /uv /uvx /bin/
 COPY --chown=app:app backend/pyproject.toml backend/uv.lock ./
+COPY --chown=app:app backend/Dockerfile.worker ./Dockerfile.worker
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --group retrieval --no-install-project
 

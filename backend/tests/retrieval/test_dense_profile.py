@@ -249,6 +249,8 @@ def test_latency_report_rejects_manifest_or_query_identity_mismatches() -> None:
         platform="macOS",
         machine="arm64",
         runtime_environment="test-worker",
+        worker_build_id="a" * 64,
+        serving_host_id="b" * 64,
     )
 
     assert report.require_compatible(manifest) is report
@@ -257,6 +259,8 @@ def test_latency_report_rejects_manifest_or_query_identity_mismatches() -> None:
         runtime_environment="test-worker",
         platform="macOS",
         machine="arm64",
+        worker_build_id="a" * 64,
+        serving_host_id="b" * 64,
     ) is report
     with pytest.raises(ValueError, match="manifest"):
         report.model_copy(update={"dense_manifest_hash": "0" * 64}).require_compatible(
@@ -272,6 +276,8 @@ def test_latency_report_rejects_manifest_or_query_identity_mismatches() -> None:
             runtime_environment="test-worker",
             platform="Linux-cloud",
             machine="arm64",
+            worker_build_id="a" * 64,
+            serving_host_id="b" * 64,
         )
     with pytest.raises(ValueError, match="machine"):
         report.require_runtime_compatible(
@@ -279,6 +285,26 @@ def test_latency_report_rejects_manifest_or_query_identity_mismatches() -> None:
             runtime_environment="test-worker",
             platform="macOS",
             machine="x86_64",
+            worker_build_id="a" * 64,
+            serving_host_id="b" * 64,
+        )
+    with pytest.raises(ValueError, match="worker build"):
+        report.require_runtime_compatible(
+            manifest,
+            runtime_environment="test-worker",
+            platform="macOS",
+            machine="arm64",
+            worker_build_id="c" * 64,
+            serving_host_id="b" * 64,
+        )
+    with pytest.raises(ValueError, match="serving host"):
+        report.require_runtime_compatible(
+            manifest,
+            runtime_environment="test-worker",
+            platform="macOS",
+            machine="arm64",
+            worker_build_id="a" * 64,
+            serving_host_id="c" * 64,
         )
 
 
@@ -301,6 +327,8 @@ def test_latency_report_rejects_slow_or_incomplete_certification() -> None:
             platform="macOS",
             machine="arm64",
             runtime_environment="test-worker",
+            worker_build_id="a" * 64,
+            serving_host_id="b" * 64,
         )
 
     with pytest.raises(ValidationError, match="maximum"):
@@ -321,4 +349,6 @@ def test_latency_report_rejects_slow_or_incomplete_certification() -> None:
             platform="macOS",
             machine="arm64",
             runtime_environment="test-worker",
+            worker_build_id="a" * 64,
+            serving_host_id="b" * 64,
         )

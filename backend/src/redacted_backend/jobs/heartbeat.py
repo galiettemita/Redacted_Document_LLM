@@ -6,6 +6,10 @@ from dramatiq import Middleware
 from redis import Redis
 
 from redacted_backend.config import Settings
+from redacted_backend.runtime_identity import (
+    WorkerHeartbeat,
+    current_worker_runtime_identity,
+)
 
 
 class WorkerHeartbeatMiddleware(Middleware):
@@ -17,6 +21,9 @@ class WorkerHeartbeatMiddleware(Middleware):
         self._client = Redis.from_url(settings.redis_url)
         self._key = settings.worker_heartbeat_key
         self._ttl = settings.worker_heartbeat_ttl_seconds
+        self._heartbeat = WorkerHeartbeat(
+            identity=current_worker_runtime_identity()
+        ).model_dump_json()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -44,4 +51,4 @@ class WorkerHeartbeatMiddleware(Middleware):
             self._write()
 
     def _write(self) -> None:
-        self._client.set(self._key, "ready", ex=self._ttl)
+        self._client.set(self._key, self._heartbeat, ex=self._ttl)

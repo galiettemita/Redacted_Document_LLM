@@ -507,6 +507,11 @@ git push origin HEAD
 - [x] Replace the inline transfer commands with a fail-fast native-zsh script that validates paths, computes remaining bytes, verifies every file, and promotes the top manifest last.
 - [x] Persist and re-check the RunPod toolchain under `/workspace` so stopping the benchmark Pod cannot break the separately approved full build.
 - [x] Extend the opt-in live component smoke through pinned BGE encoding and a real compressed FAISS search.
+- [x] Reject multi-document transfer manifests and every symbolic-link destination component before transfer.
+- [x] Repair a simultaneously missing shard manifest and corrupt candidate from verified final embeddings without re-encoding.
+- [x] Charge the benchmark's initial full-corpus hash verification to fixed setup time.
+- [x] Bind latency certification to the live worker build fingerprint and exact serving-host boot identity carried by its expiring heartbeat.
+- [x] Require both a fail-fast command timeout and an independent provider-side automatic Pod stop for the capped benchmark.
 
 ### Task 9: Cross the paid cloud and model boundaries only with explicit approvals
 

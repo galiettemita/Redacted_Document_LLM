@@ -16,6 +16,16 @@ from redacted_backend.retrieval.types import (
     DenseFaissVerification,
     DenseLatencyReport,
 )
+from redacted_backend.runtime_identity import WorkerRuntimeIdentity
+
+
+def _runtime_identity() -> WorkerRuntimeIdentity:
+    return WorkerRuntimeIdentity(
+        worker_build_id="a" * 64,
+        serving_host_id="b" * 64,
+        platform="macOS-test",
+        machine="arm64-test",
+    )
 
 
 def _manifest(queries_sha256: str) -> CompressedShardedDenseIndexManifest:
@@ -121,8 +131,7 @@ def test_latency_certification_warms_once_and_publishes_all_timings(
         queries,
         output,
         clock=_AlternatingClock(4.99),
-        platform_name=lambda: "macOS-test",
-        machine_name=lambda: "arm64-test",
+        runtime_identity=_runtime_identity,
         runtime_environment=lambda: "serving-worker-container",
     )
 
@@ -134,6 +143,10 @@ def test_latency_certification_warms_once_and_publishes_all_timings(
     assert report.dense_manifest_hash == runtime.manifest.manifest_hash()
     assert report.recall_queries_sha256 == queries_sha256
     assert report.runtime_environment == "serving-worker-container"
+    assert report.worker_build_id == "a" * 64
+    assert report.serving_host_id == "b" * 64
+    assert report.platform == "macOS-test"
+    assert report.machine == "arm64-test"
     assert report.faiss_verification == runtime.faiss_verification
     assert DenseLatencyReport.model_validate_json(
         output.read_text(encoding="utf-8")
@@ -221,4 +234,6 @@ def test_latency_report_rejects_nonfinite_measurements() -> None:
             platform="test",
             machine="test",
             runtime_environment="serving-worker-container",
+            worker_build_id="a" * 64,
+            serving_host_id="b" * 64,
         )
