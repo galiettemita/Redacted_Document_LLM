@@ -278,33 +278,33 @@ git push origin HEAD
 - Consumes: schema-v2 manifest, Task 2 `ChunkOffsetIndex`, Task 3 candidate loader, float16 shard embeddings, `QueryEncoder`.
 - Produces: `ShardedDenseIndex(root: Path, chunks_path: Path, manifest: CompressedShardedDenseIndexManifest, encoder: QueryEncoder, candidate_loader=FaissIvfPqIndex.load, profile: DenseArtifactProfile | None = None)`, cached candidate indexes/memmaps, deterministic `search`, and `certify_dense_latency(...) -> DenseLatencyReport`.
 
-- [ ] **Step 1: Write failing runtime and latency tests**
+- [x] **Step 1: Write failing runtime and latency tests**
 
 Update the two-shard search fixture to one global chunk file/offset table. Assert both shards are searched even when BM25 is not present, candidate loaders run once at construction and never again across searches, exact global rescoring determines rank, duplicate/`-1` candidates are ignored, out-of-range rows fail, equal scores sort by chunk ID, and query metadata/provenance remain unchanged.
 
 Use injected barriers/counters to assert at most four shard searches run concurrently. Use an injected monotonic clock to assert a 4.99-second maximum publishes a report and a 5.01-second result raises without writing one. Assert the report covers exactly the frozen 100 queries and binds their hash and the dense-manifest hash.
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Step 2: Run and confirm failure**
 
 Run: `cd backend && uv run pytest -q tests/retrieval/test_dense_sharded.py tests/retrieval/test_dense_latency.py`
 
 Expected: FAIL because the runtime still opens HNSW/metadata per shard per query.
 
-- [ ] **Step 3: Implement resident candidate indexes and bounded shard search**
+- [x] **Step 3: Implement resident candidate indexes and bounded shard search**
 
 Load and verify all candidate indexes once during construction, mmap embeddings once, open the global `ChunkOffsetIndex`, and retain immutable handles for the cached runtime's lifetime. Use a `ThreadPoolExecutor(max_workers=4)` only around per-shard candidate search/exact rescoring; merge in the caller thread with deterministic sorting. Materialize metadata only for the final global top 300.
 
-- [ ] **Step 4: Implement local latency certification**
+- [x] **Step 4: Implement local latency certification**
 
 Warm the encoder/runtime once, execute all 100 queries, retain every elapsed value, and atomically write `DenseLatencyReport` only when every result is `<= 5.0` seconds. Record platform/machine strings for audit without making model-specific assumptions in readiness.
 
-- [ ] **Step 5: Run focused tests and an un-timed small real-FAISS smoke**
+- [x] **Step 5: Run focused tests and an un-timed small real-FAISS smoke**
 
 Run: `cd backend && uv run pytest -q tests/retrieval/test_dense_sharded.py tests/retrieval/test_dense_latency.py tests/retrieval/test_faiss_ivfpq.py`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add backend/src/redacted_backend/retrieval/dense_sharded.py backend/tests/retrieval/test_dense_sharded.py backend/tests/retrieval/test_dense_latency.py

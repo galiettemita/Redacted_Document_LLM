@@ -3,22 +3,35 @@ from __future__ import annotations
 import hashlib
 import heapq
 import os
+import platform
 import tempfile
+import time
 from collections.abc import Callable, Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal, Protocol
+from types import TracebackType
+from typing import Literal, Protocol, Self
 
 import numpy as np
 from numpy.typing import NDArray
 
 from redacted_backend.corpus.chunker import CorpusChunk
+from redacted_backend.retrieval.chunk_offsets import ChunkOffsetIndex
 from redacted_backend.retrieval.dense import (
     IncompatibleDenseIndexError,
     QueryEncoder,
     require_dense_recall,
 )
+from redacted_backend.retrieval.dense_profile import (
+    DenseArtifactProfile,
+    dense_semantics_hash,
+)
+from redacted_backend.retrieval.faiss_ivfpq import FaissIvfPqIndex
 from redacted_backend.retrieval.types import (
+    CompressedDenseShardManifest,
+    CompressedShardedDenseIndexManifest,
+    DenseLatencyReport,
     DenseShardManifest,
     RankedChunk,
     ShardedDenseIndexManifest,
@@ -27,6 +40,8 @@ from redacted_backend.scientific_config import ScientificConfig
 
 
 class CandidateIndex(Protocol):
+    ntotal: int
+
     def search(
         self,
         query: NDArray[np.float32],
@@ -42,26 +57,77 @@ class ShardedDenseIndex:
         self,
         *,
         root: Path,
-        manifest: ShardedDenseIndexManifest,
+        chunks_path: Path,
+        manifest: CompressedShardedDenseIndexManifest,
         encoder: QueryEncoder,
-        candidate_loader: CandidateLoader,
+        candidate_loader: CandidateLoader = FaissIvfPqIndex.load,
+        profile: DenseArtifactProfile | None = None,
         scientific: ScientificConfig | None = None,
     ) -> None:
         self.root = root
+        self.chunks_path = chunks_path
         self.manifest = manifest
         self.encoder = encoder
         self.candidate_loader = candidate_loader
         self.scientific = scientific or ScientificConfig()
+        self.profile = profile or manifest.artifact_profile
+        self._closed = False
+        self._candidates: list[CandidateIndex] = []
+        self._embeddings: list[np.memmap] = []
+        self._chunks: ChunkOffsetIndex | None = None
+        self._executor: ThreadPoolExecutor | None = None
         self._validate()
+        try:
+            self._chunks = ChunkOffsetIndex.open(
+                chunks_path,
+                root / manifest.chunk_offsets_path,
+                expected_count=manifest.chunk_count,
+                expected_chunks_sha256=manifest.chunks_sha256,
+                expected_offsets_sha256=manifest.chunk_offsets_sha256,
+            )
+            for shard in manifest.shards:
+                directory = root / shard.path
+                candidate = candidate_loader(
+                    directory / "candidate.faiss",
+                    profile=self.profile,
+                )
+                if int(candidate.ntotal) != shard.chunk_count:
+                    raise IncompatibleDenseIndexError(
+                        "Dense candidate row count does not match its shard"
+                    )
+                self._candidates.append(candidate)
+                self._embeddings.append(
+                    np.memmap(
+                        directory / "embeddings.f16",
+                        dtype=np.float16,
+                        mode="r",
+                        shape=(shard.chunk_count, manifest.embedding_dimension),
+                    )
+                )
+            self._executor = ThreadPoolExecutor(
+                max_workers=min(
+                    self.profile.max_parallel_shards,
+                    len(manifest.shards),
+                ),
+                thread_name_prefix="dense-shard",
+            )
+        except BaseException:
+            if self._chunks is not None:
+                self._chunks.close()
+            self._embeddings.clear()
+            self._candidates.clear()
+            raise
 
     def search(
         self,
         query: str,
-        candidates: int = 2_000,
+        candidates: int | None = None,
         limit: int = 300,
         *,
         query_kind: Literal["context", "own"] = "context",
     ) -> list[RankedChunk]:
+        if self._closed:
+            raise IncompatibleDenseIndexError("Compressed dense runtime is closed")
         if not query.strip():
             raise ValueError("Dense query must not be empty")
         if limit < 1 or limit > self.scientific.top_chunks_per_list:
@@ -69,7 +135,15 @@ class ShardedDenseIndex:
                 "Dense result limit must be between 1 and "
                 f"{self.scientific.top_chunks_per_list}"
             )
-        if candidates < 1 or candidates > self.manifest.candidate_count:
+        requested_candidates = (
+            self.profile.candidate_count_per_shard
+            if candidates is None
+            else candidates
+        )
+        if (
+            requested_candidates < 1
+            or requested_candidates > self.profile.candidate_count_per_shard
+        ):
             raise ValueError(
                 "Dense candidate count must be positive and not exceed the manifest"
             )
@@ -78,41 +152,18 @@ class ShardedDenseIndex:
             query,
             self.manifest.embedding_dimension,
         )
-        best: list[tuple[float, CorpusChunk]] = []
-        for shard in self.manifest.shards:
-            directory = self.root / shard.path
-            index = self.candidate_loader(
-                directory / "candidate.faiss",
-                ef_search=self.manifest.ef_search,
+        assert self._executor is not None
+        futures = [
+            self._executor.submit(
+                self._search_shard,
+                ordinal,
+                query_vector,
+                requested_candidates,
             )
-            local_count = min(candidates, shard.chunk_count)
-            rows = np.asarray(
-                index.search(query_vector, local_count),
-                dtype=np.int64,
-            ).reshape(-1)
-            rows = np.unique(rows)
-            if np.any(rows < 0) or np.any(rows >= shard.chunk_count):
-                raise IncompatibleDenseIndexError(
-                    "Dense candidate index returned an invalid shard row"
-                )
-            embeddings = _open_embeddings(
-                directory,
-                shard.chunk_count,
-                self.manifest.embedding_dimension,
-            )
-            scores = np.asarray(embeddings[rows], dtype=np.float32) @ query_vector
-            offsets = _open_offsets(directory, shard.chunk_count)
-            with (directory / "metadata.jsonl").open("rb") as metadata:
-                local = [
-                    (
-                        float(score),
-                        _read_chunk_at(metadata, int(offsets[int(row)])),
-                    )
-                    for row, score in zip(rows, scores, strict=True)
-                ]
-            del embeddings
-            del offsets
-            best = _best_scored_chunks((*best, *local), limit)
+            for ordinal in range(len(self.manifest.shards))
+        ]
+        scored = [value for future in futures for value in future.result()]
+        ranked = self._materialize(scored, limit)
 
         query_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()
         index_hash = self.manifest.manifest_hash()
@@ -136,7 +187,7 @@ class ShardedDenseIndex:
                 index_manifest_hash=index_hash,
                 corpus_manifest_hash=self.manifest.corpus_manifest_hash,
             )
-            for rank, (score, chunk) in enumerate(best, start=1)
+            for rank, (score, chunk) in enumerate(ranked, start=1)
         ]
 
     def _validate(self) -> None:
@@ -146,24 +197,217 @@ class ShardedDenseIndex:
             raise IncompatibleDenseIndexError("Dense model name mismatch")
         if manifest.model_revision != config.embedding_model_revision:
             raise IncompatibleDenseIndexError("Dense model revision mismatch")
-        if manifest.scientific_hash != config.manifest_hash():
-            raise IncompatibleDenseIndexError("Dense scientific manifest mismatch")
+        if manifest.dense_semantics_hash != dense_semantics_hash(config):
+            raise IncompatibleDenseIndexError("Dense semantic manifest mismatch")
         if manifest.embedding_dimension != config.embedding_dimension:
             raise IncompatibleDenseIndexError("Dense embedding dimension mismatch")
         if (
-            manifest.candidate_index != config.dense_index_version
-            or manifest.hnsw_m != config.dense_hnsw_m
-            or manifest.ef_construction != config.dense_ef_construction
-            or manifest.ef_search != config.dense_ef_search
-            or manifest.candidate_count != config.dense_candidate_count
+            manifest.artifact_profile_hash != self.profile.manifest_hash()
+            or manifest.artifact_profile != self.profile
+            or manifest.candidate_index != self.profile.candidate_index
         ):
-            raise IncompatibleDenseIndexError("Dense index parameters mismatch")
+            raise IncompatibleDenseIndexError("Dense artifact profile mismatch")
         require_dense_recall(
             manifest.recall_at_300,
             minimum=config.dense_recall_minimum,
         )
-        for shard in manifest.shards:
-            _verify_shard_files(self.root, shard, manifest.embedding_dimension)
+        _verify_compressed_artifacts(self.root, manifest)
+
+    def _search_shard(
+        self,
+        ordinal: int,
+        query_vector: NDArray[np.float32],
+        candidates: int,
+    ) -> list[tuple[float, int]]:
+        shard = self.manifest.shards[ordinal]
+        local_count = min(candidates, shard.chunk_count)
+        raw_rows = np.asarray(
+            self._candidates[ordinal].search(query_vector, local_count),
+            dtype=np.int64,
+        ).reshape(-1)
+        rows: list[int] = []
+        seen: set[int] = set()
+        for value in raw_rows:
+            row = int(value)
+            if row == -1 or row in seen:
+                continue
+            if row < 0 or row >= shard.chunk_count:
+                raise IncompatibleDenseIndexError(
+                    "Dense candidate index returned an invalid shard row"
+                )
+            seen.add(row)
+            rows.append(row)
+        if not rows:
+            return []
+        row_array = np.asarray(rows, dtype=np.int64)
+        scores = (
+            np.asarray(self._embeddings[ordinal][row_array], dtype=np.float32)
+            @ query_vector
+        )
+        return [
+            (float(score), shard.start_row + row)
+            for row, score in zip(rows, scores, strict=True)
+        ]
+
+    def _materialize(
+        self,
+        scored: Sequence[tuple[float, int]],
+        limit: int,
+    ) -> list[tuple[float, CorpusChunk]]:
+        if not scored:
+            return []
+        ordered = sorted(scored, key=lambda value: (-value[0], value[1]))
+        selected = ordered[:limit]
+        cached: dict[int, CorpusChunk] = {}
+        if len(ordered) > limit:
+            cutoff = selected[-1][0]
+            above = [value for value in ordered if value[0] > cutoff]
+            tied = [value for value in ordered if value[0] == cutoff]
+            remaining = limit - len(above)
+            if len(tied) > remaining:
+                assert self._chunks is not None
+                for _score, row in tied:
+                    cached[row] = self._chunks.read(row)
+                tied = sorted(tied, key=lambda value: cached[value[1]].id)
+            selected = above + tied[:remaining]
+        assert self._chunks is not None
+        materialized: list[tuple[float, CorpusChunk]] = []
+        for score, row in selected:
+            chunk = cached.get(row)
+            if chunk is None:
+                chunk = self._chunks.read(row)
+            materialized.append((score, chunk))
+        return sorted(materialized, key=lambda value: (-value[0], value[1].id))
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        if self._executor is not None:
+            self._executor.shutdown(wait=True, cancel_futures=True)
+        if self._chunks is not None:
+            self._chunks.close()
+        self._embeddings.clear()
+        self._candidates.clear()
+        self._closed = True
+
+    def __enter__(self) -> Self:
+        if self._closed:
+            raise IncompatibleDenseIndexError("Compressed dense runtime is closed")
+        return self
+
+    def __exit__(
+        self,
+        exception_type: type[BaseException] | None,
+        exception: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        del exception_type, exception, traceback
+        self.close()
+
+
+class DenseLatencyError(RuntimeError):
+    pass
+
+
+def certify_dense_latency(
+    runtime: object,
+    queries: Sequence[str],
+    output_path: Path,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+    platform_name: Callable[[], str] = platform.platform,
+    machine_name: Callable[[], str] = platform.machine,
+) -> DenseLatencyReport:
+    manifest = runtime.manifest
+    if len(queries) != manifest.recall_query_count or any(
+        not query.strip() for query in queries
+    ):
+        raise DenseLatencyError("Dense latency query count or content mismatch")
+    query_bytes = ("\n".join(queries) + "\n").encode("utf-8")
+    query_hash = hashlib.sha256(query_bytes).hexdigest()
+    if query_hash != manifest.recall_queries_sha256:
+        raise DenseLatencyError("Dense latency query hash mismatch")
+    runtime.search(queries[0])
+    timings: list[float] = []
+    maximum = manifest.artifact_profile.max_warm_search_seconds
+    for query in queries:
+        started = clock()
+        runtime.search(query)
+        elapsed = clock() - started
+        if elapsed <= 0:
+            raise DenseLatencyError("Dense latency clock returned a nonpositive duration")
+        if elapsed > maximum:
+            raise DenseLatencyError(
+                f"Dense warm search took {elapsed:.2f}s; maximum is {maximum:.1f}s"
+            )
+        timings.append(elapsed)
+    report = DenseLatencyReport(
+        dense_manifest_hash=manifest.manifest_hash(),
+        recall_queries_sha256=query_hash,
+        query_count=len(queries),
+        warm_search_seconds=timings,
+        max_observed_seconds=max(timings),
+        maximum_allowed_seconds=maximum,
+        platform=platform_name(),
+        machine=machine_name(),
+    )
+    report.require_compatible(manifest)
+    _write_bytes_atomic(
+        output_path,
+        (report.model_dump_json() + "\n").encode("utf-8"),
+    )
+    return report
+
+
+def _verify_compressed_artifacts(
+    root: Path,
+    manifest: CompressedShardedDenseIndexManifest,
+) -> None:
+    artifacts: list[tuple[Path, int, str]] = [
+        (
+            root / manifest.chunk_offsets_path,
+            manifest.chunk_offsets_size_bytes,
+            manifest.chunk_offsets_sha256,
+        ),
+        (
+            root / manifest.candidate_template_path,
+            manifest.candidate_template_size_bytes,
+            manifest.candidate_template_sha256,
+        ),
+        (
+            root / manifest.recall_report_path,
+            manifest.recall_report_size_bytes,
+            manifest.recall_report_sha256,
+        ),
+    ]
+    for shard in manifest.shards:
+        artifacts.extend(
+            [
+                (
+                    root / shard.path / "embeddings.f16",
+                    shard.embeddings_size_bytes,
+                    shard.embeddings_sha256,
+                ),
+                (
+                    root / shard.path / "candidate.faiss",
+                    shard.candidate_index_size_bytes,
+                    shard.candidate_index_sha256,
+                ),
+            ]
+        )
+    for path, size, checksum in artifacts:
+        if not path.is_file():
+            raise IncompatibleDenseIndexError(
+                f"Compressed dense artifact is missing: {path}"
+            )
+        if path.stat().st_size != size:
+            raise IncompatibleDenseIndexError(
+                f"Compressed dense artifact has an invalid size: {path}"
+            )
+        if _sha256_file(path) != checksum:
+            raise IncompatibleDenseIndexError(
+                f"Compressed dense artifact checksum mismatch: {path}"
+            )
 
 
 def select_certification_queries(
