@@ -530,6 +530,8 @@ git push origin HEAD
 
 Guide the user through account, billing, API/SSH credential creation, and local untracked storage one button at a time. Confirm the credential exists without printing it.
 
+- [x] Correct the obsolete `--stop-after` assumption: current RunPod removed the flag because it was never enforced. Require an approved prepaid-balance ceiling with auto-pay off, no other active resources, and independent Mac/in-Pod scheduled stops.
+
 - [ ] **Step 2: Quote and obtain one benchmark cap**
 
 Use the selected live pod rate and a fixed maximum benchmark duration to state an exact maximum dollar amount. Start no pod before the user explicitly approves that amount.

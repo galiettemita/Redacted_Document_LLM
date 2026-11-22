@@ -15,7 +15,8 @@ The RunPod labels below were checked against the official documentation on 2026-
 - Run exactly the 100,000-row benchmark first.
 - Record the live total hourly rate shown by RunPod before deployment.
 - Stop the Pod immediately after the benchmark finishes.
-- Create the benchmark Pod only with a provider-side automatic stop equal to the approved total Pod duration. A command timeout inside SSH is an additional limit, not a substitute.
+- Keep RunPod auto-pay off, verify that no other billable RunPod resources are active, and treat the entire prepaid account balance as the provider-enforced financial ceiling. RunPod stops running Pods when that balance reaches zero.
+- Schedule the same stop deadline from both the Mac and the Pod immediately after creation. A command timeout inside SSH is a third, shorter limit, not a substitute for either stop scheduler.
 - Do not run the full build until the user approves its separately calculated maximum cost.
 - Publication still requires all checksums, recall@300 of at least `0.98`, artifacts no larger than 28 GiB, and all 100 local warm searches no slower than 5.0 seconds.
 
@@ -67,16 +68,16 @@ Add only the public key to RunPod:
 6. Name it `redacted-dense-build-mac`.
 7. Paste the public-key line and click **Save**.
 
-### Create a restricted API key for the automatic-stop deployment
+### Create a restricted API key for the capped deployment
 
-The benchmark Pod must be created through `runpodctl` with a provider-side automatic stop. The API key stays on the Mac and is never copied to the Pod or chat.
+The benchmark Pod must be created through `runpodctl` so its ID can be captured immediately and two independent stop schedulers can be armed. The API key stays on the Mac and is never copied to the Pod or chat.
 
 1. Open **Credentials**.
 2. Select **API Keys**.
 3. Click **Create API Key**.
 4. Name it `redacted-dense-build-temporary`.
 5. Select **Restricted**, not **All**.
-6. Leave unrelated APIs at **None**. Enable only the minimum Pod and network-volume permissions needed by the approved automation. If the displayed permission controls cannot express that narrow scope, cancel and stop; do not deploy until a narrowly scoped key and the independent automatic-stop control are both available.
+6. Leave unrelated APIs at **None**. Enable only the minimum Pod and network-volume permissions needed by the approved automation. If the displayed permission controls cannot express that narrow scope, cancel and stop; do not deploy until a narrowly scoped key is available.
 7. Click **Create**.
 8. Click the new key once to copy it and save it in the password manager. Do not paste it into chat, Git, `.env`, or a Pod.
 9. After the work, return to **Credentials** → **API Keys**, click the trash icon, and confirm **Revoke Key**.
@@ -87,10 +88,12 @@ On the Mac, install and configure the official CLI:
 brew install runpod/runpodctl/runpodctl
 runpodctl doctor
 runpodctl version
-runpodctl pod create --help | grep -F -- '--stop-after'
+runpodctl pod create --help
 ```
 
-When `runpodctl doctor` asks for the API key, paste it directly into Mac Terminal. Do not put it in a shell-history command. The last command must display `--stop-after`. If it does not, stop: do not create a Pod until the CLI/provider exposes an independently enforced automatic-stop control.
+When `runpodctl doctor` asks for the API key, paste it directly into Mac Terminal. Do not put it in a shell-history command. Verify that `runpodctl doctor` reports a healthy API-key check.
+
+Do not use `--stop-after` or `--terminate-after`. RunPod [removed both flags in `runpodctl` v2.12.0](https://github.com/runpod/runpodctl/releases/tag/v2.12.0) because the backend never enforced them; an old CLI accepting either flag does not make it a safety control. Upgrade before proceeding if `runpodctl pod create --help` still lists either flag. The current official Pod-management procedure schedules a stop with `sleep ...; runpodctl pod stop ... &`.
 
 ## Phase 2: Price the benchmark before creating billable resources
 
@@ -100,13 +103,15 @@ When `runpodctl doctor` asks for the API key, paste it directly into Mac Termina
 4. Select one currently available GPU. Do not use **Deploy when available**, because it could start spending later without a person present.
 5. In **Storage**, preview a 150 GiB network volume in the same data center. The volume cannot be attached across data centers.
 6. In the right-side **Summary**, record the exact displayed GPU rate, storage rate, total running rate, and stopped-storage rate.
-7. Close the deploy page without clicking **Deploy Pod**.
+7. Open **Pods**, **Serverless**, and **Storage** in separate tabs and verify there are no other active billable resources. Stop here if another resource must remain active because the prepaid balance would no longer be a benchmark-only ceiling.
+8. Open **Billing**, verify **Auto-pay** is off, and record the current prepaid balance. RunPod requires at least one hour of credits to deploy a Pod. If the current balance is greater than the maximum amount the user is willing to risk, stop and do not deploy.
+9. Close the deploy page without clicking **Deploy Pod**.
 
 State the benchmark proposal in this exact form, filling in real numbers:
 
-> One 100,000-row benchmark on [GPU] at $[running rate]/hour. The Pod will have a provider-enforced automatic stop after [exact duration], and the benchmark command will have a shorter [exact duration] timeout. Including at most $[storage allowance] of volume storage, the maximum benchmark spend is $[exact total].
+> One 100,000-row benchmark on [GPU] at $[running rate]/hour. Both the Mac and Pod will schedule a stop at [exact deadline], and the benchmark command will have a shorter [exact duration] timeout. With auto-pay off and no other active resources, the full prepaid balance of $[current balance] is the provider-enforced account-level maximum; the planned benchmark plus volume allowance is $[planned total].
 
-Proceed only after the user replies with an explicit approval naming that maximum dollar amount.
+Proceed only after the user replies with an explicit approval naming both the planned total and the full prepaid-balance maximum. Never describe a local or in-Pod timer as provider-enforced.
 
 ## Phase 3: Create the approved volume and Pod
 
@@ -122,7 +127,7 @@ These clicks spend money. They are future actions, not part of local implementat
 6. Choose **Standard** unless the approved quote explicitly used High-Performance storage.
 7. Recheck the approved cap, then click **Create Network Volume**.
 
-### Deploy the Pod with the provider-side hard stop
+### Deploy the Pod and arm both stop schedulers
 
 Do not click **Deploy Pod** in the console. In Mac Terminal, use `runpodctl template search pytorch`, `runpodctl gpu list`, and `runpodctl network-volume list` to copy the exact already-priced template ID, GPU ID, and network-volume ID. Then set the approved values without including an API key:
 
@@ -131,25 +136,40 @@ RUNPOD_TEMPLATE_ID='EXACT_PRICED_TEMPLATE_ID'
 RUNPOD_GPU_ID='EXACT_PRICED_GPU_ID'
 RUNPOD_NETWORK_VOLUME_ID='EXACT_NETWORK_VOLUME_ID'
 APPROVED_POD_DURATION='EXACT_APPROVED_DURATION'
-export RUNPOD_TEMPLATE_ID RUNPOD_GPU_ID RUNPOD_NETWORK_VOLUME_ID APPROVED_POD_DURATION
+APPROVED_POD_SECONDS='EXACT_APPROVED_INTEGER_SECONDS'
+export RUNPOD_TEMPLATE_ID RUNPOD_GPU_ID RUNPOD_NETWORK_VOLUME_ID APPROVED_POD_DURATION APPROVED_POD_SECONDS
 ```
 
-Re-run `runpodctl pod create --help` and confirm `--stop-after` is still supported. Then create exactly one Pod:
+Re-run `runpodctl doctor`, confirm the approved prepaid-balance ceiling and auto-pay setting in the console, and create exactly one Pod without `--wait` so the Pod ID is available before SSH startup:
 
 ```bash
-runpodctl pod create \
+set -euo pipefail
+POD_CREATED_AT_EPOCH="$(date +%s)"
+POD_STOP_DEADLINE_EPOCH="$((POD_CREATED_AT_EPOCH + APPROVED_POD_SECONDS))"
+POD_CREATE_JSON="$(runpodctl pod create \
   --template-id "$RUNPOD_TEMPLATE_ID" \
   --gpu-id "$RUNPOD_GPU_ID" \
   --gpu-count 1 \
   --name redacted-dense-benchmark \
   --network-volume-id "$RUNPOD_NETWORK_VOLUME_ID" \
   --container-disk-in-gb 30 \
-  --ssh \
-  --stop-after "$APPROVED_POD_DURATION" \
-  --wait
+  --ssh)"
+RUNPOD_POD_ID="$(printf '%s' "$POD_CREATE_JSON" | jq -er '.id')"
+export RUNPOD_POD_ID POD_STOP_DEADLINE_EPOCH
+
+nohup sh -c '
+  remaining=$(( $1 - $(date +%s) ))
+  if [ "$remaining" -gt 0 ]; then sleep "$remaining"; fi
+  runpodctl pod stop "$2"
+' runpod-stop "$POD_STOP_DEADLINE_EPOCH" "$RUNPOD_POD_ID" \
+  >"/tmp/redacted-dense-${RUNPOD_POD_ID}-stop.log" 2>&1 &
+LOCAL_STOP_SCHEDULER_PID=$!
+export LOCAL_STOP_SCHEDULER_PID
+
+runpodctl pod get "$RUNPOD_POD_ID"
 ```
 
-If creation or `--wait` reports any error, immediately run `runpodctl pod list --all`. A failed wait can leave a billable Pod behind. Stop any `redacted-dense-benchmark` Pod with `runpodctl pod stop POD_ID` before diagnosing. If the live rate is higher than the approved rate, stop it immediately and request a revised cap.
+Confirm the background scheduler is alive with `kill -0 "$LOCAL_STOP_SCHEDULER_PID"`. If creation, JSON parsing, or the scheduler check reports any error, immediately run `runpodctl pod list --all`. A failed client command can leave a billable Pod behind. Stop any `redacted-dense-benchmark` Pod with `runpodctl pod stop POD_ID` before diagnosing. If the live rate is higher than the approved rate, stop it immediately and request a revised cap.
 
 ### Connect over SSH
 
@@ -157,6 +177,24 @@ If creation or `--wait` reports any error, immediately run `runpodctl pod list -
 2. Click the running Pod to expand its detail panel.
 3. Click **Connect** and copy the displayed **SSH over exposed TCP** command.
 4. Paste that command into Mac Terminal. If asked to trust a new host fingerprint, compare it with the RunPod panel before typing `yes`.
+5. In the Pod terminal, verify `RUNPOD_POD_ID` equals the ID captured on the Mac and arm the independent in-Pod scheduler against the same absolute deadline:
+
+```bash
+EXPECTED_POD_ID='PASTE_THE_CAPTURED_POD_ID'
+POD_STOP_DEADLINE_EPOCH='PASTE_THE_APPROVED_DEADLINE_EPOCH'
+test "$RUNPOD_POD_ID" = "$EXPECTED_POD_ID"
+remaining="$((POD_STOP_DEADLINE_EPOCH - $(date +%s)))"
+test "$remaining" -gt 0
+nohup sh -c '
+  remaining=$(( $1 - $(date +%s) ))
+  if [ "$remaining" -gt 0 ]; then sleep "$remaining"; fi
+  runpodctl pod stop "$2"
+' runpod-stop "$POD_STOP_DEADLINE_EPOCH" "$RUNPOD_POD_ID" \
+  >/workspace/redacted-dense-stop.log 2>&1 &
+kill -0 $!
+```
+
+Stop immediately if the Pod ID is absent/mismatched, the deadline has passed, or the scheduler does not stay alive. Do not start the benchmark with only one scheduler.
 
 ## Phase 4: Reproduce the public source and prepare the GPU environment
 
@@ -225,9 +263,9 @@ timeout --signal=TERM --kill-after=300s \
   | tee /workspace/redacted-build/dense-benchmark-report.json
 ```
 
-`set -o pipefail` makes a benchmark or timeout failure remain a failure even if `tee` succeeds. The command timeout kills a hung benchmark; the provider-side `--stop-after` remains the independent backstop if SSH disconnects or the shell itself fails.
+`set -o pipefail` makes a benchmark or timeout failure remain a failure even if `tee` succeeds. The command timeout kills a hung benchmark. The Mac and in-Pod stop schedulers remain independent backstops if SSH disconnects or the benchmark shell fails, while the approved prepaid balance with auto-pay off is the financial ceiling.
 
-On every exit—success, timeout, error, or interrupt—stop the Pod immediately from another Mac Terminal with `runpodctl pod stop POD_ID`, then verify `runpodctl pod get POD_ID` reports it stopped. The automatic stop is the backstop, not the normal shutdown. Only after a successful exit:
+On every exit—success, timeout, error, or interrupt—stop the Pod immediately from another Mac Terminal with `runpodctl pod stop POD_ID`, then verify `runpodctl pod get POD_ID` reports it stopped. The two scheduled stops are backstops, not the normal shutdown. Only after a successful exit:
 
 1. Copy `dense-benchmark-report.json` to the Mac using the SSH host and port from **Connect**.
 2. Confirm again that the Pod is stopped. Do not leave the GPU running while reviewing results.
