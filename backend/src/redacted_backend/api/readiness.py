@@ -10,7 +10,11 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from redacted_backend.config import Settings
-from redacted_backend.corpus.best_available import BestAvailableCorpusManifest
+from redacted_backend.corpus.best_available import (
+    PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT,
+    BestAvailableCorpusManifest,
+    BestAvailableRetrievalContract,
+)
 from redacted_backend.corpus.manifest import CorpusManifest
 from redacted_backend.db.base import Database
 from redacted_backend.domain.analysis import PredictionBasis
@@ -289,6 +293,9 @@ def resolve_best_available_corpus_readiness(
     settings: Settings,
     *,
     index_counter: Callable[[str, str], int] | None = None,
+    contract: BestAvailableRetrievalContract = (
+        PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT
+    ),
 ) -> ComponentReadiness:
     required = (
         settings.best_available_corpus_manifest_path,
@@ -334,6 +341,7 @@ def resolve_best_available_corpus_readiness(
         index,
         dense,
         ScientificConfig(),
+        contract=contract,
     )
     if not manifest_readiness.ready:
         return manifest_readiness
@@ -373,6 +381,11 @@ def resolve_best_available_corpus_readiness(
             ready=False,
             detail="dense latency report invalid",
         )
+    if latency.runtime_environment != contract.latency_runtime_environment:
+        return ComponentReadiness(
+            ready=False,
+            detail="dense latency runtime environment mismatch",
+        )
     if not chunks_path.is_file():
         return ComponentReadiness(
             ready=False,
@@ -402,7 +415,7 @@ def resolve_best_available_corpus_readiness(
             ready=False,
             detail="retrieval index probe failed",
         )
-    if live_count != index.chunk_count:
+    if live_count != index.chunk_count or live_count != contract.chunk_count:
         return ComponentReadiness(
             ready=False,
             detail="BM25 live index count mismatch",

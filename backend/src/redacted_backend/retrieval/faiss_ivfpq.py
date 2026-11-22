@@ -6,6 +6,7 @@ import json
 import os
 import struct
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Self
 
@@ -13,12 +14,23 @@ import numpy as np
 from numpy.typing import NDArray
 
 from redacted_backend.retrieval.dense import IncompatibleDenseIndexError
-from redacted_backend.retrieval.dense_profile import DenseArtifactProfile
+from redacted_backend.retrieval.dense_profile import (
+    DenseArtifactProfile,
+    faiss_layout_hash,
+)
 
 
 _ARTIFACT_MAGIC = b"RDIVFPQ1\n"
 _MAX_HEADER_BYTES = 1024 * 1024
 _ArtifactKind = Literal["template", "candidate"]
+
+
+@dataclass(frozen=True)
+class FaissIvfPqArtifactHeader:
+    kind: _ArtifactKind
+    ntotal: int
+    payload_size_bytes: int
+    payload_sha256: str
 
 
 def train_ivfpq_template(
@@ -220,6 +232,7 @@ def _write_faiss_artifact(
         "kind": kind,
         "faiss_version": faiss_version or faiss.__version__,
         "artifact_profile_hash": profile.manifest_hash(),
+        "faiss_layout_hash": faiss_layout_hash(profile),
         "dimension": int(index.d),
         "ivf_nlist": int(index.nlist),
         "pq_subvectors": int(index.pq.M),
@@ -285,6 +298,81 @@ def _read_faiss_artifact(
     return index
 
 
+def inspect_ivfpq_artifact(
+    path: Path,
+    *,
+    expected_kind: _ArtifactKind,
+    profile: DenseArtifactProfile,
+    expected_ntotal: int,
+) -> FaissIvfPqArtifactHeader:
+    """Validate the checksum-bound wrapper without importing worker-only FAISS."""
+
+    try:
+        with path.open("rb") as source:
+            prefix_size = len(_ARTIFACT_MAGIC) + 4
+            prefix = source.read(prefix_size)
+            if len(prefix) != prefix_size or not prefix.startswith(_ARTIFACT_MAGIC):
+                raise IncompatibleDenseIndexError(
+                    "FAISS IVF-PQ artifact format is invalid"
+                )
+            header_size = struct.unpack("<I", prefix[len(_ARTIFACT_MAGIC) :])[0]
+            if header_size < 2 or header_size > _MAX_HEADER_BYTES:
+                raise IncompatibleDenseIndexError(
+                    "FAISS IVF-PQ metadata size is invalid"
+                )
+            header_bytes = source.read(header_size)
+            if len(header_bytes) != header_size:
+                raise IncompatibleDenseIndexError("FAISS IVF-PQ artifact is truncated")
+    except OSError as error:
+        raise IncompatibleDenseIndexError(
+            f"Cannot read FAISS IVF-PQ artifact: {path}"
+        ) from error
+    try:
+        metadata = json.loads(header_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise IncompatibleDenseIndexError("FAISS IVF-PQ metadata is invalid") from error
+    if not isinstance(metadata, dict):
+        raise IncompatibleDenseIndexError("FAISS IVF-PQ metadata must be an object")
+    _validate_header_metadata(
+        metadata,
+        expected_kind=expected_kind,
+        profile=profile,
+    )
+    payload_size = metadata.get("payload_size_bytes")
+    ntotal = metadata.get("ntotal")
+    payload_sha256 = metadata.get("payload_sha256")
+    if not isinstance(payload_size, int) or payload_size < 1:
+        raise IncompatibleDenseIndexError("FAISS IVF-PQ payload size is invalid")
+    if path.stat().st_size != prefix_size + header_size + payload_size:
+        raise IncompatibleDenseIndexError("FAISS IVF-PQ payload size mismatch")
+    if not isinstance(ntotal, int) or ntotal != expected_ntotal:
+        raise IncompatibleDenseIndexError("FAISS IVF-PQ row count mismatch")
+    if (
+        not isinstance(payload_sha256, str)
+        or len(payload_sha256) != 64
+        or any(value not in "0123456789abcdef" for value in payload_sha256)
+    ):
+        raise IncompatibleDenseIndexError("FAISS IVF-PQ payload checksum is invalid")
+    payload_digest = hashlib.sha256()
+    try:
+        with path.open("rb") as source:
+            source.seek(prefix_size + header_size)
+            for block in iter(lambda: source.read(1024 * 1024), b""):
+                payload_digest.update(block)
+    except OSError as error:
+        raise IncompatibleDenseIndexError(
+            f"Cannot read FAISS IVF-PQ artifact payload: {path}"
+        ) from error
+    if payload_digest.hexdigest() != payload_sha256:
+        raise IncompatibleDenseIndexError("FAISS IVF-PQ payload checksum mismatch")
+    return FaissIvfPqArtifactHeader(
+        kind=expected_kind,
+        ntotal=ntotal,
+        payload_size_bytes=payload_size,
+        payload_sha256=payload_sha256,
+    )
+
+
 def _validate_metadata(
     metadata: dict[str, object],
     payload: bytes,
@@ -293,21 +381,47 @@ def _validate_metadata(
     profile: DenseArtifactProfile,
 ) -> None:
     faiss = _faiss_module()
+    _validate_header_metadata(
+        metadata,
+        expected_kind=expected_kind,
+        profile=profile,
+    )
+    if faiss.__version__ != profile.faiss_version:
+        raise IncompatibleDenseIndexError("FAISS version does not match the profile")
+    if metadata.get("payload_size_bytes") != len(payload):
+        raise IncompatibleDenseIndexError("FAISS IVF-PQ payload size mismatch")
+    if metadata.get("payload_sha256") != hashlib.sha256(payload).hexdigest():
+        raise IncompatibleDenseIndexError("FAISS IVF-PQ payload checksum mismatch")
+
+
+def _validate_header_metadata(
+    metadata: dict[str, object],
+    *,
+    expected_kind: _ArtifactKind,
+    profile: DenseArtifactProfile,
+) -> None:
     if metadata.get("schema_version") != "faiss-ivfpq-artifact-v1":
         raise IncompatibleDenseIndexError("FAISS IVF-PQ artifact schema mismatch")
     if metadata.get("kind") != expected_kind:
         raise IncompatibleDenseIndexError("FAISS IVF-PQ artifact kind mismatch")
     if (
         metadata.get("faiss_version") != profile.faiss_version
-        or faiss.__version__ != profile.faiss_version
     ):
         raise IncompatibleDenseIndexError("FAISS version does not match the profile")
-    if metadata.get("artifact_profile_hash") != profile.manifest_hash():
-        raise IncompatibleDenseIndexError("FAISS IVF-PQ artifact profile mismatch")
-    if metadata.get("payload_size_bytes") != len(payload):
-        raise IncompatibleDenseIndexError("FAISS IVF-PQ payload size mismatch")
-    if metadata.get("payload_sha256") != hashlib.sha256(payload).hexdigest():
-        raise IncompatibleDenseIndexError("FAISS IVF-PQ payload checksum mismatch")
+    if metadata.get("faiss_layout_hash") != faiss_layout_hash(profile):
+        raise IncompatibleDenseIndexError("FAISS IVF-PQ layout mismatch")
+    expected = {
+        "dimension": profile.embedding_dimension,
+        "ivf_nlist": profile.ivf_nlist,
+        "pq_subvectors": profile.pq_subvectors,
+        "pq_bits": profile.pq_bits,
+        "metric": profile.metric,
+    }
+    actual = {name: metadata.get(name) for name in expected}
+    if actual != expected:
+        raise IncompatibleDenseIndexError("FAISS IVF-PQ header parameters mismatch")
+    if metadata.get("is_trained") is not True:
+        raise IncompatibleDenseIndexError("FAISS IVF-PQ artifact is not trained")
 
 
 def _validate_index(

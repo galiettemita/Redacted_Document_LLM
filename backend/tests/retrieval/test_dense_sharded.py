@@ -212,7 +212,7 @@ def test_search_caches_every_shard_and_exactly_rescores_global_candidates(
                 [[0.95, 0.05, 0.0], [0.9, 0.1, 0.0], [0.7, 0.3, 0.0]]
             ),
         ],
-        chunks=[chunk_b, chunk_invalid, chunk_c, chunk_z, chunk_a, chunk_d],
+        chunks=[chunk_a, chunk_invalid, chunk_c, chunk_z, chunk_b, chunk_d],
         candidate_rows=[[0, -1, 2, 2], [0, 1, 2]],
     )
     loaded_paths: list[str] = []
@@ -268,11 +268,12 @@ def test_search_caches_every_shard_and_exactly_rescores_global_candidates(
     assert loaded_paths == ["shard-00000", "shard-00001"]
     assert [item.chunk_id for item in first] == [
         chunk_z.id,
-        min(chunk_a.id, chunk_b.id),
-        max(chunk_a.id, chunk_b.id),
+        chunk_a.id,
+        chunk_b.id,
         chunk_c.id,
         chunk_d.id,
     ]
+    assert chunk_b.id < chunk_a.id  # chunk-ID order is deliberately reversed.
     assert second == first
     assert read_count == 10
     assert [item.rank for item in first] == [1, 2, 3, 4, 5]

@@ -219,6 +219,10 @@ Artifact building and retrieval verification use no OpenAI generation. Once oper
 - [x] Expose safe benchmark/build/latency/verification commands and a benchmark-first RunPod runbook.
 - [x] Verify local suites and the fictional demo.
 - [x] Prove real compressed four-list independence and UI/demo isolation with no provider spend.
+- [x] Pin the exact production corpus and frozen 100-query identities independently of self-consistent manifests.
+- [x] Validate recall evidence, shard manifests, and FAISS wrapper headers before operational readiness.
+- [x] Align certification/serving tie-breaking and require complete dense lists.
+- [x] Make tuning/resume, benchmark projections, worker-image latency, and shard-by-shard transfer production-safe.
 - [ ] Complete the capped cloud benchmark after explicit approval.
 - [ ] Complete the full cloud build after separate explicit approval.
 - [ ] Download and verify artifacts locally.

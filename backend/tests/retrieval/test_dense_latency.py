@@ -115,6 +115,7 @@ def test_latency_certification_warms_once_and_publishes_all_timings(
         clock=_AlternatingClock(4.99),
         platform_name=lambda: "macOS-test",
         machine_name=lambda: "arm64-test",
+        runtime_environment=lambda: "serving-worker-container",
     )
 
     assert len(runtime.calls) == 101
@@ -124,6 +125,7 @@ def test_latency_certification_warms_once_and_publishes_all_timings(
     assert report.max_observed_seconds == 4.99
     assert report.dense_manifest_hash == runtime.manifest.manifest_hash()
     assert report.recall_queries_sha256 == queries_sha256
+    assert report.runtime_environment == "serving-worker-container"
     assert DenseLatencyReport.model_validate_json(
         output.read_text(encoding="utf-8")
     ) == report
@@ -135,6 +137,7 @@ def test_latency_certification_refuses_a_slow_query_without_publishing(
     queries, queries_sha256 = _queries()
     runtime = _Runtime(_manifest(queries_sha256))
     output = tmp_path / "latency.json"
+    output.write_text("stale passing report", encoding="utf-8")
 
     with pytest.raises(DenseLatencyError, match="5.01.*5.0"):
         certify_dense_latency(
@@ -145,3 +148,33 @@ def test_latency_certification_refuses_a_slow_query_without_publishing(
         )
 
     assert not output.exists()
+
+
+def test_latency_certification_invalidates_stale_report_before_query_checks(
+    tmp_path: Path,
+) -> None:
+    queries, queries_sha256 = _queries()
+    runtime = _Runtime(_manifest(queries_sha256))
+    output = tmp_path / "latency.json"
+    output.write_text("stale passing report", encoding="utf-8")
+
+    with pytest.raises(DenseLatencyError, match="query count"):
+        certify_dense_latency(runtime, queries[:-1], output)
+
+    assert not output.exists()
+
+
+def test_latency_report_rejects_nonfinite_measurements() -> None:
+    queries, queries_sha256 = _queries()
+    with pytest.raises(ValueError, match="finite"):
+        DenseLatencyReport(
+            dense_manifest_hash=_manifest(queries_sha256).manifest_hash(),
+            recall_queries_sha256=queries_sha256,
+            query_count=100,
+            warm_search_seconds=[1.0] * 99 + [float("nan")],
+            max_observed_seconds=1.0,
+            maximum_allowed_seconds=5.0,
+            platform="test",
+            machine="test",
+            runtime_environment="serving-worker-container",
+        )

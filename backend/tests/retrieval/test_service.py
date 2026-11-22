@@ -85,10 +85,23 @@ def test_realistic_service_fails_instead_of_claiming_empty_evidence() -> None:
         dense=RecordingRetriever("dense", []),
     )
 
-    with pytest.raises(RetrievalError, match="no_evidence_retrieved") as error:
+    with pytest.raises(RetrievalError, match="incomplete_dense_retrieval") as error:
         service.retrieve_realistic(_example(), "specific own query")
 
-    assert error.value.code == "no_evidence_retrieved"
+    assert error.value.code == "incomplete_dense_retrieval"
+
+
+def test_realistic_service_rejects_a_partial_dense_list() -> None:
+    complete = [_ranked(index) for index in range(300)]
+    service = RealisticRetrievalService(
+        bm25=RecordingRetriever("bm25", complete),
+        dense=RecordingRetriever("dense", complete[:-1]),
+    )
+
+    with pytest.raises(RetrievalError, match="299 of 300") as error:
+        service.retrieve_realistic(_example(), "specific own query")
+
+    assert error.value.code == "incomplete_dense_retrieval"
 
 
 def _example() -> VisibleExample:

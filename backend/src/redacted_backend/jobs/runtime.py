@@ -8,7 +8,9 @@ import numpy as np
 from redacted_backend.config import Settings
 from redacted_backend.corpus.best_available import (
     BEST_AVAILABLE_BM25_INDEX_NAME,
+    PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT,
     BestAvailableCorpusManifest,
+    BestAvailableRetrievalContract,
 )
 from redacted_backend.corpus.build_dense import FaissHnswIndex
 from redacted_backend.corpus.chunker import CorpusChunk
@@ -43,6 +45,9 @@ def build_analysis_orchestrator(
     prediction_basis: PredictionBasis,
     *,
     database: Database | None = None,
+    best_available_contract: BestAvailableRetrievalContract = (
+        PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT
+    ),
 ) -> AnalysisOrchestrator:
     if settings.database_url is None and database is None:
         raise RuntimeError("Analysis worker database is not configured")
@@ -77,6 +82,7 @@ def build_analysis_orchestrator(
             database=database,
             gateway=gateway,
             scientific=scientific,
+            contract=best_available_contract,
         )
     if not settings.allow_paper_exact_calls:
         raise RuntimeError("Analysis worker paper-exact access is not approved")
@@ -133,6 +139,7 @@ def _build_best_available_orchestrator(
     database: Database,
     gateway: OpenAIGateway,
     scientific: ScientificConfig,
+    contract: BestAvailableRetrievalContract,
 ) -> AnalysisOrchestrator:
     required_paths = {
         "best-available corpus manifest": (
@@ -183,6 +190,7 @@ def _build_best_available_orchestrator(
         bm25_manifest,
         dense_manifest,
         scientific,
+        contract=contract,
     )
     if not manifest_readiness.ready:
         raise RuntimeError(manifest_readiness.detail)
@@ -202,6 +210,11 @@ def _build_best_available_orchestrator(
             latency_path.read_text(encoding="utf-8")
         )
         latency.require_compatible(dense_manifest)
+        if (
+            latency.runtime_environment
+            != contract.latency_runtime_environment
+        ):
+            raise ValueError("Dense latency runtime environment mismatch")
     except (OSError, ValueError) as error:
         raise RuntimeError("Dense latency report mismatch") from error
     try:

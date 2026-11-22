@@ -151,10 +151,15 @@ def test_create_rejects_untrained_wrong_version_or_wrong_profile_templates(
         dimension=8,
         profile=profile,
     )
-    with pytest.raises(IncompatibleDenseIndexError, match="profile"):
+    tuned = FaissIvfPqIndex.create(
+        trained_path,
+        profile=profile.model_copy(update={"nprobe": 1}),
+    )
+    assert tuned.nprobe == 1
+    with pytest.raises(IncompatibleDenseIndexError, match="layout"):
         FaissIvfPqIndex.create(
             trained_path,
-            profile=profile.model_copy(update={"nprobe": 1}),
+            profile=profile.model_copy(update={"pq_bits": 3}),
         )
 
 

@@ -14,6 +14,7 @@ from redacted_backend.retrieval import dense_sharded
 from redacted_backend.corpus.best_available import BestAvailableCorpusManifest
 from redacted_backend.corpus.build_dense_sharded import (
     StorageBudgetError,
+    benchmark_sharded_dense_build,
     build_sharded_dense_from_files,
 )
 from redacted_backend.corpus.chunker import CorpusChunk
@@ -147,6 +148,7 @@ def _build(
     *,
     encoder: DeterministicEncoder | None = None,
     profile: DenseArtifactProfile | None = None,
+    shard_size: int = 2,
 ) -> tuple[
     CompressedShardedDenseIndexManifest,
     Path,
@@ -166,7 +168,7 @@ def _build(
         scientific=scientific,
         profile=profile or _profile(),
         batch_size=2,
-        shard_size=2,
+        shard_size=shard_size,
         application_query_count=2,
         corpus_query_count=2,
         recall_block_rows=2,
@@ -207,6 +209,41 @@ def test_build_publishes_compressed_shards_without_duplicate_metadata(
         ).hexdigest() == shard.candidate_index_sha256
     assert manifest.recall_at_300 == 1.0
     assert (output / manifest.recall_report_path).is_file()
+
+
+def test_benchmark_scales_fixed_and_row_dependent_work_separately(
+    tmp_path: Path,
+) -> None:
+    chunks, corpus, _queries, _rows, scientific = _fixture(tmp_path, count=10)
+    profile = _profile(training_sample_count=5, shard_size_limit=2)
+
+    report = benchmark_sharded_dense_build(
+        chunks,
+        corpus,
+        tmp_path / "benchmark",
+        encoder=DeterministicEncoder(8),
+        scientific=scientific,
+        profile=profile,
+        sample_rows=5,
+        batch_size=2,
+    )
+
+    row_scale = report.production_chunk_count / report.sample_rows
+    certification_scale = row_scale * (
+        100 / report.certification_probe_queries
+    )
+    expected_seconds = (
+        report.setup_seconds
+        + report.encoding_seconds * row_scale
+        + report.training_seconds
+        + report.candidate_add_seconds * row_scale
+        + report.certification_probe_seconds * certification_scale
+    )
+    assert report.projected_shard_count == 5
+    assert report.projected_full_seconds == pytest.approx(expected_seconds)
+    assert report.projected_gpu_hours == pytest.approx(expected_seconds / 3600)
+    assert report.candidate_fixed_bytes_per_shard > 0
+    assert report.peak_gpu_memory_bytes is None
 
 
 def test_embedding_phase_resumes_without_reencoding_verified_checkpoints(
@@ -306,6 +343,71 @@ def test_corrupt_candidate_rebuilds_from_embeddings_without_encoding(
 
     assert repaired.chunk_count == 5
     assert rebuilt_candidate_encoder.encoded_rows == 0
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        _profile(candidate_count_per_shard=4),
+        _profile(pq_bits=2),
+    ],
+)
+def test_candidate_tuning_reuses_completed_embeddings(
+    tmp_path: Path,
+    profile: DenseArtifactProfile,
+) -> None:
+    _build(tmp_path)
+    encoder = DeterministicEncoder(8, fail_after_rows=0)
+
+    tuned, _, _ = _build(tmp_path, encoder=encoder, profile=profile)
+
+    assert tuned.artifact_profile == profile
+    assert encoder.encoded_rows == 0
+
+
+@pytest.mark.parametrize(
+    "orphan",
+    [
+        "chunks.offsets-report.json",
+        "training-rows-manifest.json",
+        "candidate-template-manifest.json",
+    ],
+)
+def test_interrupted_phase_pairs_recover_without_reencoding(
+    tmp_path: Path,
+    orphan: str,
+) -> None:
+    _manifest, output, _ = _build(tmp_path)
+    (output / "manifest.json").unlink()
+    (output / orphan).unlink()
+    encoder = DeterministicEncoder(8, fail_after_rows=0)
+
+    recovered, _, _ = _build(tmp_path, encoder=encoder)
+
+    assert recovered.chunk_count == 5
+    assert encoder.encoded_rows == 0
+
+
+def test_smaller_physical_shards_keep_the_frozen_profile_compatible(
+    tmp_path: Path,
+) -> None:
+    profile = _profile(shard_size_limit=2)
+
+    manifest, _, _ = _build(tmp_path, profile=profile, shard_size=1)
+
+    assert manifest.shard_size_limit == 2
+    assert len(manifest.shards) == 5
+    assert all(shard.chunk_count == 1 for shard in manifest.shards)
+
+
+def test_build_lock_refuses_a_second_writer(tmp_path: Path) -> None:
+    root = tmp_path / "dense"
+    root.mkdir()
+
+    with dense_builder._exclusive_build_lock(root):
+        with pytest.raises(RuntimeError, match="Another compressed dense build"):
+            with dense_builder._exclusive_build_lock(root):
+                pass
 
 
 def test_underfilled_candidate_rebuilds_from_embeddings_without_encoding(

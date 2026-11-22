@@ -3,13 +3,17 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
-from uuid import UUID
+from urllib.parse import quote
+from urllib.request import Request, urlopen
+from uuid import UUID, uuid4
 
 import numpy as np
+import pytest
 from numpy.typing import NDArray
 from sqlalchemy import select
 
@@ -21,6 +25,7 @@ from redacted_backend.corpus.best_available import (
     BestAvailableCorpusManifest,
 )
 from redacted_backend.corpus.chunker import CorpusChunk
+from redacted_backend.corpus.manifest import CorpusManifest
 from redacted_backend.db.base import Base
 from redacted_backend.db.models import AnalysisJob
 from redacted_backend.documents.detection import DetectedPassage, DetectionResult
@@ -34,8 +39,9 @@ from redacted_backend.models.openai_gateway import (
     OpenAIGateway,
     ProviderHttpResponse,
 )
-from redacted_backend.retrieval.bm25 import Bm25Index
+from redacted_backend.retrieval.bm25 import Bm25Index, OpenSearchHttpTransport
 from redacted_backend.retrieval.chunk_offsets import build_chunk_offsets
+from redacted_backend.retrieval.dense import BgeEncoder
 from redacted_backend.retrieval.dense_profile import (
     DenseArtifactProfile,
     dense_semantics_hash,
@@ -122,8 +128,6 @@ class TinyBm25Transport:
         terms = set(re.findall(r"[a-z0-9]+", query.casefold()))
         hits: list[dict[str, Any]] = []
         for document in self.documents:
-            if document["document_id"] == "dense-only-document":
-                continue
             text_terms = set(
                 re.findall(r"[a-z0-9]+", str(document["text"]).casefold())
             )
@@ -142,10 +146,18 @@ class TinyBm25Transport:
 class FixedDenseQueryEncoder:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.vectors: list[NDArray[np.float32]] = []
 
     def encode_query(self, text: str) -> NDArray[np.float32]:
         self.calls.append(text)
-        return np.asarray([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        vector = np.asarray(
+            [0.0, 1.0, 0.0, 0.0]
+            if "specific actors" in text
+            else [1.0, 0.0, 0.0, 0.0],
+            dtype=np.float32,
+        )
+        self.vectors.append(vector)
+        return vector
 
 
 def _build_real_retrievers(
@@ -335,6 +347,77 @@ def _archive_chunk(document_id: str, text: str) -> CorpusChunk:
     )
 
 
+def test_live_opensearch_and_pinned_encoder_naturally_separate_dense_document() -> None:
+    url = os.environ.get("REDACTED_LIVE_OPENSEARCH_URL")
+    if not url:
+        pytest.skip("set REDACTED_LIVE_OPENSEARCH_URL for the local component smoke")
+    index_name = f"redacted-four-list-smoke-{uuid4().hex}"
+    scientific = ScientificConfig(bm25_index_name=index_name)
+    chunks = [
+        _archive_chunk(
+            "bm25-context-document",
+            "visible before visible after archive bulletin",
+        ).model_copy(update={"corpus": "cfpf"}),
+        _archive_chunk(
+            "bm25-own-document",
+            "specific actors paris 1960 meeting public archive",
+        ).model_copy(update={"corpus": "cfpf"}),
+        _archive_chunk(
+            "dense-only-document",
+            "semantic vector evidence from a separate diplomatic cable",
+        ).model_copy(update={"corpus": "cfpf"}),
+    ]
+    corpus = CorpusManifest(
+        schema_version="historylab-normalized-v1",
+        source_manifest_hash="1" * 64,
+        coverage_report_hash="2" * 64,
+        exclusion_hash="3" * 64,
+        scientific_hash=scientific.manifest_hash(),
+        chunker_version=scientific.corpus_chunker_version,
+        chunk_words=scientific.chunk_words,
+        chunk_overlap=scientific.chunk_overlap,
+        document_count=3,
+        chunk_count=3,
+        corpus_counts={"cfpf": 3},
+        exclusion_counts={},
+        coverage_ready=True,
+        chunks_sha256="4" * 64,
+    )
+    bm25 = Bm25Index(
+        OpenSearchHttpTransport(url),
+        scientific=scientific,
+        index_name=index_name,
+    )
+    try:
+        bm25.build(chunks, corpus)
+        bm25_documents = {
+            item.document_id
+            for query, kind in (
+                ("visible before visible after archive bulletin", "context"),
+                ("specific actors paris 1960 meeting", "own"),
+            )
+            for item in bm25.search(query, 3, query_kind=kind)
+        }
+        assert "dense-only-document" not in bm25_documents
+
+        encoder = BgeEncoder(scientific=scientific)
+        context_vector = encoder.encode_query("visible public archive context")
+        own_vector = encoder.encode_query("specific actors paris meeting")
+        assert context_vector.shape == own_vector.shape == (768,)
+        assert not np.array_equal(context_vector, own_vector)
+    finally:
+        try:
+            urlopen(
+                Request(
+                    f"{url.rstrip('/')}/{quote(index_name)}",
+                    method="DELETE",
+                ),
+                timeout=10,
+            ).close()
+        except Exception:
+            pass
+
+
 def test_upload_to_best_available_sse_runs_two_stage_four_list_prediction(
     tmp_path: Path,
     monkeypatch,
@@ -505,6 +588,7 @@ def test_upload_to_best_available_sse_runs_two_stage_four_list_prediction(
     assert bm25_transport.searches[1] == "specific actors paris 1960 meeting"
     assert len(dense_encoder.calls) == 2
     assert dense_encoder.calls == bm25_transport.searches
+    assert not np.array_equal(dense_encoder.vectors[0], dense_encoder.vectors[1])
     assert len(fake_transport.count_requests) == 2
     assert [item[1] for item in fake_transport.create_requests] == [
         f"{job['id']}:query",

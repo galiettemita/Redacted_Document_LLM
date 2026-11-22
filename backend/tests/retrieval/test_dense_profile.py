@@ -8,6 +8,8 @@ from pydantic import ValidationError
 from redacted_backend.retrieval.dense_profile import (
     DenseArtifactProfile,
     dense_semantics_hash,
+    dense_training_selection_hash,
+    faiss_layout_hash,
 )
 from redacted_backend.retrieval.types import (
     CompressedDenseShardManifest,
@@ -61,6 +63,24 @@ def _profile() -> DenseArtifactProfile:
         candidate_count_per_shard=4,
         training_sample_count=8,
         shard_size_limit=3,
+    )
+
+
+def test_phase_hashes_allow_search_tuning_without_reencoding() -> None:
+    profile = _profile()
+    search_tuned = profile.model_copy(
+        update={"nprobe": 1, "candidate_count_per_shard": 2}
+    )
+    layout_tuned = profile.model_copy(update={"pq_bits": 7})
+    selection_tuned = profile.model_copy(update={"training_sample_count": 9})
+
+    assert faiss_layout_hash(search_tuned) == faiss_layout_hash(profile)
+    assert dense_training_selection_hash(search_tuned) == (
+        dense_training_selection_hash(profile)
+    )
+    assert faiss_layout_hash(layout_tuned) != faiss_layout_hash(profile)
+    assert dense_training_selection_hash(selection_tuned) != (
+        dense_training_selection_hash(profile)
     )
 
 
@@ -219,6 +239,7 @@ def test_latency_report_rejects_manifest_or_query_identity_mismatches() -> None:
         maximum_allowed_seconds=5.0,
         platform="macOS",
         machine="arm64",
+        runtime_environment="test-worker",
     )
 
     assert report.require_compatible(manifest) is report
@@ -243,6 +264,7 @@ def test_latency_report_rejects_slow_or_incomplete_certification() -> None:
             maximum_allowed_seconds=5.0,
             platform="macOS",
             machine="arm64",
+            runtime_environment="test-worker",
         )
 
     with pytest.raises(ValidationError, match="maximum"):
@@ -255,4 +277,5 @@ def test_latency_report_rejects_slow_or_incomplete_certification() -> None:
             maximum_allowed_seconds=5.0,
             platform="macOS",
             machine="arm64",
+            runtime_environment="test-worker",
         )

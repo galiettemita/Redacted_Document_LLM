@@ -40,6 +40,8 @@
 ### Task 1: Version the compressed artifact profile and manifests
 
 **Files:**
+- Modify: `README.md`
+- Modify: `compose.yaml`
 - Create: `backend/src/redacted_backend/retrieval/dense_profile.py`
 - Modify: `backend/src/redacted_backend/retrieval/types.py`
 - Create: `backend/tests/retrieval/test_dense_profile.py`
@@ -439,6 +441,7 @@ git push origin HEAD
 - Modify: `backend/tests/test_import_safety.py`
 - Modify: `src/features/workspace/DocumentWorkspace.test.tsx` only if the current prediction-ready assertions do not cover basis preservation.
 - Modify: `docs/superpowers/specs/2026-11-21-compressed-four-list-dense-design.md`
+- Modify: `docs/runbooks/runpod-compressed-dense-build.md`
 
 **Interfaces:**
 - Consumes: the completed compressed runtime/readiness and existing orchestrator/UI.
@@ -485,6 +488,18 @@ git add backend/tests src docs/superpowers/specs/2026-11-21-compressed-four-list
 git commit -m "test: verify compressed four-list product flow"
 git push origin HEAD
 ```
+
+#### Whole-branch review remediation
+
+- [x] Pin the exact 4,300,534-document/14,549,269-passage corpus manifest and frozen 100-query digest in production readiness, build, verification, and worker runtime while keeping injectable tiny-test contracts.
+- [x] Parse and cross-check the recall report, on-disk shard manifests, and FAISS-free wrapper headers/row counts before readiness can become operational.
+- [x] Use global row ID as the single deterministic score-tie rule in the builder, standalone certifier, and serving runtime.
+- [x] Separate embedding/training/FAISS-layout identities so candidate tuning reuses verified embeddings; recover interrupted phase pairs under a single-writer lock.
+- [x] Measure and project setup, encoding, training, insertion, certification, per-row bytes, per-shard bytes, RSS, and GPU memory separately.
+- [x] Keep the frozen profile while allowing smaller physical shards; reject incomplete dense lists before four-list fusion.
+- [x] Invalidate stale latency reports, reject nonfinite timings, and certify inside the serving worker image.
+- [x] Make transfer free-space-aware, shard-by-shard, resumable, checksum-verified, and top-manifest-last.
+- [x] Prove natural BM25 separation and query-dependent pinned BGE vectors against a disposable real OpenSearch node without touching the production index.
 
 ### Task 9: Cross the paid cloud and model boundaries only with explicit approvals
 

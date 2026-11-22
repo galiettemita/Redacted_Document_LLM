@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import struct
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from redacted_backend.config import Settings
 from redacted_backend.corpus.best_available import (
     BEST_AVAILABLE_BM25_INDEX_NAME,
     BestAvailableCorpusManifest,
+    BestAvailableRetrievalContract,
 )
 from redacted_backend.corpus.chunker import CorpusChunk
 from redacted_backend.corpus.manifest import CorpusManifest
@@ -30,12 +32,14 @@ from redacted_backend.retrieval.bm25 import index_definition_hash
 from redacted_backend.retrieval.dense_profile import (
     DenseArtifactProfile,
     dense_semantics_hash,
+    faiss_layout_hash,
 )
 from redacted_backend.retrieval.types import (
     Bm25IndexManifest,
     CompressedDenseShardManifest,
     CompressedShardedDenseIndexManifest,
     DenseLatencyReport,
+    DenseRecallReport,
     DenseIndexManifest,
 )
 from redacted_backend.scientific_config import ScientificConfig
@@ -378,6 +382,7 @@ def test_best_available_readiness_verifies_separate_shards_queries_and_live_inde
     tmp_path: Path,
 ) -> None:
     settings, corpus, bm25, dense = _compatible_best_available_settings(tmp_path)
+    contract = _best_available_test_contract(corpus, dense)
 
     readiness = resolve_best_available_corpus_readiness(
         settings,
@@ -386,6 +391,7 @@ def test_best_available_readiness_verifies_separate_shards_queries_and_live_inde
             if (url, name) == ("http://search.test:9200", bm25.index_name)
             else -1
         ),
+        contract=contract,
     )
 
     assert readiness.model_dump() == {
@@ -397,7 +403,17 @@ def test_best_available_readiness_verifies_separate_shards_queries_and_live_inde
         bm25,
         dense,
         ScientificConfig(),
+        contract=contract,
     ).ready is True
+    assert verify_best_available_corpus_readiness(
+        corpus,
+        bm25,
+        dense,
+        ScientificConfig(),
+    ).model_dump() == {
+        "ready": False,
+        "detail": "best-available production corpus identity mismatch",
+    }
     ready = ComponentReadiness(ready=True, detail="ready")
     unavailable = ComponentReadiness(ready=False, detail="not configured")
     basis = readiness_api.resolve_prediction_basis_readiness(
@@ -419,9 +435,11 @@ def test_best_available_readiness_fails_closed_on_corruption_or_live_count(
     tmp_path: Path,
 ) -> None:
     settings, _corpus, bm25, dense = _compatible_best_available_settings(tmp_path)
+    contract = _best_available_test_contract(_corpus, dense)
     assert resolve_best_available_corpus_readiness(
         settings,
         index_counter=lambda _url, _name: bm25.chunk_count,
+        contract=contract,
     ).ready is True
     shard_root = settings.best_available_dense_artifact_directory
     assert shard_root is not None
@@ -430,6 +448,7 @@ def test_best_available_readiness_fails_closed_on_corruption_or_live_count(
     corrupt = resolve_best_available_corpus_readiness(
         settings,
         index_counter=lambda _url, _name: bm25.chunk_count,
+        contract=contract,
     )
     assert corrupt.model_dump() == {
         "ready": False,
@@ -439,13 +458,85 @@ def test_best_available_readiness_fails_closed_on_corruption_or_live_count(
     settings, _corpus, bm25, _dense = _compatible_best_available_settings(
         tmp_path / "count"
     )
+    contract = _best_available_test_contract(_corpus, _dense)
     mismatch = resolve_best_available_corpus_readiness(
         settings,
         index_counter=lambda _url, _name: bm25.chunk_count + 1,
+        contract=contract,
     )
     assert mismatch.model_dump() == {
         "ready": False,
         "detail": "BM25 live index count mismatch",
+    }
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["recall_report", "candidate_header", "shard_manifest"],
+)
+def test_best_available_readiness_parses_scientific_artifacts(
+    tmp_path: Path,
+    case: str,
+) -> None:
+    settings, corpus, bm25, dense = _compatible_best_available_settings(tmp_path)
+    dense_root = settings.best_available_dense_artifact_directory
+    assert dense_root is not None
+    shard = dense.shards[0]
+    if case == "recall_report":
+        path = dense_root / dense.recall_report_path
+        previous_size = path.stat().st_size
+        path.write_text("{}\n", encoding="utf-8")
+        dense = dense.model_copy(
+            update={
+                "recall_report_size_bytes": path.stat().st_size,
+                "recall_report_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "total_artifact_bytes": (
+                    dense.total_artifact_bytes - previous_size + path.stat().st_size
+                ),
+            }
+        )
+    elif case == "candidate_header":
+        path = dense_root / shard.path / "candidate.faiss"
+        previous_size = path.stat().st_size
+        path.write_bytes(b"not-a-faiss-wrapper")
+        shard = shard.model_copy(
+            update={
+                "candidate_index_size_bytes": path.stat().st_size,
+                "candidate_index_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+        )
+        dense = dense.model_copy(
+            update={
+                "shards": [shard],
+                "total_artifact_bytes": (
+                    dense.total_artifact_bytes - previous_size + path.stat().st_size
+                ),
+            }
+        )
+        (dense_root / shard.path / "manifest.json").write_text(
+            shard.model_dump_json() + "\n",
+            encoding="utf-8",
+        )
+    else:
+        (dense_root / shard.path / "manifest.json").write_text(
+            shard.model_copy(
+                update={"candidate_index_sha256": "0" * 64}
+            ).model_dump_json()
+            + "\n",
+            encoding="utf-8",
+        )
+    _rewrite_dense_fixture(settings, dense)
+    contract = _best_available_test_contract(corpus, dense)
+
+    readiness = resolve_best_available_corpus_readiness(
+        settings,
+        index_counter=lambda _url, _name: bm25.chunk_count,
+        contract=contract,
+    )
+
+    assert readiness.model_dump() == {
+        "ready": False,
+        "detail": "dense shard artifacts invalid",
     }
 
 
@@ -459,7 +550,7 @@ def test_best_available_readiness_fails_closed_on_corruption_or_live_count(
         ("offset_size", "dense offset size mismatch"),
         ("shard_range", "dense shard range mismatch"),
         ("candidate_template", "dense candidate template mismatch"),
-        ("recall_count", "dense recall query count mismatch"),
+        ("recall_count", "dense recall query identity mismatch"),
         ("recall_value", "dense recall@300 is below 0.9800"),
     ],
 )
@@ -471,6 +562,7 @@ def test_best_available_manifest_mismatches_fail_closed(
     _settings, corpus, bm25, dense = _compatible_best_available_settings(
         tmp_path / case
     )
+    contract = _best_available_test_contract(corpus, dense)
     if case == "unsupported_profile":
         unsupported = dense.artifact_profile.model_copy(update={"nprobe": 512})
         dense = dense.model_copy(
@@ -505,6 +597,7 @@ def test_best_available_manifest_mismatches_fail_closed(
         bm25,
         dense,
         ScientificConfig(),
+        contract=contract,
     ).model_dump() == {"ready": False, "detail": detail}
 
 
@@ -530,6 +623,7 @@ def test_best_available_external_mismatches_fail_before_live_bm25_probe(
     settings, _corpus, _bm25, dense = _compatible_best_available_settings(
         tmp_path / case
     )
+    contract = _best_available_test_contract(_corpus, dense)
     dense_root = settings.best_available_dense_artifact_directory
     latency_path = settings.best_available_latency_report_path
     queries_path = settings.best_available_recall_queries_path
@@ -576,6 +670,7 @@ def test_best_available_external_mismatches_fail_before_live_bm25_probe(
     readiness = resolve_best_available_corpus_readiness(
         settings,
         index_counter=count,
+        contract=contract,
     )
 
     assert readiness.ready is False
@@ -824,13 +919,12 @@ def _compatible_best_available_settings(
     offsets = dense_root / "chunks.offsets.u64"
     offsets.write_bytes(b"\0" * 8)
     template = dense_root / "candidate-template.faiss"
-    template.write_bytes(b"template-fixture")
+    _write_faiss_header_fixture(template, profile=profile, kind="template", ntotal=0)
     recall_report = dense_root / "recall-report.json"
-    recall_report.write_bytes(b"{}\n")
     embeddings = shard_directory / "embeddings.f16"
     embeddings.write_bytes(b"\0" * (scientific.embedding_dimension * 2))
     candidate = shard_directory / "candidate.faiss"
-    candidate.write_bytes(b"candidate-fixture")
+    _write_faiss_header_fixture(candidate, profile=profile, kind="candidate", ntotal=1)
     template_sha256 = hashlib.sha256(template.read_bytes()).hexdigest()
     shard = CompressedDenseShardManifest(
         artifact_profile_hash=profile.manifest_hash(),
@@ -848,6 +942,19 @@ def _compatible_best_available_settings(
     queries = "".join(f"public certification query {index}\n" for index in range(100))
     queries_path = tmp_path / "best-recall-queries.txt"
     queries_path.write_text(queries, encoding="utf-8")
+    query_sha256 = hashlib.sha256(queries.encode("utf-8")).hexdigest()
+    recall_report.write_text(
+        DenseRecallReport(
+            artifact_profile_hash=profile.manifest_hash(),
+            corpus_manifest_hash=corpus.manifest_hash(),
+            recall_queries_sha256=query_sha256,
+            recall_query_count=100,
+            recall_at_300=0.99,
+            per_query_recall=[0.99] * 100,
+        ).model_dump_json()
+        + "\n",
+        encoding="utf-8",
+    )
     total_bytes = (
         offsets.stat().st_size
         + template.stat().st_size
@@ -883,9 +990,13 @@ def _compatible_best_available_settings(
             recall_report.read_bytes()
         ).hexdigest(),
         recall_at_300=0.99,
-        recall_queries_sha256=hashlib.sha256(queries.encode("utf-8")).hexdigest(),
+        recall_queries_sha256=query_sha256,
         recall_query_count=100,
         total_artifact_bytes=total_bytes,
+    )
+    (shard_directory / "manifest.json").write_text(
+        shard.model_dump_json() + "\n",
+        encoding="utf-8",
     )
     latency = DenseLatencyReport(
         dense_manifest_hash=dense.manifest_hash(),
@@ -896,6 +1007,7 @@ def _compatible_best_available_settings(
         maximum_allowed_seconds=profile.max_warm_search_seconds,
         platform="test-platform",
         machine="test-machine",
+        runtime_environment="test-worker",
     )
     corpus_path = tmp_path / "best-corpus.json"
     bm25_path = tmp_path / "best-bm25.json"
@@ -916,3 +1028,73 @@ def _compatible_best_available_settings(
         opensearch_url="http://search.test:9200",
     )
     return settings, corpus, bm25, dense
+
+
+def _best_available_test_contract(
+    corpus: BestAvailableCorpusManifest,
+    dense: CompressedShardedDenseIndexManifest,
+) -> BestAvailableRetrievalContract:
+    return BestAvailableRetrievalContract(
+        corpus_manifest_hash=corpus.manifest_hash(),
+        chunks_sha256=corpus.chunks_sha256,
+        parsed_row_count=corpus.parsed_row_count,
+        document_count=corpus.document_count,
+        chunk_count=corpus.chunk_count,
+        application_queries_sha256="0" * 64,
+        recall_queries_sha256=dense.recall_queries_sha256,
+        recall_query_count=dense.recall_query_count,
+        latency_runtime_environment="test-worker",
+    )
+
+
+def _write_faiss_header_fixture(
+    path: Path,
+    *,
+    profile: DenseArtifactProfile,
+    kind: str,
+    ntotal: int,
+) -> None:
+    payload = f"{kind}-payload".encode("utf-8")
+    metadata = {
+        "schema_version": "faiss-ivfpq-artifact-v1",
+        "kind": kind,
+        "faiss_version": profile.faiss_version,
+        "artifact_profile_hash": profile.manifest_hash(),
+        "faiss_layout_hash": faiss_layout_hash(profile),
+        "dimension": profile.embedding_dimension,
+        "ivf_nlist": profile.ivf_nlist,
+        "pq_subvectors": profile.pq_subvectors,
+        "pq_bits": profile.pq_bits,
+        "metric": profile.metric,
+        "is_trained": True,
+        "ntotal": ntotal,
+        "payload_size_bytes": len(payload),
+        "payload_sha256": hashlib.sha256(payload).hexdigest(),
+    }
+    header = json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode()
+    path.write_bytes(b"RDIVFPQ1\n" + struct.pack("<I", len(header)) + header + payload)
+
+
+def _rewrite_dense_fixture(
+    settings: Settings,
+    dense: CompressedShardedDenseIndexManifest,
+) -> None:
+    dense_path = settings.best_available_dense_manifest_path
+    latency_path = settings.best_available_latency_report_path
+    assert dense_path is not None
+    assert latency_path is not None
+    dense_path.write_text(dense.model_dump_json(), encoding="utf-8")
+    latency_path.write_text(
+        DenseLatencyReport(
+            dense_manifest_hash=dense.manifest_hash(),
+            recall_queries_sha256=dense.recall_queries_sha256,
+            query_count=dense.recall_query_count,
+            warm_search_seconds=[1.0] * dense.recall_query_count,
+            max_observed_seconds=1.0,
+            maximum_allowed_seconds=dense.artifact_profile.max_warm_search_seconds,
+            platform="test-platform",
+            machine="test-machine",
+            runtime_environment="test-worker",
+        ).model_dump_json(),
+        encoding="utf-8",
+    )

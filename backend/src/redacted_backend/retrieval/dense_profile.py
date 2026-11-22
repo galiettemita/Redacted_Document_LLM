@@ -72,6 +72,37 @@ def dense_semantics_hash(scientific: ScientificConfig) -> str:
     )
 
 
+def dense_training_selection_hash(profile: DenseArtifactProfile) -> str:
+    return _canonical_hash(
+        {
+            "training_sample_count": profile.training_sample_count,
+            "training_seed": profile.training_seed,
+            "training_selection_version": profile.training_selection_version,
+        }
+    )
+
+
+def faiss_layout_hash(profile: DenseArtifactProfile) -> str:
+    """Identity of bytes that require FAISS retraining/re-encoding.
+
+    Search-time tuning such as nprobe, retained candidates, shard concurrency,
+    latency, and storage ceilings deliberately do not change this identity.
+    """
+
+    return _canonical_hash(
+        {
+            "candidate_index": profile.candidate_index,
+            "faiss_version": profile.faiss_version,
+            "embedding_dimension": profile.embedding_dimension,
+            "metric": profile.metric,
+            "ivf_nlist": profile.ivf_nlist,
+            "pq_subvectors": profile.pq_subvectors,
+            "pq_bits": profile.pq_bits,
+            "training_seed": profile.training_seed,
+        }
+    )
+
+
 def _canonical_hash(value: object) -> str:
     canonical = json.dumps(
         value,

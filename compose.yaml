@@ -87,6 +87,7 @@ services:
         condition: service_healthy
     environment:
       REDACTED_ENVIRONMENT: development
+      REDACTED_RUNTIME_ROLE: worker
       REDACTED_DATABASE_URL: postgresql://redacted:redacted-local@postgres:5432/redacted
       REDACTED_REDIS_URL: redis://redis:6379/0
       REDACTED_CORPUS_MANIFEST_PATH: /artifacts/corpus/manifest.json

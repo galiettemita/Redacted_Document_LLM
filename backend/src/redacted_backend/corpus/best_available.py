@@ -41,6 +41,17 @@ _LIMITATIONS_SHA256 = (
 )
 _CORPUS_LABEL = "historylab-unlabeled"
 BEST_AVAILABLE_BM25_INDEX_NAME = "foiarchive-best-available-bm25-v1"
+BEST_AVAILABLE_DOCUMENT_COUNT = 4_300_534
+BEST_AVAILABLE_CHUNK_COUNT = 14_549_269
+BEST_AVAILABLE_CORPUS_MANIFEST_HASH = (
+    "c13b302363f3a512fc5f20ecad1c05e629a5005cd39a886de1070c42ece165f4"
+)
+BEST_AVAILABLE_CHUNKS_SHA256 = (
+    "c28eb98cb5e9aa4a6171dc74e83d5f1ab890435cdbb4b625f7c1153e050d611c"
+)
+BEST_AVAILABLE_RECALL_QUERIES_SHA256 = (
+    "4660d92066b8dad48417f3bc2eac7b0e58222e69930eedc4467bcb2eb9b34ec4"
+)
 _EXPECTED_REASONS = (
     "catalog_collection_count_mismatch:briefing",
     "catalog_collection_count_mismatch:cabinet",
@@ -65,6 +76,35 @@ class BestAvailableSourceContractError(ValueError):
 
 class BestAvailableImportError(ValueError):
     pass
+
+
+class BestAvailableRetrievalContract(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    corpus_manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    chunks_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    parsed_row_count: int = Field(ge=1)
+    document_count: int = Field(ge=1)
+    chunk_count: int = Field(ge=1)
+    application_queries_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    recall_queries_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    recall_query_count: int = Field(ge=1)
+    latency_runtime_environment: str = Field(min_length=1)
+
+
+PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT = BestAvailableRetrievalContract(
+    corpus_manifest_hash=BEST_AVAILABLE_CORPUS_MANIFEST_HASH,
+    chunks_sha256=BEST_AVAILABLE_CHUNKS_SHA256,
+    parsed_row_count=4_889_089,
+    document_count=BEST_AVAILABLE_DOCUMENT_COUNT,
+    chunk_count=BEST_AVAILABLE_CHUNK_COUNT,
+    application_queries_sha256=(
+        "b7d2db69e4775e59d1688d69055331af7d6795e76fdddec9487737298b55964b"
+    ),
+    recall_queries_sha256=BEST_AVAILABLE_RECALL_QUERIES_SHA256,
+    recall_query_count=100,
+    latency_runtime_environment="serving-worker-container",
+)
 
 
 class BestAvailableSourceProfile(BaseModel):

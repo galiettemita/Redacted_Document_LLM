@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import heapq
+import math
 import os
 import platform
 import tempfile
@@ -27,11 +28,15 @@ from redacted_backend.retrieval.dense_profile import (
     DenseArtifactProfile,
     dense_semantics_hash,
 )
-from redacted_backend.retrieval.faiss_ivfpq import FaissIvfPqIndex
+from redacted_backend.retrieval.faiss_ivfpq import (
+    FaissIvfPqIndex,
+    inspect_ivfpq_artifact,
+)
 from redacted_backend.retrieval.types import (
     CompressedDenseShardManifest,
     CompressedShardedDenseIndexManifest,
     DenseLatencyReport,
+    DenseRecallReport,
     DenseShardManifest,
     RankedChunk,
     ShardedDenseIndexManifest,
@@ -117,6 +122,10 @@ class ShardedDenseIndex:
             self._embeddings.clear()
             self._candidates.clear()
             raise
+
+    @property
+    def available_count(self) -> int:
+        return self.manifest.chunk_count
 
     def search(
         self,
@@ -256,28 +265,13 @@ class ShardedDenseIndex:
     ) -> list[tuple[float, CorpusChunk]]:
         if not scored:
             return []
-        ordered = sorted(scored, key=lambda value: (-value[0], value[1]))
-        selected = ordered[:limit]
-        cached: dict[int, CorpusChunk] = {}
-        if len(ordered) > limit:
-            cutoff = selected[-1][0]
-            above = [value for value in ordered if value[0] > cutoff]
-            tied = [value for value in ordered if value[0] == cutoff]
-            remaining = limit - len(above)
-            if len(tied) > remaining:
-                assert self._chunks is not None
-                for _score, row in tied:
-                    cached[row] = self._chunks.read(row)
-                tied = sorted(tied, key=lambda value: cached[value[1]].id)
-            selected = above + tied[:remaining]
+        selected = sorted(scored, key=lambda value: (-value[0], value[1]))[:limit]
         assert self._chunks is not None
         materialized: list[tuple[float, CorpusChunk]] = []
         for score, row in selected:
-            chunk = cached.get(row)
-            if chunk is None:
-                chunk = self._chunks.read(row)
+            chunk = self._chunks.read(row)
             materialized.append((score, chunk))
-        return sorted(materialized, key=lambda value: (-value[0], value[1].id))
+        return materialized
 
     def close(self) -> None:
         if self._closed:
@@ -317,8 +311,10 @@ def certify_dense_latency(
     clock: Callable[[], float] = time.monotonic,
     platform_name: Callable[[], str] = platform.platform,
     machine_name: Callable[[], str] = platform.machine,
+    runtime_environment: Callable[[], str] | None = None,
 ) -> DenseLatencyReport:
     manifest = runtime.manifest
+    output_path.unlink(missing_ok=True)
     if len(queries) != manifest.recall_query_count or any(
         not query.strip() for query in queries
     ):
@@ -334,8 +330,10 @@ def certify_dense_latency(
         started = clock()
         runtime.search(query)
         elapsed = clock() - started
-        if elapsed <= 0:
-            raise DenseLatencyError("Dense latency clock returned a nonpositive duration")
+        if not math.isfinite(elapsed) or elapsed <= 0:
+            raise DenseLatencyError(
+                "Dense latency clock returned a nonfinite or nonpositive duration"
+            )
         if elapsed > maximum:
             raise DenseLatencyError(
                 f"Dense warm search took {elapsed:.2f}s; maximum is {maximum:.1f}s"
@@ -350,6 +348,7 @@ def certify_dense_latency(
         maximum_allowed_seconds=maximum,
         platform=platform_name(),
         machine=machine_name(),
+        runtime_environment=(runtime_environment or _runtime_environment)(),
     )
     report.require_compatible(manifest)
     _write_bytes_atomic(
@@ -572,6 +571,7 @@ def verify_compressed_dense_artifacts(
     manifest: CompressedShardedDenseIndexManifest,
 ) -> None:
     _verify_compressed_artifacts(root, manifest)
+    _verify_compressed_scientific_artifacts(root, manifest)
     with ChunkOffsetIndex.open(
         chunks_path,
         root / manifest.chunk_offsets_path,
@@ -603,7 +603,7 @@ def verify_compressed_dense_artifacts_cached(
         stat = path.stat()
         signatures.append((name, stat.st_size, stat.st_mtime_ns))
     for shard in manifest.shards:
-        for name in ("embeddings.f16", "candidate.faiss"):
+        for name in ("manifest.json", "embeddings.f16", "candidate.faiss"):
             path = root / shard.path / name
             stat = path.stat()
             signatures.append((f"{shard.path}/{name}", stat.st_size, stat.st_mtime_ns))
@@ -624,6 +624,48 @@ def _verify_compressed_dense_artifacts_cached(
 ) -> None:
     manifest = CompressedShardedDenseIndexManifest.model_validate_json(manifest_json)
     verify_compressed_dense_artifacts(Path(root), Path(chunks_path), manifest)
+
+
+def _verify_compressed_scientific_artifacts(
+    root: Path,
+    manifest: CompressedShardedDenseIndexManifest,
+) -> None:
+    recall = DenseRecallReport.model_validate_json(
+        (root / manifest.recall_report_path).read_text(encoding="utf-8")
+    )
+    recall.require_compatible(
+        manifest,
+        minimum=ScientificConfig().dense_recall_minimum,
+    )
+    inspect_ivfpq_artifact(
+        root / manifest.candidate_template_path,
+        expected_kind="template",
+        profile=manifest.artifact_profile,
+        expected_ntotal=0,
+    )
+    for shard in manifest.shards:
+        shard_path = root / shard.path / "manifest.json"
+        on_disk = CompressedDenseShardManifest.model_validate_json(
+            shard_path.read_text(encoding="utf-8")
+        )
+        if on_disk != shard:
+            raise IncompatibleDenseIndexError(
+                "Compressed dense shard manifest does not match the top-level manifest"
+            )
+        inspect_ivfpq_artifact(
+            root / shard.path / "candidate.faiss",
+            expected_kind="candidate",
+            profile=manifest.artifact_profile,
+            expected_ntotal=shard.chunk_count,
+        )
+
+
+def _runtime_environment() -> str:
+    if Path("/.dockerenv").is_file() and os.environ.get(
+        "REDACTED_RUNTIME_ROLE"
+    ) == "worker":
+        return "serving-worker-container"
+    return "unverified"
 
 
 def _matrix_scores(

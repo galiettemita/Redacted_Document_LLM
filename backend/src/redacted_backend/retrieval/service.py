@@ -82,6 +82,19 @@ class RealisticRetrievalService:
                 query_kind="own",
             ),
         )
+        expected_dense_count = min(
+            limit,
+            int(getattr(self.dense, "available_count", limit)),
+        )
+        for name, ranked in (
+            ("context_dense", lists.context_dense),
+            ("own_dense", lists.own_dense),
+        ):
+            if len(ranked) != expected_dense_count:
+                raise RetrievalError(
+                    "incomplete_dense_retrieval",
+                    f"{name} returned {len(ranked)} of {expected_dense_count} required results",
+                )
         try:
             decision = self.self_matcher.match(
                 UploadIdentity(

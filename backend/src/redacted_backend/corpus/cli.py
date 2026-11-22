@@ -16,6 +16,7 @@ from redacted_backend.corpus.bulk_export import (
     audit_historylab_bulk_export,
 )
 from redacted_backend.corpus.best_available import (
+    PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT,
     BestAvailableCorpusManifest,
     build_best_available_chunks,
     load_best_available_source,
@@ -224,6 +225,7 @@ def run(argv: Sequence[str] | None = None) -> int:
             Path(args.output_directory),
             sample_rows=100_000,
             batch_size=args.batch_size,
+            contract=PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT,
         )
         print(json.dumps(report.model_dump(mode="json"), sort_keys=True, indent=2))
         return 0
@@ -238,6 +240,7 @@ def run(argv: Sequence[str] | None = None) -> int:
             batch_size=args.batch_size,
             shard_size=args.shard_size,
             recall_block_rows=args.recall_block_rows,
+            contract=PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT,
         )
         print(json.dumps(report.model_dump(mode="json"), sort_keys=True, indent=2))
         return 0
@@ -468,8 +471,17 @@ def verify_best_available_dense(
         dense_manifest_path.read_text(encoding="utf-8")
     )
     supported_profile = DenseArtifactProfile()
+    contract = PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT
     if corpus.scientific_hash != scientific.manifest_hash():
         raise ValueError("Best-available corpus scientific manifest mismatch")
+    if (
+        corpus.manifest_hash() != contract.corpus_manifest_hash
+        or corpus.chunks_sha256 != contract.chunks_sha256
+        or corpus.parsed_row_count != contract.parsed_row_count
+        or corpus.document_count != contract.document_count
+        or corpus.chunk_count != contract.chunk_count
+    ):
+        raise ValueError("Best-available production corpus identity mismatch")
     if (
         dense.model_name != scientific.embedding_model
         or dense.model_revision != scientific.embedding_model_revision
@@ -488,8 +500,11 @@ def verify_best_available_dense(
         or dense.artifact_profile_hash != supported_profile.manifest_hash()
     ):
         raise ValueError("Unsupported compressed dense artifact profile")
-    if dense.recall_query_count != 100:
-        raise ValueError("Compressed dense recall query count mismatch")
+    if (
+        dense.recall_query_count != contract.recall_query_count
+        or dense.recall_queries_sha256 != contract.recall_queries_sha256
+    ):
+        raise ValueError("Compressed dense recall query identity mismatch")
     if dense.recall_at_300 < scientific.dense_recall_minimum:
         raise ValueError("Compressed dense recall is below the publication gate")
 
@@ -504,6 +519,8 @@ def verify_best_available_dense(
         latency_report_path.read_text(encoding="utf-8")
     )
     latency.require_compatible(dense)
+    if latency.runtime_environment != contract.latency_runtime_environment:
+        raise ValueError("Compressed dense latency runtime environment mismatch")
     verify_compressed_dense_artifacts(dense_root, chunks_path, dense)
     return DenseVerificationReport(
         dense_manifest_hash=dense.manifest_hash(),

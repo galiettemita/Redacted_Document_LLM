@@ -17,7 +17,10 @@ from redacted_backend.jobs.runtime_provider import (
     AnalysisRuntimeProvider,
     RuntimeInitializationError,
 )
-from tests.test_readiness import _compatible_best_available_settings
+from tests.test_readiness import (
+    _best_available_test_contract,
+    _compatible_best_available_settings,
+)
 
 
 def _runtime() -> AnalysisOrchestrator:
@@ -184,7 +187,7 @@ def test_best_available_runtime_loads_only_its_separate_verified_artifacts(
     tmp_path,
     monkeypatch,
 ) -> None:
-    settings, _corpus, bm25_manifest, dense_manifest = (
+    settings, corpus, bm25_manifest, dense_manifest = (
         _compatible_best_available_settings(tmp_path)
     )
     settings = settings.model_copy(
@@ -238,6 +241,10 @@ def test_best_available_runtime_loads_only_its_separate_verified_artifacts(
         settings,
         PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
         database=database,
+        best_available_contract=_best_available_test_contract(
+            corpus,
+            dense_manifest,
+        ),
     )
 
     assert runtime.retrieval is not None

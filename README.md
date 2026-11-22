@@ -171,6 +171,8 @@ uv run corpus benchmark-best-available-dense \
   --output-directory ../var/corpus/best-available/dense-benchmark
 ```
 
+The benchmark reports setup, encoding, IVF-PQ training, candidate insertion, and recall-certification probe time separately. Its projection scales row-dependent work by corpus rows and fixed candidate overhead by the expected shard count; use `projected_gpu_hours`, `peak_gpu_memory_bytes`, and the live pod rate for the capped approval.
+
 After the benchmark-derived full-build maximum is separately approved, build the resumable compressed index. Each shard contains at most 1,000,000 consecutive chunks and publishes atomically. Certification combines the 50 frozen public application-shaped queries with 50 stable-hash title/opening-text queries from the verified corpus, scans the stored float16 embeddings exactly in bounded blocks, and refuses to publish the top manifest below `recall@300 = 0.98` or above the 28 GiB artifact ceiling:
 
 ```bash
@@ -183,23 +185,32 @@ uv run corpus build-best-available-dense \
   --output-manifest ../var/corpus/best-available/dense/manifest.json
 ```
 
-After transferring the published artifacts to the Mac, certify the frozen five-second warm-search ceiling and verify every local artifact without a provider call:
+After the runbook transfers and verifies each shard, certify the frozen five-second warm-search ceiling in the same worker image that serves predictions. This writes only the latency report and makes no provider call:
 
 ```bash
-uv run corpus certify-best-available-dense-latency \
-  --chunks ../var/corpus/best-available/chunks.jsonl \
-  --dense-directory ../var/corpus/best-available/dense \
-  --dense-manifest ../var/corpus/best-available/dense/manifest.json \
-  --certification-queries ../var/corpus/best-available/dense/recall-queries.txt \
-  --output ../var/corpus/best-available/dense/latency-report.json
+cd /absolute/path/to/Redacted_Document_LLM
+PROJECT_ROOT=$PWD
+docker compose build worker
+docker compose run --rm --no-deps \
+  -e REDACTED_RUNTIME_ROLE=worker \
+  -v "$PROJECT_ROOT/var/corpus:/artifacts/corpus:rw" \
+  worker corpus certify-best-available-dense-latency \
+  --chunks /artifacts/corpus/best-available/chunks.jsonl \
+  --dense-directory /artifacts/corpus/best-available/dense \
+  --dense-manifest /artifacts/corpus/best-available/dense/manifest.json \
+  --certification-queries /artifacts/corpus/best-available/dense/recall-queries.txt \
+  --output /artifacts/corpus/best-available/dense/latency-report.json
 
-uv run corpus verify-best-available-dense \
-  --chunks ../var/corpus/best-available/chunks.jsonl \
-  --corpus-manifest ../var/corpus/best-available/corpus-manifest.json \
-  --dense-directory ../var/corpus/best-available/dense \
-  --dense-manifest ../var/corpus/best-available/dense/manifest.json \
-  --certification-queries ../var/corpus/best-available/dense/recall-queries.txt \
-  --latency-report ../var/corpus/best-available/dense/latency-report.json
+docker compose run --rm --no-deps \
+  -e REDACTED_RUNTIME_ROLE=worker \
+  -v "$PROJECT_ROOT/var/corpus:/artifacts/corpus:rw" \
+  worker corpus verify-best-available-dense \
+  --chunks /artifacts/corpus/best-available/chunks.jsonl \
+  --corpus-manifest /artifacts/corpus/best-available/corpus-manifest.json \
+  --dense-directory /artifacts/corpus/best-available/dense \
+  --dense-manifest /artifacts/corpus/best-available/dense/manifest.json \
+  --certification-queries /artifacts/corpus/best-available/dense/recall-queries.txt \
+  --latency-report /artifacts/corpus/best-available/dense/latency-report.json
 ```
 
 With all provider approvals still false, restart the API and worker and check `/v1/readiness`. The expected safe state is `best_available_foiarchive_v1.operational=true`, `approved=false`, and `ready=false`. Do not enable best-available generation from the artifact build alone. First count the exact own-query request and the resulting evidence-bound prediction request, show their expected and maximum combined cost, and obtain a new explicit approval for that two-stage call. Only then set the master and best-available flags; keep the other basis flags false unless separately approved:

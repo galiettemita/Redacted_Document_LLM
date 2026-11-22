@@ -2,7 +2,9 @@ from pydantic import BaseModel, ConfigDict
 
 from redacted_backend.corpus.best_available import (
     BEST_AVAILABLE_BM25_INDEX_NAME,
+    PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT,
     BestAvailableCorpusManifest,
+    BestAvailableRetrievalContract,
 )
 from redacted_backend.corpus.manifest import CorpusManifest
 from redacted_backend.domain.analysis import PredictionBasis
@@ -144,6 +146,10 @@ def verify_best_available_corpus_readiness(
     index: Bm25IndexManifest,
     dense: CompressedShardedDenseIndexManifest,
     scientific: ScientificConfig,
+    *,
+    contract: BestAvailableRetrievalContract = (
+        PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT
+    ),
 ) -> ComponentReadiness:
     scientific_hash = scientific.manifest_hash()
     corpus_hash = corpus.manifest_hash()
@@ -161,6 +167,17 @@ def verify_best_available_corpus_readiness(
         return ComponentReadiness(
             ready=False,
             detail="best-available corpus scientific manifest mismatch",
+        )
+    if (
+        corpus.manifest_hash() != contract.corpus_manifest_hash
+        or corpus.chunks_sha256 != contract.chunks_sha256
+        or corpus.parsed_row_count != contract.parsed_row_count
+        or corpus.document_count != contract.document_count
+        or corpus.chunk_count != contract.chunk_count
+    ):
+        return ComponentReadiness(
+            ready=False,
+            detail="best-available production corpus identity mismatch",
         )
     if (
         index.retrieval_profile != "best_available_foiarchive_v1"
@@ -272,10 +289,13 @@ def verify_best_available_corpus_readiness(
         expected_start = shard.end_row
     if expected_start != dense.chunk_count:
         return ComponentReadiness(ready=False, detail="dense shard range mismatch")
-    if dense.recall_query_count != 100:
+    if (
+        dense.recall_query_count != contract.recall_query_count
+        or dense.recall_queries_sha256 != contract.recall_queries_sha256
+    ):
         return ComponentReadiness(
             ready=False,
-            detail="dense recall query count mismatch",
+            detail="dense recall query identity mismatch",
         )
     if dense.recall_at_300 < scientific.dense_recall_minimum:
         return ComponentReadiness(

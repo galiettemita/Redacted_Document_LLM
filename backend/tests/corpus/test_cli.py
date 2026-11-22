@@ -483,6 +483,7 @@ def test_build_best_available_dense_cli_reports_verified_sharded_manifest(
         "batch_size": 32,
         "shard_size": 1_000_000,
         "recall_block_rows": 8_192,
+        "contract": cli.PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT,
     }
 
 
@@ -495,12 +496,22 @@ def test_benchmark_best_available_dense_cli_uses_exact_paths_and_100k_rows(
         sample_rows=100_000,
         production_chunk_count=14_549_269,
         elapsed_seconds=10.0,
+        setup_seconds=1.0,
+        encoding_seconds=5.0,
+        training_seconds=1.0,
+        candidate_add_seconds=1.0,
+        certification_probe_seconds=2.0,
+        certification_probe_queries=10,
         rows_per_second=10_000.0,
         peak_rss_bytes=123,
+        peak_gpu_memory_bytes=456,
         embedding_bytes_per_row=1536.0,
         candidate_bytes_per_row=100.0,
+        candidate_fixed_bytes_per_shard=1024,
+        projected_shard_count=15,
         offset_bytes_per_row=8.0,
         projected_full_artifact_bytes=24 * 1024**3,
+        projected_full_seconds=1800.0,
         projected_gpu_hours=0.5,
     )
     captured: dict[str, object] = {}
@@ -540,7 +551,11 @@ def test_benchmark_best_available_dense_cli_uses_exact_paths_and_100k_rows(
     ) == report
     assert captured == {
         "args": (chunks, corpus_manifest, output),
-        "kwargs": {"sample_rows": 100_000, "batch_size": 32},
+        "kwargs": {
+            "sample_rows": 100_000,
+            "batch_size": 32,
+            "contract": cli.PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT,
+        },
     }
 
 
@@ -563,6 +578,7 @@ def test_certify_best_available_dense_latency_cli_uses_frozen_profile_limit(
         maximum_allowed_seconds=5.0,
         platform="test",
         machine="test",
+        runtime_environment="serving-worker-container",
     )
     captured: dict[str, object] = {}
 

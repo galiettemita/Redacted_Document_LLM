@@ -189,7 +189,7 @@ When the command exits successfully:
 1. Copy `dense-benchmark-report.json` to the Mac using the SSH host and port from **Connect**.
 2. Open **Pods**, expand the Pod, click **Stop** (square icon), and confirm. Do not leave the GPU running while reviewing results.
 3. Validate the JSON as `DenseBuildBenchmarkReport`.
-4. Record `elapsed_seconds`, `rows_per_second`, `peak_rss_bytes`, `projected_full_artifact_bytes`, and `projected_gpu_hours`.
+4. Record the separate `setup_seconds`, `encoding_seconds`, `training_seconds`, `candidate_add_seconds`, and `certification_probe_seconds` measurements, plus `rows_per_second`, `peak_rss_bytes`, `peak_gpu_memory_bytes`, `projected_shard_count`, `projected_full_artifact_bytes`, and `projected_gpu_hours`. The projection scales row work by corpus rows, fixed candidate overhead by shard count, and certification by both rows and the frozen 100-query count.
 5. Reject the plan if projected artifacts exceed 28 GiB.
 
 Calculate the separate full-build proposal from the measured report and the live RunPod rate:
@@ -223,33 +223,78 @@ The top-level manifest is published only after the checksum, storage, and recall
 
 ## Phase 7: Transfer, local latency certification, and verification
 
-Keep the Pod running only for the transfer. From Mac Terminal, use the SSH host and port shown by RunPod. Replace the placeholders without changing the local destination:
+Keep the Pod running only for the transfer. From Mac Terminal, use the SSH host and port shown by RunPod. Replace the placeholders, then download the manifest as an uninstalled transfer plan. The script refuses to start without enough real free space, resumes partial files, verifies every shard immediately, and installs `manifest.json` only after all bytes pass:
 
 ```bash
-rsync -avP --partial \
-  -e "ssh -p RUNPOD_SSH_PORT -i ~/.ssh/id_ed25519" \
-  root@RUNPOD_SSH_HOST:/workspace/redacted-build/best-available/dense/ \
-  /absolute/path/to/Redacted_Document_LLM/var/corpus/best-available/dense/
+PROJECT_ROOT=/absolute/path/to/Redacted_Document_LLM
+DENSE_DIR="$PROJECT_ROOT/var/corpus/best-available/dense"
+REMOTE=root@RUNPOD_SSH_HOST
+SSH_COMMAND="ssh -p RUNPOD_SSH_PORT -i $HOME/.ssh/id_ed25519"
+REMOTE_DENSE=/workspace/redacted-build/best-available/dense
+mkdir -p "$DENSE_DIR"
+
+$SSH_COMMAND "$REMOTE" "cat $REMOTE_DENSE/manifest.json" > "$DENSE_DIR/.incoming-manifest.json"
+required_bytes=$(jq -r '.total_artifact_bytes + 2147483648' "$DENSE_DIR/.incoming-manifest.json")
+available_bytes=$(df -Pk "$DENSE_DIR" | awk 'NR==2 {printf "%.0f\n", $4 * 1024}')
+if [ "$available_bytes" -lt "$required_bytes" ]; then
+  echo "STOP: need $required_bytes free bytes; only $available_bytes are available"
+  exit 1
+fi
+
+transfer_file() {
+  relative_path=$1
+  expected_sha256=$2
+  mkdir -p "$(dirname "$DENSE_DIR/$relative_path")"
+  rsync -avP --partial -e "$SSH_COMMAND" \
+    "$REMOTE:$REMOTE_DENSE/$relative_path" "$DENSE_DIR/$relative_path"
+  printf '%s  %s\n' "$expected_sha256" "$DENSE_DIR/$relative_path" | shasum -a 256 -c -
+}
+
+transfer_file chunks.offsets.u64 "$(jq -r '.chunk_offsets_sha256' "$DENSE_DIR/.incoming-manifest.json")"
+transfer_file candidate-template.faiss "$(jq -r '.candidate_template_sha256' "$DENSE_DIR/.incoming-manifest.json")"
+transfer_file recall-report.json "$(jq -r '.recall_report_sha256' "$DENSE_DIR/.incoming-manifest.json")"
+transfer_file recall-queries.txt "$(jq -r '.recall_queries_sha256' "$DENSE_DIR/.incoming-manifest.json")"
+
+jq -c '.shards[]' "$DENSE_DIR/.incoming-manifest.json" | while IFS= read -r shard; do
+  shard_path=$(printf '%s' "$shard" | jq -r '.path')
+  transfer_file "$shard_path/embeddings.f16" "$(printf '%s' "$shard" | jq -r '.embeddings_sha256')"
+  transfer_file "$shard_path/candidate.faiss" "$(printf '%s' "$shard" | jq -r '.candidate_index_sha256')"
+  rsync -avP --partial -e "$SSH_COMMAND" \
+    "$REMOTE:$REMOTE_DENSE/$shard_path/manifest.json" "$DENSE_DIR/$shard_path/manifest.json"
+  printf '%s' "$shard" | jq -S . > "$DENSE_DIR/.expected-shard.json"
+  jq -S . "$DENSE_DIR/$shard_path/manifest.json" > "$DENSE_DIR/.actual-shard.json"
+  cmp "$DENSE_DIR/.expected-shard.json" "$DENSE_DIR/.actual-shard.json"
+done
+
+rm -f "$DENSE_DIR/.expected-shard.json" "$DENSE_DIR/.actual-shard.json"
+mv "$DENSE_DIR/.incoming-manifest.json" "$DENSE_DIR/manifest.json"
 ```
 
-On the Mac, certify all 100 warm searches. The command has no option that can raise the frozen five-second limit:
+On the Mac, certify all 100 warm searches inside the same worker image that serves predictions. The command has no option that can raise the frozen five-second limit. It mounts the artifact directory read-write only for the certification report; ordinary API and worker services continue mounting it read-only:
 
 ```bash
-cd /absolute/path/to/Redacted_Document_LLM/backend
-uv run corpus certify-best-available-dense-latency \
-  --chunks ../var/corpus/best-available/chunks.jsonl \
-  --dense-directory ../var/corpus/best-available/dense \
-  --dense-manifest ../var/corpus/best-available/dense/manifest.json \
-  --certification-queries ../var/corpus/best-available/dense/recall-queries.txt \
-  --output ../var/corpus/best-available/dense/latency-report.json
+cd "$PROJECT_ROOT"
+docker compose build worker
+docker compose run --rm --no-deps \
+  -e REDACTED_RUNTIME_ROLE=worker \
+  -v "$PROJECT_ROOT/var/corpus:/artifacts/corpus:rw" \
+  worker corpus certify-best-available-dense-latency \
+  --chunks /artifacts/corpus/best-available/chunks.jsonl \
+  --dense-directory /artifacts/corpus/best-available/dense \
+  --dense-manifest /artifacts/corpus/best-available/dense/manifest.json \
+  --certification-queries /artifacts/corpus/best-available/dense/recall-queries.txt \
+  --output /artifacts/corpus/best-available/dense/latency-report.json
 
-uv run corpus verify-best-available-dense \
-  --chunks ../var/corpus/best-available/chunks.jsonl \
-  --corpus-manifest ../var/corpus/best-available/corpus-manifest.json \
-  --dense-directory ../var/corpus/best-available/dense \
-  --dense-manifest ../var/corpus/best-available/dense/manifest.json \
-  --certification-queries ../var/corpus/best-available/dense/recall-queries.txt \
-  --latency-report ../var/corpus/best-available/dense/latency-report.json
+docker compose run --rm --no-deps \
+  -e REDACTED_RUNTIME_ROLE=worker \
+  -v "$PROJECT_ROOT/var/corpus:/artifacts/corpus:rw" \
+  worker corpus verify-best-available-dense \
+  --chunks /artifacts/corpus/best-available/chunks.jsonl \
+  --corpus-manifest /artifacts/corpus/best-available/corpus-manifest.json \
+  --dense-directory /artifacts/corpus/best-available/dense \
+  --dense-manifest /artifacts/corpus/best-available/dense/manifest.json \
+  --certification-queries /artifacts/corpus/best-available/dense/recall-queries.txt \
+  --latency-report /artifacts/corpus/best-available/dense/latency-report.json
 ```
 
 Verification must print `"verified": true`. It performs no model/provider call.

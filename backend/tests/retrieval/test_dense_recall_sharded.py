@@ -16,10 +16,12 @@ from redacted_backend.retrieval.dense_profile import (
     dense_semantics_hash,
 )
 from redacted_backend.retrieval.dense_sharded import (
+    _best_scored_rows,
     _matrix_scores,
     certify_sharded_dense_recall,
     select_certification_queries,
 )
+from redacted_backend.corpus.build_dense_sharded import _best_scores
 from redacted_backend.retrieval.types import (
     CompressedDenseShardManifest,
     CompressedShardedDenseIndexManifest,
@@ -45,6 +47,13 @@ class Candidate:
     ) -> NDArray[np.int64]:
         del query
         return np.asarray(self.rows[:candidates], dtype=np.int64)
+
+
+def test_builder_certifier_and_runtime_use_global_row_tie_breaking() -> None:
+    tied = [(0.75, 9), (0.75, 2), (0.75, 5)]
+
+    assert _best_scores(tied, 2) == [(0.75, 2), (0.75, 5)]
+    assert _best_scored_rows(tied, 2) == [(0.75, 2), (0.75, 5)]
 
 
 def _chunk(index: int) -> CorpusChunk:

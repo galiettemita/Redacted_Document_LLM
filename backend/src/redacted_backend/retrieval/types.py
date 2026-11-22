@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from pathlib import PurePosixPath
 from typing import Literal
 
@@ -307,13 +308,21 @@ class DenseLatencyReport(BaseModel):
     maximum_allowed_seconds: float = Field(gt=0)
     platform: str = Field(min_length=1)
     machine: str = Field(min_length=1)
+    runtime_environment: str = Field(min_length=1)
 
     @model_validator(mode="after")
     def validate_timings(self) -> DenseLatencyReport:
         if len(self.warm_search_seconds) != self.query_count:
             raise ValueError("Dense latency query count does not match timings")
-        if any(value <= 0 for value in self.warm_search_seconds):
-            raise ValueError("Dense latency timings must be positive")
+        if any(
+            not math.isfinite(value) or value <= 0
+            for value in self.warm_search_seconds
+        ):
+            raise ValueError("Dense latency timings must be finite and positive")
+        if not math.isfinite(self.max_observed_seconds):
+            raise ValueError("Dense latency maximum must be finite")
+        if not math.isfinite(self.maximum_allowed_seconds):
+            raise ValueError("Dense latency allowance must be finite")
         if max(self.warm_search_seconds) != self.max_observed_seconds:
             raise ValueError("Dense latency maximum does not match timings")
         if self.max_observed_seconds > self.maximum_allowed_seconds:
@@ -338,6 +347,61 @@ class DenseLatencyReport(BaseModel):
             raise ValueError("Dense latency profile maximum mismatch")
         return self
 
+
+class DenseRecallReport(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal["dense-recall-build-report-v1"] = (
+        "dense-recall-build-report-v1"
+    )
+    artifact_profile_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    corpus_manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    recall_queries_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    recall_query_count: int = Field(ge=1)
+    recall_at_300: float = Field(ge=0, le=1)
+    per_query_recall: list[float] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_measurements(self) -> DenseRecallReport:
+        if len(self.per_query_recall) != self.recall_query_count:
+            raise ValueError("Dense recall query count does not match measurements")
+        if any(
+            not math.isfinite(value) or value < 0 or value > 1
+            for value in self.per_query_recall
+        ):
+            raise ValueError("Dense recall measurements must be finite probabilities")
+        if not math.isfinite(self.recall_at_300):
+            raise ValueError("Dense recall mean must be finite")
+        measured = math.fsum(self.per_query_recall) / len(self.per_query_recall)
+        if not math.isclose(measured, self.recall_at_300, rel_tol=0, abs_tol=1e-12):
+            raise ValueError("Dense recall mean does not match measurements")
+        return self
+
+    def require_compatible(
+        self,
+        manifest: CompressedShardedDenseIndexManifest,
+        *,
+        minimum: float,
+    ) -> DenseRecallReport:
+        if self.artifact_profile_hash != manifest.artifact_profile_hash:
+            raise ValueError("Dense recall artifact profile mismatch")
+        if self.corpus_manifest_hash != manifest.corpus_manifest_hash:
+            raise ValueError("Dense recall corpus identity mismatch")
+        if (
+            self.recall_queries_sha256 != manifest.recall_queries_sha256
+            or self.recall_query_count != manifest.recall_query_count
+        ):
+            raise ValueError("Dense recall query identity mismatch")
+        if not math.isclose(
+            self.recall_at_300,
+            manifest.recall_at_300,
+            rel_tol=0,
+            abs_tol=1e-12,
+        ):
+            raise ValueError("Dense recall manifest mean mismatch")
+        if self.recall_at_300 < minimum:
+            raise ValueError("Dense recall is below the required minimum")
+        return self
 
 def _require_safe_relative_name(value: str, *, kind: Literal["directory", "file"]) -> None:
     path = PurePosixPath(value)
