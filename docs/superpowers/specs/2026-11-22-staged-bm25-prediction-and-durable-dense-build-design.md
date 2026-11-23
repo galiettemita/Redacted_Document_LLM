@@ -8,9 +8,7 @@ Ship one honest, real archive-assisted prediction through the ordinary uploaded-
 
 The user uploads a PDF, the existing production workspace detects and prepares its redactions, and the first visible redaction can be predicted with the existing **Predict passage** control. There is no new preview route, preview button, or simulated result.
 
-The first completed result is labeled:
-
-`Archive-assisted prediction — full-corpus BM25 search; dense retrieval still building`
+The customer-facing card uses only the existing generic prediction presentation and the provider result. It does not display a staged-basis label or mention BM25, dense retrieval, the background build, Andrew's method, implementation details, or research limitations.
 
 The result is a genuine two-stage provider workflow:
 
@@ -19,9 +17,9 @@ The result is a genuine two-stage provider workflow:
 3. The two real ranked lists are self-document filtered and fused at document level.
 4. GPT receives the fused evidence and produces the passage-linked prediction.
 
-No query, evidence, benchmark, limitation, token, or build diagnostic is shown in the ordinary prediction card. Existing provider provenance, request hashes, costs, retrieval evidence, and immutable prediction basis remain stored in the backend.
+No basis, query, evidence, benchmark, limitation, token, or build diagnostic is shown in the ordinary prediction card. Existing provider provenance, request hashes, costs, retrieval evidence, immutable prediction basis, and the honest scientific boundary remain stored in the backend and documentation.
 
-The software, no-spend loopback, and local deployment can be completed without user input. Producing the first live result additionally depends on the user uploading the intended PDF and explicitly approving the displayed maximum cost for that one two-stage job. The delivery target does not silently waive either requirement.
+The software, no-spend loopback, and local deployment can be completed without user input. Producing the first live result additionally depends on the user uploading the intended PDF and configuring the hard staged-provider spending ceiling. The delivery target does not silently waive either requirement.
 
 ## Honest scientific boundary
 
@@ -55,7 +53,11 @@ The staged basis is operational only when all of these are true:
 - the live OpenSearch index count is exactly 14,549,269;
 - the staged runtime can execute a real BM25 readiness probe.
 
-It is approved only when the existing master paid-call flag and a new staged-BM25 approval flag are both true. All paid flags stay false during implementation, tests, deployment, retrieval checks, and cost counting. Before the first real two-stage job, show the expected and maximum combined query-plus-prediction cost and obtain a new explicit approval. Approval is for one eligible passage job; it does not authorize unattended generations or additional passages.
+The user grants standing authorization for staged-BM25 provider calls and does not require per-call approval. The application cannot currently read the OpenAI account's available-credit balance, so it must enforce a separate local hard ceiling, `REDACTED_STAGED_BM25_SPEND_CAP_USD`, before unattended spending is enabled. The exact ceiling is supplied by the user and stored only in untracked runtime configuration.
+
+All paid flags stay false during implementation, tests, deployment, and retrieval checks. For a live eligible job, the backend computes the maximum query-call cost before dispatch. After the query returns and evidence is available, it computes the maximum prediction-call cost. It dispatches a call only when the maximum of that call plus durable staged spend already claimed remains within the configured ceiling. Provider attempts are claimed before dispatch, actual usage is recorded when known, and an uncertain provider outcome retains its maximum reservation. When the ceiling is missing, invalid, exhausted, or insufficient, the job fails closed before another provider request. The browser cannot raise or bypass the ceiling.
+
+The master and staged-BM25 approval flags may be enabled after the no-spend deployment checks because this written standing authorization replaces individual call approvals, but only after the hard dollar ceiling is configured. Other basis flags remain separately controlled.
 
 Readiness priority for new jobs is:
 
@@ -92,7 +94,7 @@ The estimated 12-to-14-day duration is an operational estimate, not a promise. C
 - Provider uncertainty is durably claimed and never automatically resent.
 - Passage edits, deletion, expiry, or basis mismatch cancel the job using the existing revision-bound rules.
 - Dense benchmark/build failure leaves the staged BM25 feature intact and leaves paid flags unchanged.
-- Dense completion does not automatically authorize or initiate a provider call.
+- Dense completion does not initiate a provider call or expand the staged spending ceiling.
 
 ## Approaches considered
 
@@ -117,7 +119,7 @@ Model-only prediction is already available as a separately labeled basis, but it
 - Completing the dense index by November 23.
 - Calling the staged two-list path Andrew's full method.
 - Adding JPG or PNG upload; the production upload contract remains PDF.
-- Automatically spending against the configured API key.
+- Spending without the configured hard local dollar ceiling.
 - Removing or weakening the fictional demo, full four-list basis, or exact-paper basis.
 - Showing research diagnostics in customer-facing prediction cards.
 
@@ -125,11 +127,11 @@ Model-only prediction is already available as a separately labeled basis, but it
 
 - [ ] The normal PDF upload and existing Predict control can schedule the first prepared passage on the staged basis.
 - [ ] The staged trace contains exactly two independent full-corpus BM25 lists and real fused evidence.
-- [ ] The result label names full-corpus BM25 and says dense retrieval is still building.
+- [ ] The customer prediction card contains no staged-basis or implementation label.
 - [ ] A second passage is blocked server-side before provider or retrieval work at the initial limit of one.
 - [ ] All paid flags default false and fake-provider loopbacks prove two stages without spending.
 - [ ] The fictional demo and existing bases have no regression.
 - [ ] The full backend/frontend suites, typecheck, production build, Compose validation, and migration round-trip pass.
-- [ ] One exact staged job cost is shown and separately approved before the real call.
+- [ ] A hard staged-spend ceiling is configured, enforced across durable provider claims, and cannot be bypassed by the browser.
 - [ ] The durable dense runner survives the Codex turn, has a single live PID, and publishes measurable progress without claiming completion.
 - [ ] Full dense readiness remains unapproved until recall, latency, checksum, count, and storage gates all pass.
