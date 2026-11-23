@@ -8,6 +8,7 @@ import type {
   PassageDetectionResult,
   VisibleContextSummary,
 } from '../../services/backendApi'
+import { BackendApiError } from '../../services/backendApi'
 import type { PredictionService } from '../../services/predictionService'
 import type { BackendDocumentState } from '../../hooks/useBackendDocument'
 import type { DocumentDescriptor } from '../../types'
@@ -827,6 +828,60 @@ describe('DocumentWorkspace', () => {
       'We couldn’t prepare this document for prediction. Please try again.',
     )).toBeInTheDocument()
     expect(screen.queryByText('Context query ready')).not.toBeInTheDocument()
+  })
+
+  it('shows the backend preparation reason instead of a generic error', async () => {
+    vi.useRealTimers()
+    const api = apiWithCreate(undefined, {
+      detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
+      prepareDocumentContexts: vi.fn().mockRejectedValue(new BackendApiError(
+        'No supported date was found in visible first-page header text',
+        { status: 422, code: 'visible_date_not_found' },
+      )),
+    })
+    render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={api}
+        onReplace={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByText(
+      'No supported date was found in visible first-page header text',
+    )).toBeInTheDocument()
+    expect(screen.queryByText(
+      'We couldn’t prepare this document for prediction. Please try again.',
+    )).not.toBeInTheDocument()
+  })
+
+  it('retries preparation for the already-open document', async () => {
+    vi.useRealTimers()
+    const prepareDocumentContexts = vi.fn()
+      .mockRejectedValueOnce(new BackendApiError(
+        'No supported date was found in visible first-page header text',
+        { status: 422, code: 'visible_date_not_found' },
+      ))
+      .mockResolvedValueOnce(preparedDocumentContexts)
+    const api = apiWithCreate(undefined, {
+      detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
+      prepareDocumentContexts,
+    })
+    render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={api}
+        onReplace={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Try again' }))
+
+    expect(await screen.findByRole('heading', { name: 'Ready to predict' }))
+      .toBeInTheDocument()
+    expect(prepareDocumentContexts).toHaveBeenCalledTimes(2)
   })
 
   it('does not allow a passage mutation before the backend upload is ready', () => {

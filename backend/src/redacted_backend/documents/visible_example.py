@@ -107,6 +107,7 @@ def build_visible_example(
         passage_id=target.id,
         document_id=document.id,
         document_date=document.visible_date,
+        document_date_precision=document.visible_date_precision,
         before_target=transcript.before_target,
         after_target=transcript.after_target,
         context_window=context_window,

@@ -227,7 +227,9 @@ export function DocumentWorkspace({
     } catch (error) {
       if (isAbortError(error)) return
       setContextStatus('failed')
-      setContextError(errorMessage(error, 'Visible-only contexts could not be prepared.'))
+      setContextError(error instanceof BackendApiError
+        ? error.message
+        : 'We couldn’t prepare this document for prediction. Please try again.')
     } finally {
       if (contextRequest.current === controller) contextRequest.current = null
     }
@@ -628,7 +630,8 @@ export function DocumentWorkspace({
             error={analysisError
               ?? modelStream.error
               ?? passageError
-              ?? (detectionError || contextError
+              ?? contextError
+              ?? (detectionError
                 ? 'We couldn’t prepare this document for prediction. Please try again.'
                 : null)
               ?? backendDocumentError(backendDocument)}
@@ -669,6 +672,20 @@ export function DocumentWorkspace({
                   analysisScheduleStatus,
                   passages.length,
                 )}</p>
+                {contextStatus === 'failed'
+                && document.backendDocumentId
+                && passages.length > 0 ? (
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={() => void prepareAllPassageContexts(
+                      document.backendDocumentId!,
+                      passages.map((passage) => passage.id),
+                    )}
+                  >
+                    Try again
+                  </button>
+                  ) : null}
                 {contextStatus === 'ready' && passages.length > 0 ? (
                   <button
                     className="primary-button"

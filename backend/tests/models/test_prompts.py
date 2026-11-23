@@ -69,6 +69,24 @@ def test_closed_book_prompt_matches_appendix_f_and_uses_only_visible_text() -> N
     assert prompt.sha256 == hashlib.sha256(prompt.text.encode()).hexdigest()
 
 
+def test_prompts_do_not_invent_a_day_for_month_precision() -> None:
+    example = VisibleExample.model_validate(
+        _example().model_dump()
+        | {
+            "document_date": date(2016, 10, 1),
+            "document_date_precision": "month",
+        }
+    )
+
+    query = render_query_prompt(example)
+    prediction = render_prediction_prompt(example, _retrieval())
+    model_only = prompt_module.render_model_only_prediction_prompt(example)
+
+    for prompt in (query, prediction, model_only):
+        assert "October 2016" in prompt.text
+        assert "October 1, 2016" not in prompt.text
+
+
 def _example() -> VisibleExample:
     return VisibleExample(
         passage_id=UUID("00000000-0000-0000-0000-000000000001"),

@@ -126,6 +126,9 @@
     - [x] Reject stale in-flight scans after mask changes and reconcile repeated concurrent preparation requests without a server error.
     - [x] Remove temporary manual prepare/predict controls and show automatic readiness honestly in the existing sidebar.
     - [x] Verify the real DOJ PDF produces three linked contexts in one request without a retrieval or model call.
+    - [x] Accept an unambiguous visible month/year when the day is redacted, persist a conservative first-of-month boundary with month precision, and keep model prompts honest by rendering only the visible month and year.
+    - [x] Surface safe backend preparation errors and provide an in-place retry for an already-open PDF instead of requiring another upload.
+    - [x] Verify the real 66-page FISA PDF advances all 259 detected passages to `contexts_ready` from visible `2016 OCT` evidence without creating an analysis job, provider claim, prediction event, or paid model call.
   - [x] Task 12C: Remove false-positive passages from the production review workflow.
     - [x] Require explicit confirmation before tombstoning the selected stable passage.
     - [x] Keep removed automatic detections suppressed across rescans through the existing backend correction record.

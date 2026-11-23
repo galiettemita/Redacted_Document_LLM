@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from datetime import date
+from typing import Literal
 
 from redacted_backend.domain.documents import VisibleDateEvidence
 from redacted_backend.domain.passages import PassageRect
@@ -58,6 +59,14 @@ _DAY_FIRST = re.compile(
     rf"(?P<year>\d{{4}})\.?",
     re.IGNORECASE,
 )
+_MONTH_ONLY = re.compile(
+    rf"{_DATE_PREFIX}(?P<month>{_MONTH_PATTERN})\.?\s+(?P<year>\d{{4}})\.?",
+    re.IGNORECASE,
+)
+_YEAR_MONTH_ONLY = re.compile(
+    rf"(?P<year>\d{{4}})\s+(?P<month>{_MONTH_PATTERN})\.?",
+    re.IGNORECASE,
+)
 
 
 class VisibleDateDetectionError(ValueError):
@@ -106,35 +115,47 @@ def detect_visible_document_date(
         ):
             continue
         line_text = " ".join(word.text for word in ordered)
-        for parsed_date in _parse_dates(line_text):
+        for parsed_date, precision in _parse_dates(line_text):
             matches.append(
                 VisibleDateEvidence(
                     value=parsed_date,
                     page_number=first_page.page_number,
                     line_text=line_text,
                     words=ordered,
+                    precision=precision,
+                    parser_version=(
+                        "visible-date-v2"
+                        if precision == "month"
+                        else "visible-date-v1"
+                    ),
                 )
             )
 
-    distinct_dates = {match.value for match in matches}
-    if not distinct_dates:
+    if not matches:
         raise VisibleDateDetectionError(
             "visible_date_not_found",
             "No supported date was found in visible first-page header text",
         )
-    if len(distinct_dates) > 1:
+    distinct_months = {(match.value.year, match.value.month) for match in matches}
+    distinct_days = {
+        match.value for match in matches if match.precision == "day"
+    }
+    if len(distinct_months) > 1 or len(distinct_days) > 1:
         raise VisibleDateDetectionError(
             "visible_date_ambiguous",
             "Multiple distinct dates were found in visible first-page header text",
         )
-    return matches[0]
+    return next(
+        (match for match in matches if match.precision == "day"),
+        matches[0],
+    )
 
 
-def _parse_dates(text: str) -> list[date]:
-    parsed: list[date] = []
+def _parse_dates(text: str) -> list[tuple[date, Literal["day", "month"]]]:
+    parsed: list[tuple[date, Literal["day", "month"]]] = []
     iso_match = _ISO_DATE.fullmatch(text.strip())
     if iso_match is not None:
-        _append_valid_date(
+        _append_valid_day(
             parsed,
             int(iso_match.group("year")),
             int(iso_match.group("month")),
@@ -144,22 +165,39 @@ def _parse_dates(text: str) -> list[date]:
         match = pattern.fullmatch(text.strip())
         if match is not None:
             month_name = match.group("month").lower()
-            _append_valid_date(
+            _append_valid_day(
                 parsed,
                 int(match.group("year")),
                 _MONTHS[month_name],
                 int(match.group("day")),
             )
+    for pattern in (_MONTH_ONLY, _YEAR_MONTH_ONLY):
+        match = pattern.fullmatch(text.strip())
+        if match is not None:
+            candidate = date(
+                int(match.group("year")),
+                _MONTHS[match.group("month").lower()],
+                1,
+            )
+            item: tuple[date, Literal["day", "month"]] = (candidate, "month")
+            if item not in parsed:
+                parsed.append(item)
     return parsed
 
 
-def _append_valid_date(parsed: list[date], year: int, month: int, day: int) -> None:
+def _append_valid_day(
+    parsed: list[tuple[date, Literal["day", "month"]]],
+    year: int,
+    month: int,
+    day: int,
+) -> None:
     try:
         candidate = date(year, month, day)
     except ValueError:
         return
-    if candidate not in parsed:
-        parsed.append(candidate)
+    item: tuple[date, Literal["day", "month"]] = (candidate, "day")
+    if item not in parsed:
+        parsed.append(item)
 
 
 def _intersects(first: PassageRect, second: PassageRect) -> bool:

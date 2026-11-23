@@ -80,6 +80,7 @@ class VisibleDocument(BaseModel):
 
     id: UUID
     visible_date: date | None
+    visible_date_precision: Literal["day", "month"] = "day"
     pages: list[PageWords] = Field(min_length=1)
     mask_discoveries: list[MaskDiscovery] = Field(min_length=1)
 
@@ -115,6 +116,7 @@ class VisibleExample(BaseModel):
     passage_id: UUID
     document_id: UUID
     document_date: date
+    document_date_precision: Literal["day", "month"] = "day"
     before_target: str
     after_target: str
     context_window: str

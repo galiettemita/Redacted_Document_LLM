@@ -24,7 +24,7 @@ class DateProvenance(StrEnum):
 
 
 class VisibleDateEvidence(BaseModel):
-    """The visible PDF line that deterministically established the document date."""
+    """Visible PDF text that established a date or conservative month boundary."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -32,7 +32,10 @@ class VisibleDateEvidence(BaseModel):
     page_number: int = Field(ge=1)
     line_text: str = Field(min_length=1)
     words: list[PageWord] = Field(min_length=1)
-    parser_version: Literal["visible-date-v1"] = "visible-date-v1"
+    precision: Literal["day", "month"] = "day"
+    parser_version: Literal["visible-date-v1", "visible-date-v2"] = (
+        "visible-date-v1"
+    )
 
 
 class DocumentRecord(BaseModel):

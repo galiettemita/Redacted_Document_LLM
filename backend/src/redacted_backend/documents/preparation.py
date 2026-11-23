@@ -122,6 +122,7 @@ def prepare_visible_contexts(
     visible_document = VisibleDocument(
         id=document.id,
         visible_date=date_evidence.value,
+        visible_date_precision=date_evidence.precision,
         pages=pages,
         mask_discoveries=discoveries,
     )

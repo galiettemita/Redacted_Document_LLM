@@ -45,7 +45,8 @@ export interface VisibleDateEvidence {
     source: 'embedded' | 'ocr'
     confidence: number
   }>
-  parser_version: 'visible-date-v1'
+  precision: 'day' | 'month'
+  parser_version: 'visible-date-v1' | 'visible-date-v2'
 }
 
 export interface BackendPassageRecord {

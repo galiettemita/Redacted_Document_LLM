@@ -73,4 +73,6 @@ def _render(path: Path, version: str, **values: str) -> RenderedPrompt:
 
 def _paper_date(example: VisibleExample) -> str:
     value = example.document_date
+    if example.document_date_precision == "month":
+        return value.strftime("%B %Y")
     return f"{value.strftime('%B')} {value.day}, {value.year}"

@@ -64,6 +64,59 @@ def test_accepts_date_words_extracted_by_ocr() -> None:
     assert {item.source.value for item in evidence.words} == {"ocr"}
 
 
+@pytest.mark.parametrize(
+    "tokens",
+    [
+        ["October", "2016"],
+        ["2016", "OCT"],
+    ],
+)
+def test_uses_visible_month_as_a_conservative_date_boundary(
+    tokens: list[str],
+) -> None:
+    words = [
+        word(token, x=0.08 + index * 0.12, y=0.08, block_id=1, line_id=1)
+        for index, token in enumerate(tokens)
+    ]
+
+    evidence = detect_visible_document_date([page(*words)], [discovery(1)])
+
+    assert evidence.value == date(2016, 10, 1)
+    assert evidence.precision == "month"
+    assert evidence.line_text == " ".join(tokens)
+    assert evidence.parser_version == "visible-date-v2"
+
+
+def test_prefers_a_complete_visible_date_over_an_agreeing_visible_month() -> None:
+    words = [
+        word("October", x=0.08, y=0.08, block_id=1, line_id=1),
+        word("2016", x=0.20, y=0.08, block_id=1, line_id=1),
+        word("October", x=0.08, y=0.14, block_id=2, line_id=1),
+        word("21,", x=0.20, y=0.14, block_id=2, line_id=1),
+        word("2016", x=0.28, y=0.14, block_id=2, line_id=1),
+    ]
+
+    evidence = detect_visible_document_date([page(*words)], [discovery(1)])
+
+    assert evidence.value == date(2016, 10, 21)
+    assert evidence.precision == "day"
+    assert evidence.line_text == "October 21, 2016"
+
+
+def test_rejects_conflicting_visible_months() -> None:
+    words = [
+        word("October", x=0.08, y=0.08, block_id=1, line_id=1),
+        word("2016", x=0.20, y=0.08, block_id=1, line_id=1),
+        word("November", x=0.08, y=0.14, block_id=2, line_id=1),
+        word("2016", x=0.20, y=0.14, block_id=2, line_id=1),
+    ]
+
+    with pytest.raises(VisibleDateDetectionError) as error:
+        detect_visible_document_date([page(*words)], [discovery(1)])
+
+    assert error.value.code == "visible_date_ambiguous"
+
+
 def test_rejects_low_confidence_ocr_date_words() -> None:
     words = [
         PageWord.model_validate(
