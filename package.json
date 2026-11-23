@@ -4,9 +4,14 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "prepare:pdfjs": "node scripts/copy-pdfjs-wasm.mjs",
+    "postinstall": "npm run prepare:pdfjs",
+    "predev": "npm run prepare:pdfjs",
     "dev": "vite",
+    "prebuild": "npm run prepare:pdfjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "pretest": "npm run prepare:pdfjs",
     "test": "vitest",
     "typecheck": "tsc -b --pretty false"
   },

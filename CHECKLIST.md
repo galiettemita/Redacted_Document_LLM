@@ -23,6 +23,7 @@
 - [x] Make the upload-to-workspace transition synchronous so it cannot remain in a checking state.
 - [x] Pin React-PDF and its worker to the same PDF.js version.
 - [x] Use the compatibility PDF.js build for Safari and older browser runtimes.
+- [x] Restore JBIG2-scanned uploaded-PDF previews by publishing PDF.js decoder assets, configuring the document decoder path, and protecting the real decode path with a regression test.
 - [x] Audit upload, rendering, paging, zoom, marking, predictions, replacement, and responsive views in real browsers.
 - [x] Restore the feature-branch frontend after its local server exited and verify the app, sample PDF, PDF.js worker, and API proxy endpoints.
 - [x] Remove on-document prediction previews and emphasize the selected sidebar prediction.

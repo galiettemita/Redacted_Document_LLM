@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
-import { configurePdfViewerWorker } from '../../pdfRuntime'
+import { configurePdfViewerWorker, PDF_DOCUMENT_OPTIONS } from '../../pdfRuntime'
 import type { Passage, PassageRect } from '../../types'
 import { PdfErrorBoundary } from './PdfErrorBoundary'
 import { PassageOverlayLayer } from './PassageOverlayLayer'
@@ -70,6 +70,7 @@ export function PdfViewer({
         <PdfErrorBoundary key={source}>
           <Document
             file={source}
+            options={PDF_DOCUMENT_OPTIONS}
             loading={<p className="viewer-state">Opening PDF…</p>}
             error={(
               <p className="viewer-state is-error" role="alert">

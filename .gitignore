@@ -11,4 +11,5 @@ var/
 node_modules/
 dist/
 coverage/
+public/pdfjs/wasm/
 *.local
