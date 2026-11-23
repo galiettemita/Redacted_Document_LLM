@@ -236,6 +236,42 @@ def test_document_analysis_state_recovers_only_current_nonfailed_jobs(
     assert response.json()["jobs"][0]["status"] == "complete"
 
 
+def test_document_schedule_reuses_a_completed_job_without_dispatch(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dispatcher = RecordingDispatcher()
+    app, document, first, second = _staged_app(
+        tmp_path,
+        monkeypatch,
+        dispatcher=dispatcher,
+    )
+    completed = _schedule(app, first.id, first.revision, "completed-first")
+    with app.state.database.session_factory() as session, session.begin():
+        model = session.get(AnalysisJob, completed["id"])
+        assert model is not None
+        model.status = "complete"
+        model.stage = "complete"
+
+    response = asyncio.run(
+        request(
+            app,
+            "POST",
+            f"/v1/documents/{document.id}/analysis",
+            headers={"Idempotency-Key": "after-completion"},
+        )
+    )
+
+    assert response.status_code == 202
+    result = response.json()
+    assert [job["id"] for job in result["accepted_jobs"]] == [completed["id"]]
+    assert result["accepted_jobs"][0]["status"] == "complete"
+    assert result["deferred_passage_ids"] == [str(second.id)]
+    assert dispatcher.job_ids == [UUID(completed["id"])]
+    with app.state.database.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(AnalysisJob)) == 1
+
+
 def test_document_schedule_returns_readiness_blockers_without_creating_jobs(
     tmp_path: Path,
     monkeypatch,
