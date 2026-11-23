@@ -27,6 +27,7 @@ from redacted_backend.corpus.build_bm25 import (
 )
 from redacted_backend.corpus.build_dense import build_dense_from_files
 from redacted_backend.corpus.build_dense_sharded import (
+    accelerate_dense_embedding_checkpoints,
     benchmark_sharded_dense_build,
     build_sharded_dense_from_files,
     recover_benchmark_embedding_checkpoint,
@@ -250,6 +251,19 @@ def run(argv: Sequence[str] | None = None) -> int:
             )
         )
         return 0
+    if args.command == "accelerate-best-available-dense":
+        report = accelerate_dense_embedding_checkpoints(
+            Path(args.chunks),
+            Path(args.corpus_manifest),
+            Path(args.output_directory),
+            batch_size=args.batch_size,
+            encoder_threads=args.encoder_threads,
+            shard_size=args.shard_size,
+            safety_gap_shards=args.safety_gap_shards,
+            contract=PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT,
+        )
+        print(json.dumps(report.model_dump(mode="json"), sort_keys=True, indent=2))
+        return 0
     if args.command == "build-best-available-dense":
         report = build_sharded_dense_from_files(
             Path(args.chunks),
@@ -412,6 +426,30 @@ def _parser() -> argparse.ArgumentParser:
     recover_benchmark.add_argument("--output-directory", required=True)
     recover_benchmark.add_argument("--setup-seconds", type=float, required=True)
     recover_benchmark.add_argument("--encoding-seconds", type=float, required=True)
+
+    accelerate_dense = subparsers.add_parser(
+        "accelerate-best-available-dense",
+        help="encode compatible dense checkpoints from the final shard backward",
+    )
+    accelerate_dense.add_argument("--chunks", required=True)
+    accelerate_dense.add_argument("--corpus-manifest", required=True)
+    accelerate_dense.add_argument("--output-directory", required=True)
+    accelerate_dense.add_argument("--batch-size", type=_positive_int, default=64)
+    accelerate_dense.add_argument(
+        "--encoder-threads",
+        type=lambda value: _bounded_int(value, maximum=64),
+        default=4,
+    )
+    accelerate_dense.add_argument(
+        "--shard-size",
+        type=lambda value: _bounded_int(value, maximum=1_000_000),
+        required=True,
+    )
+    accelerate_dense.add_argument(
+        "--safety-gap-shards",
+        type=lambda value: _bounded_int(value, maximum=1_000),
+        default=4,
+    )
 
     best_dense = subparsers.add_parser("build-best-available-dense")
     best_dense.add_argument("--chunks", required=True)

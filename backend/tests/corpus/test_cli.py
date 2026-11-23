@@ -20,6 +20,7 @@ from redacted_backend.corpus.best_available import (
 from redacted_backend.corpus.build_bm25 import Bm25BuildReport
 from redacted_backend.corpus.build_dense_sharded import (
     BenchmarkEmbeddingCheckpoint,
+    DenseEmbeddingAccelerationReport,
     DenseBuildBenchmarkReport,
     ShardedDenseBuildReport,
 )
@@ -623,6 +624,65 @@ def test_recover_best_available_dense_benchmark_cli_binds_completed_sample(
             "sample_rows": 100_000,
             "setup_seconds": 275.0,
             "encoding_seconds": 10_500.0,
+            "contract": cli.PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT,
+        },
+    }
+
+
+def test_accelerate_best_available_dense_cli_uses_reverse_cpu_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    captured: dict[str, object] = {}
+    report = DenseEmbeddingAccelerationReport(
+        shard_count=213,
+        encoded_shard_ids=[212],
+        reused_shard_ids=[],
+        forward_frontier_shard=0,
+        stopped_for_safety_gap=False,
+    )
+
+    def fake_accelerate(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return report
+
+    monkeypatch.setattr(
+        cli,
+        "accelerate_dense_embedding_checkpoints",
+        fake_accelerate,
+        raising=False,
+    )
+    chunks = tmp_path / "chunks.jsonl"
+    corpus = tmp_path / "corpus.json"
+    output = tmp_path / "dense"
+
+    exit_code = cli.run(
+        [
+            "accelerate-best-available-dense",
+            "--chunks",
+            str(chunks),
+            "--corpus-manifest",
+            str(corpus),
+            "--output-directory",
+            str(output),
+            "--shard-size",
+            "68572",
+        ]
+    )
+
+    assert exit_code == 0
+    assert DenseEmbeddingAccelerationReport.model_validate_json(
+        capsys.readouterr().out
+    ) == report
+    assert captured == {
+        "args": (chunks, corpus, output),
+        "kwargs": {
+            "batch_size": 64,
+            "encoder_threads": 4,
+            "shard_size": 68_572,
+            "safety_gap_shards": 4,
             "contract": cli.PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT,
         },
     }

@@ -121,3 +121,24 @@
 - [x] **Step 2: Implement the FAISS-only worker and benchmark checkpoint/recovery path without weakening corpus or artifact identity checks.** The recovered 100,000-row sample is bound to corpus `c28eb9…`, embeddings `1c8017…`, offsets `641395…`, and the pinned dense semantics/training selection.
 - [x] **Step 3: Prevent launchd from repeating a failed or completed run, then run focused and complete backend verification.** Focused: 59 passed. Full backend: 539 passed with 2 expected environment skips; zsh syntax and diff checks passed.
 - [x] **Step 4: Recover the existing 100,000-row sample, restart exactly one runner, verify it enters FAISS without re-encoding, update the checklist, commit, and push.** The sample mtime remained `2026-11-23T00:13:53-0500`; isolated FAISS finished in 13.91 seconds, the measured storage gates passed, and PID 45140 advanced to the real 14,549,269-row build with 68,572-row resumable shards.
+
+### Task 6: Add a safe reverse-order CPU encoding accelerator
+
+**Files:**
+- Modify: `backend/src/redacted_backend/corpus/build_dense_sharded.py`
+- Modify: `backend/src/redacted_backend/corpus/cli.py`
+- Modify: `backend/tests/corpus/test_build_dense_sharded.py`
+- Modify: `backend/tests/corpus/test_cli.py`
+- Create: `scripts/run-local-dense-accelerator.zsh`
+- Create: `backend/tests/corpus/test_local_dense_accelerator.py`
+- Modify: `README.md`
+- Modify: `CHECKLIST.md`
+
+**Interfaces:**
+- Consumes: the verified production offset table, the exact same pinned BGE semantics/profile, and the primary builder's atomic embedding-checkpoint contract.
+- Produces: a second CPU-only encoder that works from the final shard backward, publishes only checksum-compatible checkpoints, and stops with a safety gap before it can race the forward builder.
+
+- [x] **Step 1: Record concurrent real-corpus throughput and write failing tests** for reverse checkpoint order, forward-builder reuse, the safety gap, CLI identity, and single-instance durable execution. One extra four-thread encoder measured 11.08 combined rows/s; two extra three-thread encoders measured 11.25, so exactly one accelerator is justified.
+- [x] **Step 2: Implement the reverse accelerator using the existing atomic checkpoint manifest and corpus/offset verification boundaries.** It shares no forward iterator or temporary directory, works from the final shard backward, and stops four shards before the first incomplete forward checkpoint.
+- [x] **Step 3: Run focused and complete verification, commit, and push.** Focused: 64 passed. Full backend: 544 passed with 2 expected environment skips; zsh syntax and diff checks passed.
+- [ ] **Step 4: Launch one accelerator, verify two live non-overlapping encoders and improved combined throughput, then update the checklist.**

@@ -180,6 +180,19 @@ class BenchmarkEmbeddingCheckpoint(BaseModel):
     encoding_seconds: float = Field(gt=0)
 
 
+class DenseEmbeddingAccelerationReport(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal["dense-embedding-acceleration-v1"] = (
+        "dense-embedding-acceleration-v1"
+    )
+    shard_count: int = Field(ge=1)
+    encoded_shard_ids: list[int]
+    reused_shard_ids: list[int]
+    forward_frontier_shard: int = Field(ge=0)
+    stopped_for_safety_gap: bool
+
+
 DenseRecallBuildReport = DenseRecallReport
 
 
@@ -575,6 +588,115 @@ def benchmark_sharded_dense_build(
         projected_full_seconds=projected_seconds,
         projected_gpu_hours=projected_seconds / 3600,
     )
+
+
+def accelerate_dense_embedding_checkpoints(
+    chunks_path: Path,
+    corpus_manifest_path: Path,
+    output_directory: Path,
+    *,
+    encoder: DocumentEncoder | None = None,
+    scientific: ScientificConfig | None = None,
+    profile: DenseArtifactProfile | None = None,
+    batch_size: int = 64,
+    encoder_threads: int = 4,
+    shard_size: int,
+    safety_gap_shards: int = 4,
+    max_new_shards: int | None = None,
+    contract: BestAvailableRetrievalContract | None = None,
+) -> DenseEmbeddingAccelerationReport:
+    if batch_size < 1 or encoder_threads < 1:
+        raise ValueError("Dense accelerator batch and thread counts must be positive")
+    if shard_size < 1 or shard_size > MAX_DENSE_SHARD_CHUNKS:
+        raise ValueError("Dense accelerator shard size is invalid")
+    if safety_gap_shards < 0:
+        raise ValueError("Dense accelerator safety gap must not be negative")
+    if max_new_shards is not None and max_new_shards < 1:
+        raise ValueError("Dense accelerator maximum shard count must be positive")
+    config = scientific or ScientificConfig()
+    artifact_profile = profile or DenseArtifactProfile(
+        embedding_dimension=config.embedding_dimension
+    )
+    corpus = _load_verified_corpus(chunks_path, corpus_manifest_path, config)
+    if contract is not None:
+        _require_retrieval_contract(corpus, contract)
+    _validate_profile(artifact_profile, config, shard_size, corpus.chunk_count)
+    output_directory.mkdir(parents=True, exist_ok=True)
+    with _exclusive_accelerator_lock(output_directory):
+        offsets, _training_rows = _prepare_offsets_and_training_rows(
+            chunks_path,
+            output_directory,
+            chunk_count=corpus.chunk_count,
+            chunks_sha256=corpus.chunks_sha256,
+            profile=artifact_profile,
+        )
+        effective_encoder = encoder or BgeEncoder(
+            scientific=config,
+            intra_op_threads=encoder_threads,
+        )
+        checkpoint_root = output_directory / _CHECKPOINT_ROOT
+        checkpoint_root.mkdir(parents=True, exist_ok=True)
+        shard_count = math.ceil(corpus.chunk_count / shard_size)
+        encoded: list[int] = []
+        reused: list[int] = []
+        stopped_for_gap = False
+        with ChunkOffsetIndex.open(
+            chunks_path,
+            output_directory / _OFFSETS_NAME,
+            expected_count=corpus.chunk_count,
+            expected_chunks_sha256=corpus.chunks_sha256,
+            expected_offsets_sha256=offsets.offsets_sha256,
+        ) as chunk_index:
+            for shard_id in range(shard_count - 1, -1, -1):
+                start_row = shard_id * shard_size
+                count = min(shard_size, corpus.chunk_count - start_row)
+                name = f"shard-{shard_id:05d}"
+                existing = _load_embedding_checkpoint(
+                    checkpoint_root / name,
+                    expected_id=shard_id,
+                    expected_start=start_row,
+                    expected_count=count,
+                    chunks_sha256=corpus.chunks_sha256,
+                    profile=artifact_profile,
+                    semantics_hash=dense_semantics_hash(config),
+                )
+                if existing is not None:
+                    reused.append(shard_id)
+                    continue
+                frontier = _forward_checkpoint_frontier(
+                    checkpoint_root,
+                    shard_count=shard_count,
+                )
+                if shard_id <= frontier + safety_gap_shards:
+                    stopped_for_gap = True
+                    break
+                chunks = (chunk_index.read(row) for row in range(start_row, start_row + count))
+                _encode_embedding_checkpoint(
+                    chunks,
+                    checkpoint_root,
+                    name=name,
+                    shard_id=shard_id,
+                    start_row=start_row,
+                    chunk_count=count,
+                    chunks_sha256=corpus.chunks_sha256,
+                    encoder=effective_encoder,
+                    profile=artifact_profile,
+                    semantics_hash=dense_semantics_hash(config),
+                    batch_size=batch_size,
+                )
+                encoded.append(shard_id)
+                if max_new_shards is not None and len(encoded) >= max_new_shards:
+                    break
+        return DenseEmbeddingAccelerationReport(
+            shard_count=shard_count,
+            encoded_shard_ids=encoded,
+            reused_shard_ids=reused,
+            forward_frontier_shard=_forward_checkpoint_frontier(
+                checkpoint_root,
+                shard_count=shard_count,
+            ),
+            stopped_for_safety_gap=stopped_for_gap,
+        )
 
 
 def recover_benchmark_embedding_checkpoint(
@@ -1451,7 +1573,23 @@ def _encode_embedding_checkpoint(
             temporary / "manifest.json",
             checkpoint.model_dump(mode="json"),
         )
-        os.replace(temporary, final_directory)
+        try:
+            os.replace(temporary, final_directory)
+        except OSError:
+            if not final_directory.is_dir():
+                raise
+            existing = _load_embedding_checkpoint(
+                final_directory,
+                expected_id=shard_id,
+                expected_start=start_row,
+                expected_count=chunk_count,
+                chunks_sha256=chunks_sha256,
+                profile=profile,
+                semantics_hash=semantics_hash,
+            )
+            if existing is None:
+                raise
+            return existing
         _fsync_directory(checkpoint_root)
         return checkpoint
     finally:
@@ -1768,6 +1906,19 @@ def _cleanup_incomplete_directories(root: Path) -> None:
             shutil.rmtree(path)
 
 
+def _forward_checkpoint_frontier(
+    checkpoint_root: Path,
+    *,
+    shard_count: int,
+) -> int:
+    for shard_id in range(shard_count):
+        if not (
+            checkpoint_root / f"shard-{shard_id:05d}" / "manifest.json"
+        ).is_file():
+            return shard_id
+    return shard_count
+
+
 def _read_chunks(path: Path) -> Iterator[CorpusChunk]:
     with path.open("rb") as source:
         for line_number, line in enumerate(source, start=1):
@@ -1813,6 +1964,20 @@ def _exclusive_build_lock(root: Path) -> Iterator[None]:
             raise RuntimeError(
                 f"Another compressed dense build owns {root}"
             ) from error
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def _exclusive_accelerator_lock(root: Path) -> Iterator[None]:
+    lock_path = root / ".compressed-dense-accelerator.lock"
+    with lock_path.open("a+b") as lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RuntimeError(f"Another dense accelerator owns {root}") from error
         try:
             yield
         finally:

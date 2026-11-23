@@ -14,6 +14,7 @@ from redacted_backend.retrieval import dense_sharded
 from redacted_backend.corpus.best_available import BestAvailableCorpusManifest
 from redacted_backend.corpus.build_dense_sharded import (
     StorageBudgetError,
+    accelerate_dense_embedding_checkpoints,
     benchmark_sharded_dense_build,
     build_sharded_dense_from_files,
     recover_benchmark_embedding_checkpoint,
@@ -457,6 +458,77 @@ def test_embedding_phase_resumes_without_reencoding_verified_checkpoints(
     assert report.index_manifest.chunk_count == 5
     assert second_encoder.encoded_rows == 3
     assert (output / "shard-00000/embeddings.i8").read_bytes() == completed_bytes
+
+
+def test_reverse_accelerator_checkpoint_is_reused_by_forward_builder(
+    tmp_path: Path,
+) -> None:
+    chunks, corpus, queries, _, scientific = _fixture(tmp_path)
+    output = tmp_path / "accelerated-dense"
+    accelerator_encoder = DeterministicEncoder(8)
+
+    accelerated = accelerate_dense_embedding_checkpoints(
+        chunks,
+        corpus,
+        output,
+        encoder=accelerator_encoder,
+        scientific=scientific,
+        profile=_profile(),
+        shard_size=2,
+        batch_size=2,
+        safety_gap_shards=0,
+        max_new_shards=1,
+    )
+
+    assert accelerated.encoded_shard_ids == [2]
+    assert accelerated.reused_shard_ids == []
+    assert accelerator_encoder.encoded_rows == 1
+    assert (output / "embedding-checkpoints/shard-00002/manifest.json").is_file()
+
+    forward_encoder = DeterministicEncoder(8)
+    built = build_sharded_dense_from_files(
+        chunks,
+        corpus,
+        output,
+        output / "manifest.json",
+        application_queries_path=queries,
+        certification_queries_path=output / "recall-queries.txt",
+        encoder=forward_encoder,
+        scientific=scientific,
+        profile=_profile(),
+        batch_size=2,
+        shard_size=2,
+        application_query_count=2,
+        corpus_query_count=2,
+        recall_block_rows=2,
+    )
+
+    assert built.index_manifest.chunk_count == 5
+    assert forward_encoder.encoded_rows == 4
+
+
+def test_reverse_accelerator_stops_before_forward_collision_gap(
+    tmp_path: Path,
+) -> None:
+    chunks, corpus, _queries, _, scientific = _fixture(tmp_path)
+    encoder = DeterministicEncoder(8)
+
+    report = accelerate_dense_embedding_checkpoints(
+        chunks,
+        corpus,
+        tmp_path / "gap-dense",
+        encoder=encoder,
+        scientific=scientific,
+        profile=_profile(),
+        shard_size=2,
+        batch_size=2,
+        safety_gap_shards=2,
+    )
+
+    assert report.encoded_shard_ids == []
+    assert report.stopped_for_safety_gap is True
+    assert report.forward_frontier_shard == 0
+    assert encoder.encoded_rows == 0
 
 
 def test_template_training_maps_each_embedding_shard_only_once(
