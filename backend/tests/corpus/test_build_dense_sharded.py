@@ -16,8 +16,10 @@ from redacted_backend.corpus.build_dense_sharded import (
     StorageBudgetError,
     benchmark_sharded_dense_build,
     build_sharded_dense_from_files,
+    recover_benchmark_embedding_checkpoint,
 )
 from redacted_backend.corpus.chunker import CorpusChunk
+from redacted_backend.corpus.faiss_build_worker import FaissBenchmarkResult
 from redacted_backend.retrieval.dense_profile import (
     DenseArtifactProfile,
     dense_semantics_hash,
@@ -213,6 +215,47 @@ def test_build_publishes_compressed_shards_without_duplicate_metadata(
     assert (output / manifest.recall_report_path).is_file()
 
 
+def test_default_builder_keeps_faiss_out_of_the_torch_encoding_process(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chunks, corpus, queries, _, scientific = _fixture(tmp_path)
+    output = tmp_path / "isolated-dense"
+    monkeypatch.setattr(
+        dense_builder,
+        "BgeEncoder",
+        lambda **_kwargs: DeterministicEncoder(8),
+    )
+
+    def forbidden_parent_training(*_args, **_kwargs):
+        raise AssertionError("FAISS training ran in the encoding process")
+
+    monkeypatch.setattr(
+        dense_builder,
+        "train_ivfpq_template",
+        forbidden_parent_training,
+    )
+
+    report = build_sharded_dense_from_files(
+        chunks,
+        corpus,
+        output,
+        output / "manifest.json",
+        application_queries_path=queries,
+        certification_queries_path=output / "recall-queries.txt",
+        scientific=scientific,
+        profile=_profile(),
+        batch_size=2,
+        shard_size=2,
+        application_query_count=2,
+        corpus_query_count=2,
+        recall_block_rows=2,
+    )
+
+    assert report.index_manifest.chunk_count == 5
+    assert report.index_manifest.recall_at_300 == 1.0
+
+
 def test_benchmark_scales_fixed_and_row_dependent_work_separately(
     tmp_path: Path,
 ) -> None:
@@ -277,6 +320,18 @@ def test_benchmark_charges_full_source_verification_to_setup_once(
         "open",
         slow_verified_open,
     )
+    def zero_time_faiss(job):
+        (job.output_directory / "candidate-template.faiss").write_bytes(b"template")
+        (job.output_directory / "empty-candidate.faiss").write_bytes(b"empty")
+        (job.output_directory / "candidate.faiss").write_bytes(b"candidate")
+        return FaissBenchmarkResult(
+            training_seconds=0,
+            candidate_add_seconds=0,
+            certification_probe_seconds=0,
+            certification_probe_queries=5,
+        )
+
+    monkeypatch.setattr(dense_builder, "run_faiss_benchmark_job", zero_time_faiss)
 
     report = benchmark_sharded_dense_build(
         chunks,
@@ -292,6 +347,68 @@ def test_benchmark_charges_full_source_verification_to_setup_once(
     assert report.setup_seconds == 17.0
     assert report.encoding_seconds == pytest.approx(1e-9)
     assert 17.0 <= report.projected_full_seconds < 17.001
+
+
+def test_benchmark_reuses_a_recovered_complete_sample_without_reencoding(
+    tmp_path: Path,
+) -> None:
+    chunks, corpus, _queries, _rows, scientific = _fixture(tmp_path, count=10)
+    output = tmp_path / "benchmark-recovery"
+    output.mkdir()
+    vectors = np.eye(8, dtype=np.float32)[:5]
+    quantized = dense_builder.quantize_directions(vectors)
+    quantized.tofile(output / "sample-embeddings.i8")
+
+    checkpoint = recover_benchmark_embedding_checkpoint(
+        chunks,
+        corpus,
+        output,
+        scientific=scientific,
+        profile=_profile(training_sample_count=5, shard_size_limit=5),
+        sample_rows=5,
+        setup_seconds=2.0,
+        encoding_seconds=5.0,
+    )
+    encoder = DeterministicEncoder(8, fail_after_rows=0)
+
+    report = benchmark_sharded_dense_build(
+        chunks,
+        corpus,
+        output,
+        encoder=encoder,
+        scientific=scientific,
+        profile=_profile(training_sample_count=5, shard_size_limit=5),
+        sample_rows=5,
+        batch_size=2,
+    )
+
+    assert checkpoint.embedding_sha256 == hashlib.sha256(quantized.tobytes()).hexdigest()
+    assert report.setup_seconds == 2.0
+    assert report.encoding_seconds == 5.0
+    assert encoder.encoded_rows == 0
+
+
+def test_recovery_rejects_a_preallocated_but_incomplete_sample(
+    tmp_path: Path,
+) -> None:
+    chunks, corpus, _queries, _rows, scientific = _fixture(tmp_path, count=10)
+    output = tmp_path / "benchmark-incomplete"
+    output.mkdir()
+    embeddings = np.zeros((5, 8), dtype=np.int8)
+    embeddings[0, 0] = 127
+    embeddings.tofile(output / "sample-embeddings.i8")
+
+    with pytest.raises(ValueError, match="incomplete"):
+        recover_benchmark_embedding_checkpoint(
+            chunks,
+            corpus,
+            output,
+            scientific=scientific,
+            profile=_profile(training_sample_count=5, shard_size_limit=5),
+            sample_rows=5,
+            setup_seconds=2.0,
+            encoding_seconds=5.0,
+        )
 
 
 def test_embedding_phase_resumes_without_reencoding_verified_checkpoints(

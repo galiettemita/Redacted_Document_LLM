@@ -24,6 +24,12 @@ from redacted_backend.corpus.best_available import (
     BestAvailableRetrievalContract,
 )
 from redacted_backend.corpus.chunker import CorpusChunk
+from redacted_backend.corpus.faiss_build_worker import (
+    FaissBenchmarkJob,
+    FaissProductionJob,
+    run_faiss_benchmark_job,
+    run_faiss_production_job,
+)
 from redacted_backend.retrieval.chunk_offsets import (
     ChunkOffsetIndex,
     ChunkOffsetsReport,
@@ -67,6 +73,8 @@ _TRAINING_ROWS_MANIFEST_NAME = "training-rows-manifest.json"
 _TEMPLATE_NAME = "candidate-template.faiss"
 _TEMPLATE_MANIFEST_NAME = "candidate-template-manifest.json"
 _RECALL_REPORT_NAME = "recall-report.json"
+_BENCHMARK_EMBEDDINGS_NAME = "sample-embeddings.i8"
+_BENCHMARK_CHECKPOINT_NAME = "sample-embeddings-manifest.json"
 
 
 class StorageBudgetError(RuntimeError):
@@ -152,6 +160,24 @@ class DenseBuildBenchmarkReport(BaseModel):
     training_mode: Literal["benchmark-only-all-sample-rows"] = (
         "benchmark-only-all-sample-rows"
     )
+
+
+class BenchmarkEmbeddingCheckpoint(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal["dense-benchmark-embeddings-v1"] = (
+        "dense-benchmark-embeddings-v1"
+    )
+    dense_semantics_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    training_selection_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    chunks_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    offsets_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    sample_rows: int = Field(ge=1)
+    embedding_dimension: int = Field(ge=1)
+    embedding_size_bytes: int = Field(ge=1)
+    embedding_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    setup_seconds: float = Field(ge=0)
+    encoding_seconds: float = Field(gt=0)
 
 
 DenseRecallBuildReport = DenseRecallReport
@@ -293,6 +319,7 @@ def _build_sharded_dense_from_files_unlocked(
         chunks_sha256=corpus.chunks_sha256,
         profile=artifact_profile,
     )
+    isolate_faiss = encoder is None
     embedding_encoder = encoder or BgeEncoder(
         scientific=config,
         intra_op_threads=encoder_threads,
@@ -308,19 +335,49 @@ def _build_sharded_dense_from_files_unlocked(
         shard_size=shard_size,
         batch_size=batch_size,
     )
-    template = _train_candidate_template(
-        output_directory,
-        checkpoints=checkpoints,
-        training_rows=training_rows,
-        profile=artifact_profile,
-    )
-    shards = _build_candidate_shards(
-        output_directory,
-        checkpoints=checkpoints,
-        template=template,
-        profile=artifact_profile,
-        batch_size=batch_size,
-    )
+    certified_recall: list[float] | None = None
+    query_vectors_path = output_directory / ".recall-query-vectors.f32"
+    if isolate_faiss:
+        query_vectors = np.asarray(
+            [_encode_query(embedding_encoder, query, config) for query in queries],
+            dtype=np.float32,
+        )
+        _write_bytes_atomic(query_vectors_path, query_vectors.tobytes(order="C"))
+        faiss_result = run_faiss_production_job(
+            FaissProductionJob(
+                output_directory=output_directory,
+                checkpoints=[
+                    item.model_dump(mode="json") for item in checkpoints
+                ],
+                training_rows=training_rows.model_dump(mode="json"),
+                profile=artifact_profile,
+                query_vectors_path=query_vectors_path,
+                query_count=len(queries),
+                batch_size=batch_size,
+                recall_block_rows=recall_block_rows,
+                top_chunks_per_list=config.top_chunks_per_list,
+            )
+        )
+        template = TrainedTemplateManifest.model_validate(faiss_result.template)
+        shards = [
+            CompressedDenseShardManifest.model_validate(item)
+            for item in faiss_result.shards
+        ]
+        certified_recall = faiss_result.per_query_recall
+    else:
+        template = _train_candidate_template(
+            output_directory,
+            checkpoints=checkpoints,
+            training_rows=training_rows,
+            profile=artifact_profile,
+        )
+        shards = _build_candidate_shards(
+            output_directory,
+            checkpoints=checkpoints,
+            template=template,
+            profile=artifact_profile,
+            batch_size=batch_size,
+        )
     manifest = _publish_certified_manifest(
         output_manifest_path,
         output_directory,
@@ -336,7 +393,9 @@ def _build_sharded_dense_from_files_unlocked(
         profile=artifact_profile,
         config=config,
         recall_block_rows=recall_block_rows,
+        certified_per_query_recall=certified_recall,
     )
+    query_vectors_path.unlink(missing_ok=True)
     shutil.rmtree(output_directory / _CHECKPOINT_ROOT, ignore_errors=True)
     return ShardedDenseBuildReport(
         elapsed_seconds=time.monotonic() - started,
@@ -389,111 +448,85 @@ def benchmark_sharded_dense_build(
     output_directory.mkdir(parents=True, exist_ok=True)
     _reset_peak_gpu_memory()
     offsets_path = output_directory / _OFFSETS_NAME
-    offsets = build_chunk_offsets(
-        chunks_path,
-        offsets_path,
-        expected_count=corpus.chunk_count,
-        expected_chunks_sha256=corpus.chunks_sha256,
-    )
-    selected_rows = _select_training_rows(chunks_path, sample_rows)
-    embeddings_path = output_directory / "sample-embeddings.i8"
-    _require_available_bytes(
+    embeddings_path = output_directory / _BENCHMARK_EMBEDDINGS_NAME
+    checkpoint = _load_benchmark_embedding_checkpoint(
         output_directory,
-        sample_rows * config.embedding_dimension,
-    )
-    embeddings = np.memmap(
-        embeddings_path,
-        dtype=np.int8,
-        mode="w+",
-        shape=(sample_rows, config.embedding_dimension),
-    )
-    effective_encoder = encoder or BgeEncoder(
-        scientific=config,
-        intra_op_threads=encoder_threads,
-    )
-    with ChunkOffsetIndex.open(
-        chunks_path,
-        offsets_path,
-        expected_count=corpus.chunk_count,
-        expected_chunks_sha256=corpus.chunks_sha256,
-        expected_offsets_sha256=offsets.offsets_sha256,
-    ) as chunk_index:
-        setup_seconds = time.monotonic() - setup_started
-        encoding_started = time.monotonic()
-        for start in range(0, sample_rows, batch_size):
-            rows = selected_rows[start : start + batch_size]
-            chunks = [chunk_index.read(row) for row in rows]
-            vectors = _encode_documents(effective_encoder, chunks, config)
-            embeddings[start : start + len(vectors)] = quantize_directions(vectors)
-        encoding_seconds = max(time.monotonic() - encoding_started, 1e-9)
-    embeddings.flush()
-    del embeddings
-    _fsync_path(embeddings_path)
-    training_started = time.monotonic()
-    training_vectors = _dequantized_float32_embeddings(
-        embeddings_path,
-        rows=sample_rows,
-        dimension=config.embedding_dimension,
-    )
-    template_path = output_directory / _TEMPLATE_NAME
-    train_ivfpq_template(
-        training_vectors,
-        template_path,
-        dimension=config.embedding_dimension,
+        corpus=corpus,
         profile=benchmark_profile,
+        config=config,
+        sample_rows=sample_rows,
     )
-    training_seconds = time.monotonic() - training_started
-    candidate = FaissIvfPqIndex.create(template_path, profile=benchmark_profile)
+    if checkpoint is None:
+        offsets = build_chunk_offsets(
+            chunks_path,
+            offsets_path,
+            expected_count=corpus.chunk_count,
+            expected_chunks_sha256=corpus.chunks_sha256,
+        )
+        selected_rows = _select_training_rows(chunks_path, sample_rows)
+        _require_available_bytes(
+            output_directory,
+            sample_rows * config.embedding_dimension,
+        )
+        embeddings = np.memmap(
+            embeddings_path,
+            dtype=np.int8,
+            mode="w+",
+            shape=(sample_rows, config.embedding_dimension),
+        )
+        effective_encoder = encoder or BgeEncoder(
+            scientific=config,
+            intra_op_threads=encoder_threads,
+        )
+        with ChunkOffsetIndex.open(
+            chunks_path,
+            offsets_path,
+            expected_count=corpus.chunk_count,
+            expected_chunks_sha256=corpus.chunks_sha256,
+            expected_offsets_sha256=offsets.offsets_sha256,
+        ) as chunk_index:
+            setup_seconds = time.monotonic() - setup_started
+            encoding_started = time.monotonic()
+            for start in range(0, sample_rows, batch_size):
+                rows = selected_rows[start : start + batch_size]
+                chunks = [chunk_index.read(row) for row in rows]
+                vectors = _encode_documents(effective_encoder, chunks, config)
+                embeddings[start : start + len(vectors)] = quantize_directions(vectors)
+            encoding_seconds = max(time.monotonic() - encoding_started, 1e-9)
+        embeddings.flush()
+        del embeddings
+        _fsync_path(embeddings_path)
+        checkpoint = _write_benchmark_embedding_checkpoint(
+            output_directory,
+            corpus=corpus,
+            profile=benchmark_profile,
+            config=config,
+            offsets_sha256=offsets.offsets_sha256,
+            sample_rows=sample_rows,
+            setup_seconds=setup_seconds,
+            encoding_seconds=encoding_seconds,
+        )
+    else:
+        setup_seconds = checkpoint.setup_seconds
+        encoding_seconds = checkpoint.encoding_seconds
+
+    faiss_result = run_faiss_benchmark_job(
+        FaissBenchmarkJob(
+            embeddings_path=embeddings_path,
+            output_directory=output_directory,
+            sample_rows=sample_rows,
+            batch_size=batch_size,
+            top_chunks_per_list=config.top_chunks_per_list,
+            profile=benchmark_profile,
+        )
+    )
+    training_seconds = faiss_result.training_seconds
+    candidate_add_seconds = faiss_result.candidate_add_seconds
+    certification_probe_seconds = faiss_result.certification_probe_seconds
+    probe_query_count = faiss_result.certification_probe_queries
+    template_path = output_directory / _TEMPLATE_NAME
     empty_candidate_path = output_directory / "empty-candidate.faiss"
-    candidate.save(empty_candidate_path)
-    candidate_add_started = time.monotonic()
-    for start in range(0, sample_rows, batch_size):
-        end = min(start + batch_size, sample_rows)
-        candidate.add(training_vectors[start:end])
     candidate_path = output_directory / "candidate.faiss"
-    candidate.save(candidate_path)
-    candidate_add_seconds = time.monotonic() - candidate_add_started
-    probe_query_count = min(10, sample_rows)
-    certification_started = time.monotonic()
-    probe_queries = np.ascontiguousarray(
-        training_vectors[:probe_query_count],
-        dtype=np.float32,
-    )
-    top_k = min(config.top_chunks_per_list, sample_rows)
-    exact_probe: list[list[tuple[float, int]]] = [
-        [] for _ in range(probe_query_count)
-    ]
-    benchmark_embeddings = np.memmap(
-        embeddings_path,
-        dtype=np.int8,
-        mode="r",
-        shape=(sample_rows, config.embedding_dimension),
-    )
-    for start in range(0, sample_rows, 16_384):
-        end = min(start + 16_384, sample_rows)
-        probe_scores = _matrix_scores(
-            dequantize_directions(
-                np.asarray(benchmark_embeddings[start:end], dtype=np.int8)
-            ),
-            probe_queries,
-            "auto",
-        )
-        for query_index in range(probe_query_count):
-            values = [
-                (float(score), start + row)
-                for row, score in enumerate(probe_scores[:, query_index])
-            ]
-            exact_probe[query_index] = _best_scores(
-                (*exact_probe[query_index], *values),
-                top_k,
-            )
-    del benchmark_embeddings
-    for query_vector in probe_queries:
-        candidate.search(
-            query_vector,
-            min(benchmark_profile.candidate_count_per_shard, sample_rows),
-        )
-    certification_probe_seconds = time.monotonic() - certification_started
     elapsed = max(time.monotonic() - started, 1e-9)
     embedding_bytes_per_row = embeddings_path.stat().st_size / sample_rows
     candidate_fixed_bytes = empty_candidate_path.stat().st_size
@@ -542,6 +575,155 @@ def benchmark_sharded_dense_build(
         projected_full_seconds=projected_seconds,
         projected_gpu_hours=projected_seconds / 3600,
     )
+
+
+def recover_benchmark_embedding_checkpoint(
+    chunks_path: Path,
+    corpus_manifest_path: Path,
+    output_directory: Path,
+    *,
+    scientific: ScientificConfig | None = None,
+    profile: DenseArtifactProfile | None = None,
+    sample_rows: int = 100_000,
+    setup_seconds: float,
+    encoding_seconds: float,
+    contract: BestAvailableRetrievalContract | None = None,
+) -> BenchmarkEmbeddingCheckpoint:
+    """Bind a fully written pre-checkpoint benchmark sample to its source identity."""
+
+    if sample_rows < 1:
+        raise ValueError("Dense benchmark sample rows must be positive")
+    if setup_seconds < 0 or encoding_seconds <= 0:
+        raise ValueError("Recovered benchmark timings are invalid")
+    config = scientific or ScientificConfig()
+    base_profile = profile or DenseArtifactProfile(
+        embedding_dimension=config.embedding_dimension
+    )
+    benchmark_profile = DenseArtifactProfile.model_validate(
+        base_profile.model_copy(
+            update={
+                "training_sample_count": sample_rows,
+                "shard_size_limit": max(base_profile.shard_size_limit, sample_rows),
+            }
+        ).model_dump(mode="json")
+    )
+    corpus = _load_verified_corpus(chunks_path, corpus_manifest_path, config)
+    if contract is not None:
+        _require_retrieval_contract(corpus, contract)
+    if sample_rows > corpus.chunk_count:
+        raise ValueError("Dense benchmark sample exceeds the corpus chunk count")
+    output_directory.mkdir(parents=True, exist_ok=True)
+    embeddings_path = output_directory / _BENCHMARK_EMBEDDINGS_NAME
+    expected_size = sample_rows * config.embedding_dimension
+    if not embeddings_path.is_file() or embeddings_path.stat().st_size != expected_size:
+        raise ValueError("Recovered dense benchmark embedding size is invalid")
+    embeddings = np.memmap(
+        embeddings_path,
+        dtype=np.int8,
+        mode="r",
+        shape=(sample_rows, config.embedding_dimension),
+    )
+    for start in range(0, sample_rows, 16_384):
+        end = min(start + 16_384, sample_rows)
+        block = np.asarray(embeddings[start:end], dtype=np.int8)
+        if np.any(np.all(block == 0, axis=1)):
+            del embeddings
+            raise ValueError("Recovered dense benchmark sample is incomplete")
+    del embeddings
+    offsets_path = output_directory / _OFFSETS_NAME
+    offsets = build_chunk_offsets(
+        chunks_path,
+        offsets_path,
+        expected_count=corpus.chunk_count,
+        expected_chunks_sha256=corpus.chunks_sha256,
+    )
+    with ChunkOffsetIndex.open(
+        chunks_path,
+        offsets_path,
+        expected_count=corpus.chunk_count,
+        expected_chunks_sha256=corpus.chunks_sha256,
+        expected_offsets_sha256=offsets.offsets_sha256,
+    ):
+        pass
+    return _write_benchmark_embedding_checkpoint(
+        output_directory,
+        corpus=corpus,
+        profile=benchmark_profile,
+        config=config,
+        offsets_sha256=offsets.offsets_sha256,
+        sample_rows=sample_rows,
+        setup_seconds=setup_seconds,
+        encoding_seconds=encoding_seconds,
+    )
+
+
+def _load_benchmark_embedding_checkpoint(
+    output_directory: Path,
+    *,
+    corpus: BestAvailableCorpusManifest,
+    profile: DenseArtifactProfile,
+    config: ScientificConfig,
+    sample_rows: int,
+) -> BenchmarkEmbeddingCheckpoint | None:
+    manifest_path = output_directory / _BENCHMARK_CHECKPOINT_NAME
+    if not manifest_path.exists():
+        return None
+    if not manifest_path.is_file():
+        raise ValueError("Dense benchmark checkpoint is not a file")
+    checkpoint = BenchmarkEmbeddingCheckpoint.model_validate_json(
+        manifest_path.read_text(encoding="utf-8")
+    )
+    embeddings_path = output_directory / _BENCHMARK_EMBEDDINGS_NAME
+    offsets_path = output_directory / _OFFSETS_NAME
+    if (
+        checkpoint.dense_semantics_hash != dense_semantics_hash(config)
+        or checkpoint.training_selection_hash
+        != dense_training_selection_hash(profile)
+        or checkpoint.chunks_sha256 != corpus.chunks_sha256
+        or checkpoint.sample_rows != sample_rows
+        or checkpoint.embedding_dimension != config.embedding_dimension
+        or checkpoint.embedding_size_bytes
+        != sample_rows * config.embedding_dimension
+        or not embeddings_path.is_file()
+        or embeddings_path.stat().st_size != checkpoint.embedding_size_bytes
+        or _sha256_file(embeddings_path) != checkpoint.embedding_sha256
+        or not offsets_path.is_file()
+        or offsets_path.stat().st_size != corpus.chunk_count * 8
+        or _sha256_file(offsets_path) != checkpoint.offsets_sha256
+    ):
+        raise ValueError("Dense benchmark embedding checkpoint is incompatible")
+    return checkpoint
+
+
+def _write_benchmark_embedding_checkpoint(
+    output_directory: Path,
+    *,
+    corpus: BestAvailableCorpusManifest,
+    profile: DenseArtifactProfile,
+    config: ScientificConfig,
+    offsets_sha256: str,
+    sample_rows: int,
+    setup_seconds: float,
+    encoding_seconds: float,
+) -> BenchmarkEmbeddingCheckpoint:
+    embeddings_path = output_directory / _BENCHMARK_EMBEDDINGS_NAME
+    checkpoint = BenchmarkEmbeddingCheckpoint(
+        dense_semantics_hash=dense_semantics_hash(config),
+        training_selection_hash=dense_training_selection_hash(profile),
+        chunks_sha256=corpus.chunks_sha256,
+        offsets_sha256=offsets_sha256,
+        sample_rows=sample_rows,
+        embedding_dimension=config.embedding_dimension,
+        embedding_size_bytes=embeddings_path.stat().st_size,
+        embedding_sha256=_sha256_file(embeddings_path),
+        setup_seconds=setup_seconds,
+        encoding_seconds=encoding_seconds,
+    )
+    _write_json_atomic(
+        output_directory / _BENCHMARK_CHECKPOINT_NAME,
+        checkpoint.model_dump(mode="json"),
+    )
+    return checkpoint
 
 
 def _prepare_offsets_and_training_rows(
@@ -877,16 +1059,24 @@ def _publish_certified_manifest(
     profile: DenseArtifactProfile,
     config: ScientificConfig,
     recall_block_rows: int,
+    certified_per_query_recall: list[float] | None = None,
 ) -> CompressedShardedDenseIndexManifest:
-    per_query_recall = _certify_candidate_recall(
-        output_directory,
-        shards,
-        queries,
-        encoder=encoder,
-        profile=profile,
-        config=config,
-        block_rows=recall_block_rows,
-    )
+    per_query_recall = certified_per_query_recall
+    if per_query_recall is None:
+        per_query_recall = _certify_candidate_recall(
+            output_directory,
+            shards,
+            queries,
+            encoder=encoder,
+            profile=profile,
+            config=config,
+            block_rows=recall_block_rows,
+        )
+    if len(per_query_recall) != len(queries) or any(
+        not math.isfinite(value) or value < 0 or value > 1
+        for value in per_query_recall
+    ):
+        raise ValueError("Dense certification recall result is invalid")
     recall = float(math.fsum(per_query_recall) / len(per_query_recall))
     require_dense_recall(recall, minimum=config.dense_recall_minimum)
     recall_report = DenseRecallBuildReport(
@@ -963,9 +1153,41 @@ def _certify_candidate_recall(
         [_encode_query(encoder, query, config) for query in queries],
         dtype=np.float32,
     )
-    limit = min(config.top_chunks_per_list, sum(shard.chunk_count for shard in shards))
-    exact: list[list[tuple[float, int]]] = [[] for _ in queries]
-    approximate: list[list[tuple[float, int]]] = [[] for _ in queries]
+    return _certify_candidate_recall_vectors(
+        output_directory,
+        shards,
+        query_vectors,
+        profile=profile,
+        block_rows=block_rows,
+        top_chunks_per_list=config.top_chunks_per_list,
+    )
+
+
+def _certify_candidate_recall_vectors(
+    output_directory: Path,
+    shards: list[CompressedDenseShardManifest],
+    query_vectors: NDArray[np.float32],
+    *,
+    profile: DenseArtifactProfile,
+    block_rows: int,
+    top_chunks_per_list: int,
+) -> list[float]:
+    if query_vectors.dtype != np.float32 or query_vectors.ndim != 2:
+        raise ValueError("Dense certification queries must be a float32 matrix")
+    if query_vectors.shape[1] != profile.embedding_dimension:
+        raise ValueError("Dense certification query dimension mismatch")
+    if len(query_vectors) < 1:
+        raise ValueError("Dense certification queries must not be empty")
+    if np.any(~np.isfinite(query_vectors)) or not np.allclose(
+        np.linalg.norm(query_vectors, axis=1),
+        1.0,
+        rtol=1e-4,
+        atol=1e-4,
+    ):
+        raise ValueError("Dense certification queries must be finite and normalized")
+    limit = min(top_chunks_per_list, sum(shard.chunk_count for shard in shards))
+    exact: list[list[tuple[float, int]]] = [[] for _ in query_vectors]
+    approximate: list[list[tuple[float, int]]] = [[] for _ in query_vectors]
     for shard in shards:
         directory = output_directory / shard.path
         embeddings = np.memmap(
@@ -980,7 +1202,7 @@ def _certify_candidate_recall(
                 np.asarray(embeddings[start:end], dtype=np.int8)
             )
             scores = _matrix_scores(block, query_vectors, "auto")
-            for query_index in range(len(queries)):
+            for query_index in range(len(query_vectors)):
                 values = [
                     (float(score), shard.start_row + start + row)
                     for row, score in enumerate(scores[:, query_index])

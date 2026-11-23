@@ -98,3 +98,26 @@
 - [x] **Step 2: Write failing tests** proving thread configuration precedes model loading and both dense CLI commands pass the offline default of eight threads. Three tests failed on the missing interface/default.
 - [x] **Step 3: Implement the minimal builder-only thread configuration without changing model identity, prompts, vector normalization, or runtime query encoding.** Focused retrieval/CLI suite: 20 passed.
 - [x] **Step 4: Run focused and full backend verification, update the checklist, commit, and push before the production child process starts.** Focused: 20 passed. Full backend: 532 passed, 2 expected environment skips.
+
+### Task 5: Isolate FAISS and resume the completed benchmark
+
+**Files:**
+- Create: `backend/src/redacted_backend/corpus/faiss_build_worker.py`
+- Create: `backend/tests/corpus/test_faiss_build_worker.py`
+- Modify: `backend/src/redacted_backend/corpus/build_dense_sharded.py`
+- Modify: `backend/src/redacted_backend/corpus/cli.py`
+- Modify: `backend/tests/corpus/test_build_dense_sharded.py`
+- Modify: `backend/tests/corpus/test_cli.py`
+- Modify: `backend/tests/corpus/test_local_dense_runner.py`
+- Modify: `scripts/run-local-dense-build.zsh`
+- Modify: `README.md`
+- Modify: `CHECKLIST.md`
+
+**Interfaces:**
+- Consumes: the checksum-verified 100,000-row int8 benchmark sample and the pinned dense artifact profile.
+- Produces: a checksum-bound benchmark checkpoint, a fresh FAISS-only child process for training/add/search, and a one-shot managed runner that cannot loop after a native crash.
+
+- [x] **Step 1: Write failing tests** for FAISS process isolation, complete-sample recovery, checkpoint resume without re-encoding, and managed-job cleanup. The first focused runs failed on the missing worker/recovery interfaces and missing managed-job removal.
+- [x] **Step 2: Implement the FAISS-only worker and benchmark checkpoint/recovery path without weakening corpus or artifact identity checks.** The recovered 100,000-row sample is bound to corpus `c28eb9…`, embeddings `1c8017…`, offsets `641395…`, and the pinned dense semantics/training selection.
+- [x] **Step 3: Prevent launchd from repeating a failed or completed run, then run focused and complete backend verification.** Focused: 59 passed. Full backend: 539 passed with 2 expected environment skips; zsh syntax and diff checks passed.
+- [ ] **Step 4: Recover the existing 100,000-row sample, restart exactly one runner, verify it enters FAISS without re-encoding, update the checklist, commit, and push.**

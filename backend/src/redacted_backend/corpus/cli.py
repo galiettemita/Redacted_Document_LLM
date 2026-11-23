@@ -29,6 +29,7 @@ from redacted_backend.corpus.build_dense import build_dense_from_files
 from redacted_backend.corpus.build_dense_sharded import (
     benchmark_sharded_dense_build,
     build_sharded_dense_from_files,
+    recover_benchmark_embedding_checkpoint,
 )
 from redacted_backend.corpus.exclusions import load_exclusion_manifest
 from redacted_backend.corpus.frus_metadata import (
@@ -231,6 +232,24 @@ def run(argv: Sequence[str] | None = None) -> int:
         )
         print(json.dumps(report.model_dump(mode="json"), sort_keys=True, indent=2))
         return 0
+    if args.command == "recover-best-available-dense-benchmark":
+        checkpoint = recover_benchmark_embedding_checkpoint(
+            Path(args.chunks),
+            Path(args.corpus_manifest),
+            Path(args.output_directory),
+            sample_rows=100_000,
+            setup_seconds=args.setup_seconds,
+            encoding_seconds=args.encoding_seconds,
+            contract=PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT,
+        )
+        print(
+            json.dumps(
+                checkpoint.model_dump(mode="json"),
+                sort_keys=True,
+                indent=2,
+            )
+        )
+        return 0
     if args.command == "build-best-available-dense":
         report = build_sharded_dense_from_files(
             Path(args.chunks),
@@ -383,6 +402,16 @@ def _parser() -> argparse.ArgumentParser:
         type=lambda value: _bounded_int(value, maximum=64),
         default=8,
     )
+
+    recover_benchmark = subparsers.add_parser(
+        "recover-best-available-dense-benchmark",
+        help="validate and checkpoint a completely encoded benchmark sample",
+    )
+    recover_benchmark.add_argument("--chunks", required=True)
+    recover_benchmark.add_argument("--corpus-manifest", required=True)
+    recover_benchmark.add_argument("--output-directory", required=True)
+    recover_benchmark.add_argument("--setup-seconds", type=float, required=True)
+    recover_benchmark.add_argument("--encoding-seconds", type=float, required=True)
 
     best_dense = subparsers.add_parser("build-best-available-dense")
     best_dense.add_argument("--chunks", required=True)

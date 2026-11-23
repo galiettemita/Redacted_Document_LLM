@@ -34,7 +34,11 @@ if [[ -n "${DENSE_RUNNER_CAFFEINATE:-}" ]]; then
 else
   CAFFEINATE_COMMAND="$(command -v caffeinate 2>/dev/null || true)"
 fi
-LAUNCHCTL_COMMAND="$(command -v launchctl 2>/dev/null || true)"
+if [[ -n "${DENSE_RUNNER_LAUNCHCTL:-}" ]]; then
+  LAUNCHCTL_COMMAND="$DENSE_RUNNER_LAUNCHCTL"
+else
+  LAUNCHCTL_COMMAND="$(command -v launchctl 2>/dev/null || true)"
+fi
 
 iso_now() {
   date -u '+%Y-%m-%dT%H:%M:%SZ'
@@ -273,6 +277,8 @@ start_runner() {
       DENSE_RUNNER_RECALL_BLOCK_ROWS="$RECALL_BLOCK_ROWS" \
       DENSE_RUNNER_UV="$UV_COMMAND" \
       DENSE_RUNNER_CAFFEINATE="$CAFFEINATE_COMMAND" \
+      DENSE_RUNNER_LAUNCHCTL="$LAUNCHCTL_COMMAND" \
+      DENSE_RUNNER_LAUNCH_LABEL="$launch_label" \
       "$CAFFEINATE_COMMAND" -i "$SCRIPT_PATH" internal-run-managed
     local launch_attempt
     runner_pid=""
@@ -401,9 +407,9 @@ run_benchmark_if_needed() {
 }
 
 run_internal() {
-  require_runtime
+  require_runtime || return $?
   mkdir -p "$STATE_DIR" "$BENCHMARK_DIRECTORY" "$DENSE_DIRECTORY"
-  run_benchmark_if_needed
+  run_benchmark_if_needed || return $?
 
   local build_shape
   build_shape="$(select_build_shape)"
@@ -461,10 +467,20 @@ run_internal() {
 run_managed_internal() {
   mkdir -p "$STATE_DIR"
   exec >> "$LOG_FILE" 2>&1
+  cleanup_managed_launch() {
+    if [[ -n "${DENSE_RUNNER_LAUNCH_LABEL:-}" && -x "$LAUNCHCTL_COMMAND" ]]; then
+      "$LAUNCHCTL_COMMAND" remove "$DENSE_RUNNER_LAUNCH_LABEL" >/dev/null 2>&1 || true
+    fi
+  }
+  trap cleanup_managed_launch EXIT
   local temporary_pid="$STATE_DIR/.runner.pid.$$.tmp"
   print -- "$$" > "$temporary_pid"
   mv "$temporary_pid" "$PID_FILE"
-  run_internal
+  local run_exit=0
+  run_internal || run_exit=$?
+  cleanup_managed_launch
+  trap - EXIT
+  return "$run_exit"
 }
 
 usage() {

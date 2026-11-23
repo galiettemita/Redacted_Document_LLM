@@ -19,6 +19,7 @@ from redacted_backend.corpus.best_available import (
 )
 from redacted_backend.corpus.build_bm25 import Bm25BuildReport
 from redacted_backend.corpus.build_dense_sharded import (
+    BenchmarkEmbeddingCheckpoint,
     DenseBuildBenchmarkReport,
     ShardedDenseBuildReport,
 )
@@ -557,6 +558,71 @@ def test_benchmark_best_available_dense_cli_uses_exact_paths_and_100k_rows(
             "sample_rows": 100_000,
             "batch_size": 32,
             "encoder_threads": 8,
+            "contract": cli.PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT,
+        },
+    }
+
+
+def test_recover_best_available_dense_benchmark_cli_binds_completed_sample(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    captured: dict[str, object] = {}
+    checkpoint = BenchmarkEmbeddingCheckpoint(
+        dense_semantics_hash="1" * 64,
+        training_selection_hash="2" * 64,
+        chunks_sha256="3" * 64,
+        offsets_sha256="4" * 64,
+        sample_rows=100_000,
+        embedding_dimension=768,
+        embedding_size_bytes=76_800_000,
+        embedding_sha256="5" * 64,
+        setup_seconds=275.0,
+        encoding_seconds=10_500.0,
+    )
+
+    def fake_recover(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return checkpoint
+
+    monkeypatch.setattr(
+        cli,
+        "recover_benchmark_embedding_checkpoint",
+        fake_recover,
+        raising=False,
+    )
+    chunks = tmp_path / "chunks.jsonl"
+    corpus_manifest = tmp_path / "corpus.json"
+    output = tmp_path / "benchmark"
+
+    exit_code = cli.run(
+        [
+            "recover-best-available-dense-benchmark",
+            "--chunks",
+            str(chunks),
+            "--corpus-manifest",
+            str(corpus_manifest),
+            "--output-directory",
+            str(output),
+            "--setup-seconds",
+            "275",
+            "--encoding-seconds",
+            "10500",
+        ]
+    )
+
+    assert exit_code == 0
+    assert BenchmarkEmbeddingCheckpoint.model_validate_json(
+        capsys.readouterr().out
+    ) == checkpoint
+    assert captured == {
+        "args": (chunks, corpus_manifest, output),
+        "kwargs": {
+            "sample_rows": 100_000,
+            "setup_seconds": 275.0,
+            "encoding_seconds": 10_500.0,
             "contract": cli.PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT,
         },
     }

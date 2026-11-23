@@ -130,6 +130,7 @@ def test_runner_source_uses_durable_launch_without_destructive_commands() -> Non
     assert "git clean" not in source
     assert "docker system prune" not in source
     assert "kill -9" not in source
+    assert "DENSE_RUNNER_LAUNCH_LABEL" in source
 
 
 def test_status_distinguishes_stale_resumable_and_live_foreign_pids(
@@ -254,6 +255,39 @@ def test_benchmark_failure_is_recorded_and_never_starts_production(
     commands = command_log.read_text(encoding="utf-8")
     assert "benchmark-best-available-dense" in commands
     assert "build-best-available-dense" not in commands
+
+
+def test_managed_runner_removes_its_launchd_job_after_failure(
+    runner_environment: tuple[dict[str, str], Path, Path],
+    tmp_path: Path,
+) -> None:
+    environment, state, _command_log = runner_environment
+    environment["DENSE_RUNNER_TEST_BENCHMARK_FAIL"] = "1"
+    launchctl_log = tmp_path / "launchctl.log"
+    fake_launchctl = tmp_path / "fake-launchctl"
+    _write_executable(
+        fake_launchctl,
+        """#!/bin/zsh
+set -eu
+print -r -- "$*" >> "$DENSE_RUNNER_TEST_LAUNCHCTL_LOG"
+""",
+    )
+    environment.update(
+        {
+            "DENSE_RUNNER_LAUNCHCTL": str(fake_launchctl),
+            "DENSE_RUNNER_LAUNCH_LABEL": "com.example.one-shot",
+            "DENSE_RUNNER_TEST_LAUNCHCTL_LOG": str(launchctl_log),
+        }
+    )
+
+    result = _run(environment, "internal-run-managed")
+
+    assert result.returncode == 17
+    assert launchctl_log.read_text(encoding="utf-8").splitlines() == [
+        "remove com.example.one-shot"
+    ]
+    current = json.loads((state / "state.json").read_text(encoding="utf-8"))
+    assert current["phase"] == "benchmark_failed"
 
 
 @pytest.mark.parametrize(
