@@ -59,4 +59,4 @@
 - [x] **Step 1: Run full no-spend regression verification and invoke the runner start command.**
 - [x] **Step 2: Confirm the PID is live under `caffeinate`, the state advances, and no competing runner exists.**
 - [ ] **Step 3: Record benchmark size/rate/checkpoint decision and confirm the production build starts only if both storage gates pass.**
-- [ ] **Step 4: Update and push the checklist with measured progress while leaving runtime artifacts ignored and all full four-list approvals unchanged.**
+- [x] **Step 4: Update and push the checklist with measured progress while leaving runtime artifacts ignored and all full four-list approvals unchanged.** Recorded 54,080 contiguous rows (54.1%) at 10:35 PM EST while the single runner remained CPU-active and the live staged stack remained healthy; the final benchmark report and storage decision remain correctly pending Step 3.
