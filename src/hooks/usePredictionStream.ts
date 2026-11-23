@@ -28,7 +28,6 @@ export function usePredictionStream(
     }
     const controller = new AbortController()
     let completedCount = 0
-    setPredictions([])
     setPhase('predicting')
     setError(null)
 

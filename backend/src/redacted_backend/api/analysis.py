@@ -262,7 +262,7 @@ def create_analysis_router(
                     == PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1
                     and not blockers
                 ):
-                    limit_blocker = repository.staged_prediction_blocker(
+                    limit_blocker = repository.selected_staged_prediction_blocker(
                         document_id=passage.document_id,
                         passage_id=passage.id,
                         idempotency_key=idempotency_key,

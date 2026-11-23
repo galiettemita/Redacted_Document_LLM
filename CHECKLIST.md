@@ -220,6 +220,7 @@
           - [x] Recover queued, running, or completed current-revision jobs after context preparation and replay only their durable SSE events without scheduling another provider call.
           - [x] Reuse completed jobs, suppress duplicate clicks, bound derived idempotency keys, safely redispatch committed queued jobs, and reject passage edits/removal/addition while generation is active.
           - [x] Keep one generic **Predict passage** control and all scheduling, method, retrieval, cost, and evidence diagnostics out of the customer UI while leaving the fictional demo unchanged.
+          - [x] Bind **Predict passage** to the selected passage ID and prepared revision, preserve earlier completed results, and release the one-active-prediction gate after completion so later selected passages can run sequentially.
           - [x] Merge and deploy commit `4141e38`; verify healthy API/worker/frontend, 522 backend tests, 290 main-workspace frontend tests, typecheck, production build, Compose validation, and migration round-trip.
           - [x] Prove deployment/recovery made no provider call: before and after remained 4 claims, 1,288,680 microusd actual/committed spend, and one prediction event (ID 35).
       - [ ] Complete the running 100,000-row real CPU benchmark, then start and verify the resumable 14,549,269-row production build only if the measured storage gate passes.

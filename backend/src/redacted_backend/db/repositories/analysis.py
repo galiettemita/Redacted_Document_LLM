@@ -213,6 +213,41 @@ class AnalysisJobRepository:
             return _staged_limit_blocker()
         return None
 
+    def selected_staged_prediction_blocker(
+        self,
+        *,
+        document_id: UUID | str,
+        passage_id: UUID | str,
+        idempotency_key: str,
+        limit: int,
+    ) -> AnalysisBlocker | None:
+        existing = self._session.scalar(
+            select(AnalysisJob.id).where(
+                AnalysisJob.passage_id == str(passage_id),
+                AnalysisJob.idempotency_key == idempotency_key,
+            )
+        )
+        if existing is not None:
+            return None
+        active = self._session.scalar(
+            select(func.count())
+            .select_from(AnalysisJob)
+            .where(
+                AnalysisJob.document_id == str(document_id),
+                AnalysisJob.prediction_basis
+                == PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1.value,
+                AnalysisJob.status.in_(
+                    (
+                        AnalysisStatus.QUEUED.value,
+                        AnalysisStatus.RUNNING.value,
+                    )
+                ),
+            )
+        )
+        if int(active or 0) >= limit:
+            return _staged_limit_blocker()
+        return None
+
     def start(self, job_id: UUID | str) -> AnalysisJobRecord | None:
         model = self._session.get(AnalysisJob, str(job_id), with_for_update=True)
         if model is None:

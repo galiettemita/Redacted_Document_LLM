@@ -18,6 +18,8 @@ def _render_compose(environment: dict[str, str]) -> dict[str, object]:
         [
             "docker",
             "compose",
+            "--env-file",
+            os.devnull,
             "-f",
             str(COMPOSE_FILE),
             "--profile",

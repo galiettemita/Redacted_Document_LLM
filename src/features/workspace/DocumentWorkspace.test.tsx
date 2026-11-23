@@ -15,10 +15,10 @@ import type { DocumentDescriptor } from '../../types'
 import { DocumentWorkspace } from './DocumentWorkspace'
 
 vi.mock('../viewer/PdfViewer', () => ({
-  PdfViewer: ({ markingEnabled, onMarkPassage, passages = [] }: { markingEnabled?: boolean; onMarkPassage?: (page: number, rect: { x: number; y: number; width: number; height: number }) => void; passages?: Array<{ id: string; label: string }> }) => (
+  PdfViewer: ({ markingEnabled, onMarkPassage, onPinPassage, passages = [] }: { markingEnabled?: boolean; onMarkPassage?: (page: number, rect: { x: number; y: number; width: number; height: number }) => void; onPinPassage?: (passageId: string) => void; passages?: Array<{ id: string; label: string }> }) => (
     <div className="pdf-page-shell" aria-label="Local PDF renderer">
       {passages.map((passage) => (
-        <button key={passage.id} type="button" data-passage-id={passage.id} aria-label={`${passage.label} redaction`} />
+        <button key={passage.id} type="button" data-passage-id={passage.id} aria-label={`${passage.label} redaction`} onClick={() => onPinPassage?.(passage.id)} />
       ))}
       {markingEnabled ? (
         <button type="button" onClick={() => onMarkPassage?.(1, { x: 0.2, y: 0.3, width: 0.4, height: 0.08 })}>
@@ -535,10 +535,10 @@ describe('DocumentWorkspace', () => {
 
   it('does not start retrieval or a model call until the user requests it', async () => {
     vi.useRealTimers()
-    const scheduleDocumentAnalysis = vi.fn()
+    const schedulePassageAnalysis = vi.fn()
     const api = apiWithCreate(undefined, {
       detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
-      scheduleDocumentAnalysis,
+      schedulePassageAnalysis,
     })
     const { container } = render(
       <DocumentWorkspace
@@ -552,30 +552,32 @@ describe('DocumentWorkspace', () => {
     expect(await screen.findByRole('heading', {
       name: 'Ready to predict',
     })).toBeInTheDocument()
-    expect(scheduleDocumentAnalysis).not.toHaveBeenCalled()
+    expect(schedulePassageAnalysis).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'Predict passage' })).toBeInTheDocument()
     expect(container.querySelector('.pdf-page-shell')).toHaveTextContent('')
     expect(screen.queryByText('Predicted hidden passage')).not.toBeInTheDocument()
   })
 
-  it('streams an accepted job even when another passage is deferred', async () => {
+  it('schedules only the passage the user selected', async () => {
     vi.useRealTimers()
-    const accepted = analysisJob(savedPassage.id)
-    const scheduleDocumentAnalysis = vi.fn().mockResolvedValue({
-      document_id: uploadedDocument.backendDocumentId!,
-      accepted_jobs: [accepted],
-      deferred_passage_ids: [detectedSecondPassage.id],
-      blockers: [],
-    })
+    const accepted = {
+      ...analysisJob(detectedSecondPassage.id),
+      passage_revision: preparedContext.passage_revision,
+    }
+    const schedulePassageAnalysis = vi.fn().mockResolvedValue(accepted)
+    const scheduleDocumentAnalysis = vi.fn().mockRejectedValue(
+      new Error('The document-wide endpoint must not be used for a selected passage.'),
+    )
     const api = apiWithCreate(undefined, {
       detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
       scheduleDocumentAnalysis,
+      schedulePassageAnalysis,
     })
     const stream = vi.fn<PredictionService['stream']>(
       async (_document, _signal, onPrediction) => {
         onPrediction({
-          passageId: savedPassage.id,
-          page: 1,
+          passageId: detectedSecondPassage.id,
+          page: 2,
           model: 'GPT-6 Astra',
           text: 'Recovered archival sentence.',
           provenance: 'model',
@@ -595,26 +597,29 @@ describe('DocumentWorkspace', () => {
     )
     await screen.findByRole('heading', { name: 'Ready to predict' })
 
+    fireEvent.click(screen.getByRole('button', { name: 'Passage 2 redaction' }))
     fireEvent.click(screen.getByRole('button', { name: 'Predict passage' }))
 
-    await waitFor(() => expect(scheduleDocumentAnalysis).toHaveBeenCalledOnce())
+    await waitFor(() => expect(schedulePassageAnalysis).toHaveBeenCalledOnce())
     await waitFor(() => expect(stream).toHaveBeenCalledWith(
       uploadedDocument,
       expect.any(AbortSignal),
       expect.any(Function),
       {
         jobBases: {
-          [`job-${savedPassage.id}`]: 'model_only_v1',
+          [`job-${detectedSecondPassage.id}`]: 'model_only_v1',
         },
       },
     ))
-    expect(scheduleDocumentAnalysis).toHaveBeenCalledWith(
-      uploadedDocument.backendDocumentId,
+    expect(schedulePassageAnalysis).toHaveBeenCalledWith(
+      detectedSecondPassage.id,
+      preparedContext.passage_revision,
       expect.objectContaining({
         idempotencyKey: expect.any(String),
         signal: expect.any(AbortSignal),
       }),
     )
+    expect(scheduleDocumentAnalysis).not.toHaveBeenCalled()
     expect(await screen.findByText('Recovered archival sentence.')).toBeInTheDocument()
     expect(screen.getByText(
       'Model-only prediction — no archive evidence used',
@@ -627,16 +632,14 @@ describe('DocumentWorkspace', () => {
 
   it('shows a concise unavailable state without exposing infrastructure blockers', async () => {
     vi.useRealTimers()
-    const scheduleDocumentAnalysis = vi.fn().mockResolvedValue({
-      document_id: uploadedDocument.backendDocumentId!,
-      accepted_jobs: [],
-      deferred_passage_ids: [savedPassage.id, detectedSecondPassage.id],
-      blockers: [{ component: 'corpus', detail: 'complete corpus indexes are not available' }],
+    const schedulePassageAnalysis = vi.fn().mockResolvedValue({
+      ...analysisJob(savedPassage.id, 'blocked'),
+      passage_revision: preparedContext.passage_revision,
     })
     const predictionService: PredictionService = { stream: vi.fn() }
     const api = apiWithCreate(undefined, {
       detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
-      scheduleDocumentAnalysis,
+      schedulePassageAnalysis,
     })
     render(
       <DocumentWorkspace
@@ -659,19 +662,17 @@ describe('DocumentWorkspace', () => {
     expect(predictionService.stream).not.toHaveBeenCalled()
   })
 
-  it('reuses the document idempotency key after an uncertain scheduling response', async () => {
+  it('reuses the selected-passage idempotency key after an uncertain response', async () => {
     vi.useRealTimers()
-    const scheduleDocumentAnalysis = vi.fn()
+    const schedulePassageAnalysis = vi.fn()
       .mockRejectedValueOnce(new Error('The response was interrupted.'))
       .mockResolvedValueOnce({
-        document_id: uploadedDocument.backendDocumentId!,
-        accepted_jobs: [analysisJob(savedPassage.id)],
-        deferred_passage_ids: [detectedSecondPassage.id],
-        blockers: [],
+        ...analysisJob(savedPassage.id),
+        passage_revision: preparedContext.passage_revision,
       })
     const api = apiWithCreate(undefined, {
       detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
-      scheduleDocumentAnalysis,
+      schedulePassageAnalysis,
     })
     const predictionService: PredictionService = {
       async stream() {},
@@ -689,15 +690,15 @@ describe('DocumentWorkspace', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Predict passage' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('The response was interrupted.')
-    const firstKey = scheduleDocumentAnalysis.mock.calls[0][1].idempotencyKey
+    const firstKey = schedulePassageAnalysis.mock.calls[0][2].idempotencyKey
 
     fireEvent.click(screen.getByRole('button', { name: 'Predict passage' }))
 
-    await waitFor(() => expect(scheduleDocumentAnalysis).toHaveBeenCalledTimes(2))
-    expect(scheduleDocumentAnalysis.mock.calls[1][1].idempotencyKey).toBe(firstKey)
+    await waitFor(() => expect(schedulePassageAnalysis).toHaveBeenCalledTimes(2))
+    expect(schedulePassageAnalysis.mock.calls[1][2].idempotencyKey).toBe(firstKey)
   })
 
-  it('recovers a completed current prediction without scheduling another job', async () => {
+  it('recovers a completed prediction and leaves another passage available', async () => {
     vi.useRealTimers()
     const recovered = {
       ...analysisJob(savedPassage.id),
@@ -705,7 +706,7 @@ describe('DocumentWorkspace', () => {
       status: 'complete' as const,
       stage: 'complete' as const,
     }
-    const scheduleDocumentAnalysis = vi.fn()
+    const schedulePassageAnalysis = vi.fn()
     const getDocumentAnalysis = vi.fn().mockResolvedValue({
       document_id: uploadedDocument.backendDocumentId!,
       jobs: [recovered],
@@ -725,7 +726,7 @@ describe('DocumentWorkspace', () => {
     const api = apiWithCreate(undefined, {
       detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
       getDocumentAnalysis,
-      scheduleDocumentAnalysis,
+      schedulePassageAnalysis,
     })
 
     render(
@@ -743,17 +744,19 @@ describe('DocumentWorkspace', () => {
       uploadedDocument.backendDocumentId,
       expect.any(AbortSignal),
     )
-    expect(scheduleDocumentAnalysis).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Passage 2 redaction' }))
+    expect(screen.getByRole('button', { name: 'Predict passage' })).toBeEnabled()
+    expect(schedulePassageAnalysis).not.toHaveBeenCalled()
   })
 
-  it('suppresses duplicate prediction clicks while document scheduling is pending', async () => {
+  it('suppresses duplicate prediction clicks while passage scheduling is pending', async () => {
     vi.useRealTimers()
-    const scheduleDocumentAnalysis = vi.fn<BackendApi['scheduleDocumentAnalysis']>(
+    const schedulePassageAnalysis = vi.fn<BackendApi['schedulePassageAnalysis']>(
       () => new Promise(() => {}),
     )
     const api = apiWithCreate(undefined, {
       detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
-      scheduleDocumentAnalysis,
+      schedulePassageAnalysis,
     })
     render(
       <DocumentWorkspace
@@ -768,19 +771,17 @@ describe('DocumentWorkspace', () => {
     fireEvent.click(button)
     fireEvent.click(button)
 
-    expect(scheduleDocumentAnalysis).toHaveBeenCalledOnce()
+    expect(schedulePassageAnalysis).toHaveBeenCalledOnce()
     expect(button).toBeDisabled()
   })
 
   it('locks passage changes and replacement while an accepted prediction is active', async () => {
     vi.useRealTimers()
-    const accepted = analysisJob(savedPassage.id)
-    const scheduleDocumentAnalysis = vi.fn().mockResolvedValue({
-      document_id: uploadedDocument.backendDocumentId!,
-      accepted_jobs: [accepted],
-      deferred_passage_ids: [detectedSecondPassage.id],
-      blockers: [],
-    })
+    const accepted = {
+      ...analysisJob(savedPassage.id),
+      passage_revision: preparedContext.passage_revision,
+    }
+    const schedulePassageAnalysis = vi.fn().mockResolvedValue(accepted)
     const stream = vi.fn<PredictionService['stream']>(
       async (_document, signal) => new Promise<void>((resolve) => {
         signal.addEventListener('abort', () => resolve(), { once: true })
@@ -788,7 +789,7 @@ describe('DocumentWorkspace', () => {
     )
     const api = apiWithCreate(undefined, {
       detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
-      scheduleDocumentAnalysis,
+      schedulePassageAnalysis,
     })
     render(
       <DocumentWorkspace

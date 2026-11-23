@@ -34,7 +34,7 @@ class RecordingDispatcher:
         self.job_ids.append(job_id)
 
 
-def test_staged_limit_allows_only_first_prepared_passage_and_replay(
+def test_selected_staged_limit_allows_one_active_passage_at_a_time(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -45,26 +45,38 @@ def test_staged_limit_allows_only_first_prepared_passage_and_replay(
         dispatcher=dispatcher,
     )
 
-    later_first = _schedule(app, second.id, second.revision, "later-first")
-    allowed = _schedule(app, first.id, first.revision, "first-staged")
-    replay = _schedule(app, first.id, first.revision, "first-staged")
-    later_again = _schedule(app, second.id, second.revision, "later-again")
+    selected = _schedule(app, second.id, second.revision, "selected-second")
+    replay = _schedule(app, second.id, second.revision, "selected-second")
+    blocked_while_active = _schedule(
+        app, first.id, first.revision, "first-while-second-active"
+    )
 
-    assert later_first["prediction_basis"] == (
+    assert selected["prediction_basis"] == (
         PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1.value
     )
-    assert later_first["status"] == "blocked"
-    assert later_first["blockers"] == [
+    assert selected["status"] == "queued"
+    assert selected["stage"] == "query"
+    assert replay == selected
+    assert blocked_while_active["status"] == "blocked"
+    assert blocked_while_active["blockers"] == [
         {
             "component": "staged_prediction_limit",
             "detail": "This passage is not enabled for staged prediction yet",
         }
     ]
-    assert allowed["status"] == "queued"
-    assert allowed["stage"] == "query"
-    assert replay == allowed
-    assert later_again["status"] == "blocked"
-    assert dispatcher.job_ids == [UUID(allowed["id"])]
+    with app.state.database.session_factory() as session, session.begin():
+        completed = session.get(AnalysisJob, selected["id"])
+        assert completed is not None
+        completed.status = "complete"
+        completed.stage = "complete"
+
+    next_selected = _schedule(app, first.id, first.revision, "selected-first-next")
+
+    assert next_selected["status"] == "queued"
+    assert dispatcher.job_ids == [
+        UUID(selected["id"]),
+        UUID(next_selected["id"]),
+    ]
     with app.state.database.session_factory() as session:
         jobs = session.scalars(
             select(AnalysisJob).where(

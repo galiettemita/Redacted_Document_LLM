@@ -414,17 +414,16 @@ export function DocumentWorkspace({
     }
   }
 
-  async function handlePredictAllPassages() {
+  async function handlePredictSelectedPassage() {
     if (
       !backendReady
       || contextStatus !== 'ready'
       || !document.backendDocumentId
+      || !selectedPassage
     ) return
-    const targets = state.passages.filter((passage) => (
-      !passage.id.startsWith('pending-') && contextSummaries[passage.id]
-    ))
-    if (targets.length !== state.passages.length || targets.length === 0) {
-      setAnalysisError('Every live passage needs a matching prepared revision before prediction.')
+    const selectedContext = contextSummaries[selectedPassage.id]
+    if (selectedPassage.id.startsWith('pending-') || !selectedContext) {
+      setAnalysisError('The selected passage needs a matching prepared revision before prediction.')
       return
     }
     analysisRequest.current?.abort()
@@ -435,23 +434,26 @@ export function DocumentWorkspace({
     const runId = analysisRunId.current ?? createIdempotencyKey()
     analysisRunId.current = runId
     try {
-      const result = await backendApi.scheduleDocumentAnalysis(
-        document.backendDocumentId,
+      const job = await backendApi.schedulePassageAnalysis(
+        selectedPassage.id,
+        selectedContext.passage_revision,
         { idempotencyKey: runId, signal: controller.signal },
       )
-      if (result.document_id !== document.backendDocumentId) {
-        throw new Error('The backend returned predictions for a different document.')
+      if (
+        job.document_id !== document.backendDocumentId
+        || job.passage_id !== selectedPassage.id
+        || job.passage_revision !== selectedContext.passage_revision
+      ) {
+        throw new Error('The backend returned a prediction for a different passage.')
       }
-      if (result.accepted_jobs.length === 0) {
+      if (job.status === 'blocked' || job.blockers.length > 0) {
         analysisRunId.current = null
         setAnalysisScheduleStatus('blocked')
         setAnalysisError('Predictions are not available yet. Please try again later.')
         return
       }
       setAnalysisScheduleStatus('running')
-      setPredictionJobBases(Object.fromEntries(
-        result.accepted_jobs.map((job) => [job.id, job.prediction_basis]),
-      ))
+      setPredictionJobBases({ [job.id]: job.prediction_basis })
       setPredictionRunKey((current) => current + 1)
       analysisRunId.current = null
     } catch (error) {
@@ -468,6 +470,10 @@ export function DocumentWorkspace({
     if (!passage) return
     dispatch({ type: 'select-passage', passageId, page: passage.page })
   }
+
+  const selectedHasPrediction = selectedPassage
+    ? predictions.some((prediction) => prediction.passageId === selectedPassage.id)
+    : false
 
   return (
     <main className="workspace-shell">
@@ -694,9 +700,11 @@ export function DocumentWorkspace({
                       deletionInProgress
                       || analysisScheduleStatus === 'scheduling'
                       || analysisScheduleStatus === 'running'
-                      || predictions.length > 0
+                      || !selectedPassage
+                      || !contextSummaries[selectedPassage.id]
+                      || selectedHasPrediction
                     }
-                    onClick={() => void handlePredictAllPassages()}
+                    onClick={() => void handlePredictSelectedPassage()}
                   >
                     {analysisScheduleStatus === 'scheduling'
                       ? 'Starting prediction…'

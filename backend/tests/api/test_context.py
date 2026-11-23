@@ -51,6 +51,7 @@ def create_test_app_and_passage(tmp_path: Path, **app_kwargs):
     settings_overrides = app_kwargs.pop("settings_overrides", {})
     app = create_app(
         Settings(
+            _env_file=None,
             database_url=f"sqlite+pysqlite:///{tmp_path / 'context.sqlite3'}",
             document_storage_root=tmp_path / "stored-documents",
             opensearch_url="http://127.0.0.1:1",
