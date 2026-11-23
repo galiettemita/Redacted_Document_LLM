@@ -9,7 +9,12 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from redacted_backend.db.models import AnalysisEvent, AnalysisJob
+from redacted_backend.db.models import (
+    AnalysisEvent,
+    AnalysisJob,
+    Passage,
+    VisibleExampleArtifact,
+)
 from redacted_backend.domain.analysis import (
     AnalysisBlocker,
     AnalysisEventRecord,
@@ -102,6 +107,74 @@ class AnalysisJobRepository:
     def get(self, job_id: UUID | str) -> AnalysisJobRecord | None:
         model = self._session.get(AnalysisJob, str(job_id))
         return _job_record(model) if model is not None else None
+
+    def get_by_idempotency(
+        self,
+        passage_id: UUID | str,
+        idempotency_key: str,
+    ) -> AnalysisJobRecord | None:
+        model = self._session.scalar(
+            select(AnalysisJob).where(
+                AnalysisJob.passage_id == str(passage_id),
+                AnalysisJob.idempotency_key == idempotency_key,
+            )
+        )
+        return _job_record(model) if model is not None else None
+
+    def staged_prediction_blocker(
+        self,
+        *,
+        document_id: UUID | str,
+        passage_id: UUID | str,
+        idempotency_key: str,
+        limit: int,
+    ) -> AnalysisBlocker | None:
+        existing = self._session.scalar(
+            select(AnalysisJob.id).where(
+                AnalysisJob.passage_id == str(passage_id),
+                AnalysisJob.idempotency_key == idempotency_key,
+            )
+        )
+        if existing is not None:
+            return None
+        prepared = self._session.scalars(
+            select(Passage)
+            .join(
+                VisibleExampleArtifact,
+                VisibleExampleArtifact.passage_id == Passage.id,
+            )
+            .where(
+                Passage.document_id == str(document_id),
+                Passage.status != "deleted",
+                VisibleExampleArtifact.passage_revision == Passage.revision,
+                VisibleExampleArtifact.invalidated_at.is_(None),
+            )
+        ).all()
+        eligible_ids = [
+            model.id
+            for model in sorted(prepared, key=_passage_order_key)[:limit]
+        ]
+        if str(passage_id) not in eligible_ids:
+            return _staged_limit_blocker()
+        consuming = self._session.scalar(
+            select(func.count())
+            .select_from(AnalysisJob)
+            .where(
+                AnalysisJob.document_id == str(document_id),
+                AnalysisJob.prediction_basis
+                == PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1.value,
+                AnalysisJob.status.in_(
+                    (
+                        AnalysisStatus.QUEUED.value,
+                        AnalysisStatus.RUNNING.value,
+                        AnalysisStatus.COMPLETE.value,
+                    )
+                ),
+            )
+        )
+        if int(consuming or 0) >= limit:
+            return _staged_limit_blocker()
+        return None
 
     def start(self, job_id: UUID | str) -> AnalysisJobRecord | None:
         model = self._session.get(AnalysisJob, str(job_id), with_for_update=True)
@@ -386,6 +459,18 @@ def _request_hash(passage_id: UUID, revision: int) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
+
+
+def _staged_limit_blocker() -> AnalysisBlocker:
+    return AnalysisBlocker(
+        component="staged_prediction_limit",
+        detail="This passage is not enabled for staged prediction yet",
+    )
+
+
+def _passage_order_key(model: Passage) -> tuple[int, float, float, str]:
+    first_rect = min(model.rects, key=lambda rect: (rect["y"], rect["x"]))
+    return model.page_number, first_rect["y"], first_rect["x"], model.id
 
 
 def _replayed_job(model: AnalysisJob, request_hash: str) -> AnalysisJobRecord:

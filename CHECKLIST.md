@@ -199,6 +199,7 @@
         - [x] Add the immutable staged basis, exact two-list BM25 trace, self-exclusion/RRF retrieval, evidence-bound generation, and durable trace resume without dense placeholders.
         - [x] Add the cumulative integer-microdollar staged spend ledger, $10.00 fail-closed cap, pre-dispatch maximum reservations, actual-cost settlement, and uncertain-call retention.
         - [x] Add staged corpus/BM25 readiness, exact live-count and search probes, basis priority, and a BM25-only worker runtime that never requires dense artifacts.
+        - [x] Enforce the first-passage/default-one staged limit in geometric document order under a transaction lock, with durable blockers, retry release, raised-limit scaling, and replay-safe dispatch.
       - [ ] Complete the running 100,000-row real CPU benchmark, then start and verify the resumable 14,549,269-row production build only if the measured storage gate passes.
     - [x] With a real key configured and generation still disabled, count the exact one-passage request, show expected and maximum cost, and obtain explicit approval before the first paid model call.
       - [x] Align the production input-token request with the current provider schema by excluding generation-only fields, with a regression test and full backend/frontend verification.

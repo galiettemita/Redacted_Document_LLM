@@ -13,11 +13,13 @@ from redacted_backend.api.readiness import (
     resolve_best_available_corpus_readiness,
     resolve_corpus_readiness,
     resolve_prediction_basis_readiness,
+    resolve_staged_bm25_corpus_readiness,
     resolve_worker_readiness,
     select_prediction_basis,
 )
 from redacted_backend.config import Settings
 from redacted_backend.db.base import Database
+from redacted_backend.db.models import Document
 from redacted_backend.db.repositories.analysis import (
     AnalysisConflictError,
     AnalysisJobRepository,
@@ -32,6 +34,8 @@ from redacted_backend.domain.analysis import (
 )
 from redacted_backend.domain.readiness import ComponentReadiness
 from redacted_backend.jobs.queue import AnalysisDispatcher
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 
 class ScheduleAnalysisRequest(BaseModel):
@@ -67,6 +71,7 @@ def create_analysis_router(
             )
         try:
             with ready_database.session_factory() as session, session.begin():
+                _begin_analysis_write_lock(ready_database, session)
                 passage = PassageRepository(session).get_live(passage_id)
                 if passage is None:
                     raise _not_found()
@@ -78,6 +83,7 @@ def create_analysis_router(
                             "message": "Passage revision changed before analysis scheduling",
                         },
                     )
+                _lock_analysis_document(session, passage.document_id)
                 artifact = VisibleExampleRepository(session).get_current(
                     passage.id,
                     passage.revision,
@@ -113,7 +119,25 @@ def create_analysis_router(
                         value is not None for value in query_fields
                     ),
                 )
-                job = AnalysisJobRepository(session).schedule(
+                repository = AnalysisJobRepository(session)
+                replayed = (
+                    repository.get_by_idempotency(passage.id, idempotency_key)
+                    is not None
+                )
+                if (
+                    prediction_basis
+                    == PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1
+                    and not blockers
+                ):
+                    limit_blocker = repository.staged_prediction_blocker(
+                        document_id=passage.document_id,
+                        passage_id=passage.id,
+                        idempotency_key=idempotency_key,
+                        limit=settings.bm25_stage_max_predictions_per_document,
+                    )
+                    if limit_blocker is not None:
+                        blockers.append(limit_blocker)
+                job = repository.schedule(
                     passage_id=passage.id,
                     document_id=passage.document_id,
                     passage_revision=passage.revision,
@@ -121,7 +145,7 @@ def create_analysis_router(
                     blockers=blockers,
                     prediction_basis=prediction_basis,
                 )
-            if job.status == "queued":
+            if job.status == "queued" and not replayed:
                 if dispatcher is None:
                     raise HTTPException(
                         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -197,16 +221,19 @@ def _analysis_decision(
     database = ComponentReadiness(ready=True, detail="ready")
     worker = resolve_worker_readiness(settings)
     corpus = resolve_corpus_readiness(settings)
+    staged_bm25_corpus = resolve_staged_bm25_corpus_readiness(settings)
     best_available_corpus = resolve_best_available_corpus_readiness(settings)
     bases = resolve_prediction_basis_readiness(
         settings,
         database=database,
         worker=worker,
         corpus=corpus,
+        staged_bm25_corpus=staged_bm25_corpus,
         best_available_corpus=best_available_corpus,
     )
     if not context_query_ready:
         for basis in (
+            PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1,
             PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
             PredictionBasis.PAPER_EXACT_V1,
         ):
@@ -301,6 +328,19 @@ def _require_database(database: Database | None) -> Database:
             detail={"code": "backend_not_configured"},
         )
     return database
+
+
+def _begin_analysis_write_lock(database: Database, session: Session) -> None:
+    if database.engine.dialect.name == "sqlite":
+        session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+
+
+def _lock_analysis_document(session: Session, document_id: UUID) -> None:
+    session.scalar(
+        select(Document.id)
+        .where(Document.id == str(document_id))
+        .with_for_update()
+    )
 
 
 def _not_found() -> HTTPException:

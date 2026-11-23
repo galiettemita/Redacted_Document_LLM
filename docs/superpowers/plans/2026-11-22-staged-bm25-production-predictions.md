@@ -115,11 +115,11 @@
 - Consumes: persisted passage order, active/completed staged jobs, and `bm25_stage_max_predictions_per_document`.
 - Produces: a durable `staged_prediction_limit` blocker before dispatch/retrieval/provider work; failed/cancelled jobs do not consume the limit.
 
-- [ ] **Step 1: Write failing API tests** for first eligible passage, blocked later passage, idempotent replay, failed/cancelled release, raised limit, and concurrent scheduling serialized by a document lock.
-- [ ] **Step 2: Run the focused API tests and verify the limit can currently be bypassed.**
-- [ ] **Step 3: Implement the repository count/order query and transaction-scoped document lock, add the blocker before scheduling, and keep dispatch limited to queued jobs.**
-- [ ] **Step 4: Run focused API/orchestrator tests green.**
-- [ ] **Step 5: Commit and push with `feat: limit staged predictions per document`.**
+- [x] **Step 1: Write failing API tests** for first eligible passage, blocked later passage, idempotent replay, failed/cancelled release, raised limit, and concurrent scheduling serialized by a document lock.
+- [x] **Step 2: Run the focused API tests and verify the limit can currently be bypassed.**
+- [x] **Step 3: Implement the repository count/order query and transaction-scoped document lock, add the blocker before scheduling, and keep dispatch limited to queued jobs.**
+- [x] **Step 4: Run focused API/orchestrator tests green.**
+- [x] **Step 5: Commit and push with `feat: limit staged predictions per document`.**
 
 ### Task 5: Ship the generic UI and full no-spend loopback
 

@@ -7,6 +7,7 @@ from pathlib import Path
 from threading import Barrier
 from uuid import UUID
 
+import pytest
 from sqlalchemy import event, func, select
 from sqlalchemy.orm import Session
 
@@ -14,12 +15,133 @@ import redacted_backend.api.analysis as analysis_api
 import redacted_backend.domain.analysis as analysis_domain
 from redacted_backend.db.models import AnalysisEvent, AnalysisJob, Document
 from redacted_backend.db.repositories.analysis import AnalysisJobRepository
+from redacted_backend.db.repositories.passages import PassageRepository
+from redacted_backend.domain.analysis import PredictionBasis
+from redacted_backend.domain.passages import PassageRect, PassageSource
 from redacted_backend.domain.readiness import ComponentReadiness
 from tests.api.test_context import (
     create_test_app_and_passage,
     install_fake_preparation,
     request,
 )
+
+
+class RecordingDispatcher:
+    def __init__(self) -> None:
+        self.job_ids: list[UUID] = []
+
+    def dispatch(self, job_id: UUID) -> None:
+        self.job_ids.append(job_id)
+
+
+def test_staged_limit_allows_only_first_prepared_passage_and_replay(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dispatcher = RecordingDispatcher()
+    app, document, first, second = _staged_app(
+        tmp_path,
+        monkeypatch,
+        dispatcher=dispatcher,
+    )
+
+    later_first = _schedule(app, second.id, second.revision, "later-first")
+    allowed = _schedule(app, first.id, first.revision, "first-staged")
+    replay = _schedule(app, first.id, first.revision, "first-staged")
+    later_again = _schedule(app, second.id, second.revision, "later-again")
+
+    assert later_first["prediction_basis"] == (
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1.value
+    )
+    assert later_first["status"] == "blocked"
+    assert later_first["blockers"] == [
+        {
+            "component": "staged_prediction_limit",
+            "detail": "This passage is not enabled for staged prediction yet",
+        }
+    ]
+    assert allowed["status"] == "queued"
+    assert allowed["stage"] == "query"
+    assert replay == allowed
+    assert later_again["status"] == "blocked"
+    assert dispatcher.job_ids == [UUID(allowed["id"])]
+    with app.state.database.session_factory() as session:
+        jobs = session.scalars(
+            select(AnalysisJob).where(
+                AnalysisJob.document_id == str(document.id)
+            )
+        ).all()
+    assert len(jobs) == 3
+
+
+@pytest.mark.parametrize("terminal_status", ["failed", "cancelled"])
+def test_failed_or_cancelled_staged_job_releases_the_document_limit(
+    tmp_path: Path,
+    monkeypatch,
+    terminal_status: str,
+) -> None:
+    dispatcher = RecordingDispatcher()
+    app, _document, first, _second = _staged_app(
+        tmp_path,
+        monkeypatch,
+        dispatcher=dispatcher,
+    )
+    initial = _schedule(app, first.id, first.revision, "initial-staged")
+    with app.state.database.session_factory() as session, session.begin():
+        repository = AnalysisJobRepository(session)
+        if terminal_status == "failed":
+            repository.fail(initial["id"], code="test_failure", detail="test")
+        else:
+            repository.cancel(initial["id"], code="test_cancel", detail="test")
+
+    retry = _schedule(app, first.id, first.revision, f"retry-{terminal_status}")
+
+    assert retry["status"] == "queued"
+    assert dispatcher.job_ids == [UUID(initial["id"]), UUID(retry["id"])]
+
+
+def test_raising_staged_limit_to_two_enables_the_second_passage(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dispatcher = RecordingDispatcher()
+    app, _document, first, second = _staged_app(
+        tmp_path,
+        monkeypatch,
+        dispatcher=dispatcher,
+        limit=2,
+    )
+
+    first_job = _schedule(app, first.id, first.revision, "limit-two-first")
+    second_job = _schedule(app, second.id, second.revision, "limit-two-second")
+
+    assert first_job["status"] == second_job["status"] == "queued"
+    assert dispatcher.job_ids == [UUID(first_job["id"]), UUID(second_job["id"])]
+
+
+def test_concurrent_staged_requests_cannot_bypass_the_document_limit(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dispatcher = RecordingDispatcher()
+    app, _document, first, _second = _staged_app(
+        tmp_path,
+        monkeypatch,
+        dispatcher=dispatcher,
+    )
+    barrier = Barrier(2)
+
+    def schedule(key: str) -> dict[str, object]:
+        barrier.wait(timeout=5)
+        return _schedule(app, first.id, first.revision, key)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(
+            executor.map(schedule, ("concurrent-one", "concurrent-two"))
+        )
+
+    assert sorted(result["status"] for result in results) == ["blocked", "queued"]
+    assert len(dispatcher.job_ids) == 1
 
 
 def test_analysis_request_persists_a_truthful_blocked_job_and_is_idempotent(
@@ -380,3 +502,76 @@ def test_model_only_schedules_when_visible_context_has_no_retrieval_terms(
     assert scheduled.json()["stage"] == "prediction"
     assert scheduled.json()["prediction_basis"] == "model_only_v1"
     assert dispatched == [UUID(scheduled.json()["id"])]
+
+
+def _staged_app(
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    dispatcher: RecordingDispatcher,
+    limit: int = 1,
+):
+    ready = ComponentReadiness(ready=True, detail="ready")
+    unavailable = ComponentReadiness(ready=False, detail="not configured")
+    monkeypatch.setattr(analysis_api, "resolve_worker_readiness", lambda _s: ready)
+    monkeypatch.setattr(analysis_api, "resolve_corpus_readiness", lambda _s: unavailable)
+    monkeypatch.setattr(
+        analysis_api,
+        "resolve_best_available_corpus_readiness",
+        lambda _s: unavailable,
+    )
+    monkeypatch.setattr(
+        analysis_api,
+        "resolve_staged_bm25_corpus_readiness",
+        lambda _s: ready,
+        raising=False,
+    )
+    app, document, first = create_test_app_and_passage(
+        tmp_path,
+        analysis_dispatcher=dispatcher,
+        settings_overrides={
+            "redis_url": "redis://worker.test/0",
+            "openai_api_key": "secret",
+            "allow_paid_model_calls": True,
+            "allow_model_only_calls": False,
+            "allow_staged_bm25_calls": True,
+            "allow_best_available_calls": False,
+            "allow_paper_exact_calls": False,
+            "staged_bm25_spend_cap_usd": "10.00",
+            "bm25_stage_max_predictions_per_document": limit,
+        },
+    )
+    with app.state.database.session_factory() as session, session.begin():
+        second = PassageRepository(session).create(
+            document_id=document.id,
+            label="Passage 2",
+            page_number=1,
+            rects=[PassageRect(x=0.5, y=0.5, width=0.2, height=0.05)],
+            source=PassageSource.MANUAL,
+        )
+    install_fake_preparation(monkeypatch, calls=[])
+    for passage in (first, second):
+        prepared = asyncio.run(
+            request(app, "POST", f"/v1/passages/{passage.id}:prepare-context")
+        )
+        assert prepared.status_code == 200
+    return app, document, first, second
+
+
+def _schedule(
+    app,
+    passage_id,
+    revision: int,
+    key: str,
+) -> dict[str, object]:
+    response = asyncio.run(
+        request(
+            app,
+            "POST",
+            f"/v1/passages/{passage_id}/analysis",
+            headers={"Idempotency-Key": key},
+            json={"expected_revision": revision},
+        )
+    )
+    assert response.status_code == 202
+    return response.json()
