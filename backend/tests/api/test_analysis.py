@@ -114,7 +114,7 @@ def test_document_schedule_accepts_the_first_passage_and_defers_the_rest(
     assert jobs[0].status == "queued"
 
 
-def test_document_schedule_replays_the_same_job_without_redispatch(
+def test_document_schedule_replays_the_same_job_with_safe_redispatch(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -135,7 +135,73 @@ def test_document_schedule_replays_the_same_job_without_redispatch(
 
     assert first.status_code == replay.status_code == 202
     assert replay.json() == first.json()
-    assert len(dispatcher.job_ids) == 1
+    assert len(dispatcher.job_ids) == 2
+    assert dispatcher.job_ids[0] == dispatcher.job_ids[1]
+
+
+def test_document_schedule_retry_redispatches_a_committed_queued_job(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class FlakyDispatcher:
+        def __init__(self) -> None:
+            self.job_ids: list[UUID] = []
+
+        def dispatch(self, job_id: UUID) -> None:
+            self.job_ids.append(job_id)
+            if len(self.job_ids) == 1:
+                raise RuntimeError("broker unavailable")
+
+    dispatcher = FlakyDispatcher()
+    app, document, _first, _second = _staged_app(
+        tmp_path,
+        monkeypatch,
+        dispatcher=dispatcher,
+    )
+    headers = {"Idempotency-Key": "retry-committed-document-run"}
+
+    interrupted = asyncio.run(
+        request(app, "POST", f"/v1/documents/{document.id}/analysis", headers=headers)
+    )
+    retried = asyncio.run(
+        request(app, "POST", f"/v1/documents/{document.id}/analysis", headers=headers)
+    )
+
+    assert interrupted.status_code == 503
+    assert interrupted.json()["detail"]["code"] == "worker_dispatch_failed"
+    assert retried.status_code == 202
+    assert len(dispatcher.job_ids) == 2
+    assert dispatcher.job_ids[0] == dispatcher.job_ids[1]
+    with app.state.database.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(AnalysisJob)) == 1
+
+
+def test_document_schedule_hashes_a_maximum_length_key_for_storage(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dispatcher = RecordingDispatcher()
+    app, document, _first, _second = _staged_app(
+        tmp_path,
+        monkeypatch,
+        dispatcher=dispatcher,
+    )
+
+    response = asyncio.run(
+        request(
+            app,
+            "POST",
+            f"/v1/documents/{document.id}/analysis",
+            headers={"Idempotency-Key": "x" * 512},
+        )
+    )
+
+    assert response.status_code == 202
+    with app.state.database.session_factory() as session:
+        job = session.scalar(select(AnalysisJob))
+        assert job is not None
+        assert len(job.idempotency_key) <= 512
+        assert job.idempotency_key != "x" * 512
 
 
 def test_document_analysis_state_recovers_only_current_nonfailed_jobs(

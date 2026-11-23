@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from collections.abc import Iterator
@@ -66,7 +67,6 @@ def create_analysis_router(
     ) -> DocumentAnalysisScheduleResult:
         ready_database = _require_database(database)
         _validate_idempotency_key(idempotency_key)
-        new_jobs: list[AnalysisJobRecord] = []
         try:
             with ready_database.session_factory() as session, session.begin():
                 _begin_analysis_write_lock(ready_database, session)
@@ -121,7 +121,10 @@ def create_analysis_router(
                             value is not None for value in query_fields
                         ),
                     )
-                    passage_key = f"{idempotency_key}:{passage.id}"
+                    passage_key = _document_passage_key(
+                        idempotency_key,
+                        passage.id,
+                    )
                     if (
                         prediction_basis
                         == PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1
@@ -143,9 +146,6 @@ def create_analysis_router(
                             if blocker.component != "staged_prediction_limit"
                         )
                         continue
-                    replayed = repository.get_by_idempotency(
-                        passage.id, passage_key
-                    ) is not None
                     job = repository.schedule(
                         passage_id=passage.id,
                         document_id=document_id,
@@ -155,8 +155,6 @@ def create_analysis_router(
                         prediction_basis=prediction_basis,
                     )
                     accepted[passage.id] = job
-                    if job.status == "queued" and not replayed:
-                        new_jobs.append(job)
 
                 accepted_jobs = [
                     accepted[passage.id]
@@ -174,7 +172,9 @@ def create_analysis_router(
                     deferred_passage_ids=deferred,
                     blockers=blockers,
                 )
-            for job in new_jobs:
+            for job in result.accepted_jobs:
+                if job.status != "queued":
+                    continue
                 _dispatch_job(dispatcher, job)
             return result
         except AnalysisConflictError as error:
@@ -513,6 +513,13 @@ def _validate_idempotency_key(idempotency_key: str) -> None:
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "invalid_idempotency_key"},
         )
+
+
+def _document_passage_key(idempotency_key: str, passage_id: UUID) -> str:
+    digest = hashlib.sha256(
+        f"{idempotency_key}:{passage_id}".encode("ascii")
+    ).hexdigest()
+    return f"document-analysis-v1:{digest}"
 
 
 def _unique_blockers(blockers: list[AnalysisBlocker]) -> list[AnalysisBlocker]:
