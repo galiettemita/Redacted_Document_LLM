@@ -16,7 +16,7 @@
 - Require projected artifacts `<= 16 GiB` and at least 4 GiB projected free storage.
 - Use one live PID; a second start must report the live runner or resume verified checkpoints.
 - Publish no final dense manifest until checksum, recall@300 `>= 0.98`, total-size, and 100-query same-worker latency `<= 5.0` seconds all pass.
-- Do not enable full four-list spending when the dense build finishes.
+- Do not enable full four-list spending before final verification and user authorization. The separately tested activator may enable the full basis after both conditions are satisfied, but it must not invoke a prediction or provider endpoint itself.
 
 ## Review Focus
 
@@ -159,4 +159,4 @@
 - [x] **Step 1: Write failing subprocess tests** for waiting, failed finalization, invalid verification, exact `.env` mutation, Docker failure, live readiness proof, secret non-disclosure, and managed launch cleanup. All 12 tests failed on the absent activator.
 - [x] **Step 2: Implement the minimal fail-closed activator with atomic state/config writes and one-shot launchd lifecycle.** It changes only the full-basis flag after the final report passes, never calls a prediction/provider endpoint, and requires the live API to select the full basis.
 - [x] **Step 3: Run focused and complete verification, document the operator contract, update the checklist, commit, and push.** Focused scripts: 32 passed. Full backend: 557 passed with 2 expected skips. Frontend: 290 passed; typecheck, production build, Compose validation, zsh syntax, and diff checks passed.
-- [ ] **Step 4: Launch the activator beside the encoder/finalizer and prove all three processes are independently durable without making a provider call.**
+- [x] **Step 4: Launch the activator beside the encoder/finalizer and prove all three processes are independently durable without making a provider call.** Encoder PID 45140, finalizer PID 63781, and activator PID 67952 are separately launchd-managed under PID 1. Activation remains `waiting`, the full flag remains false, and database counts stayed exactly 13 analysis jobs and 6 staged provider claims across launch.
