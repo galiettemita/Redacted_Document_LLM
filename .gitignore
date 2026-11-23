@@ -6,6 +6,7 @@ __pycache__/
 backend/.venv/
 # Durable local dense-runner state is operational data, never source.
 var/corpus/best-available/dense-build-state/
+var/corpus/best-available/dense-finalizer-state/
 var/
 node_modules/
 dist/

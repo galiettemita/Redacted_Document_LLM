@@ -60,3 +60,22 @@
 - [x] **Step 2: Confirm the PID is live under `caffeinate`, the state advances, and no competing runner exists.**
 - [ ] **Step 3: Record benchmark size/rate/checkpoint decision and confirm the production build starts only if both storage gates pass.**
 - [x] **Step 4: Update and push the checklist with measured progress while leaving runtime artifacts ignored and all full four-list approvals unchanged.** Recorded 54,080 contiguous rows (54.1%) at 10:35 PM EST while the single runner remained CPU-active and the live staged stack remained healthy; the final benchmark report and storage decision remain correctly pending Step 3.
+
+### Task 3: Make post-build certification durable
+
+**Files:**
+- Create: `scripts/finalize-local-dense-build.zsh`
+- Create: `backend/tests/corpus/test_local_dense_finalizer.py`
+- Modify: `.gitignore`
+- Modify: `README.md`
+- Modify: `CHECKLIST.md`
+
+**Interfaces:**
+- Consumes: Task 2's durable build state and published recall-certified dense manifest.
+- Produces: one durable single-instance waiter, worker-image latency report, final verification report, and explicit terminal state without changing provider approvals.
+
+- [x] **Step 1: Write failing subprocess tests** for condition-based waiting, worker-image command order, read-write artifact override, terminal build failures, latency failure, stale PID recovery, and duplicate-start prevention.
+- [x] **Step 2: Run the focused finalizer tests red.** Nine tests failed because the finalizer did not exist.
+- [x] **Step 3: Implement a launchd/nohup/caffeinate finalizer with atomic state and no destructive operations or provider path.**
+- [x] **Step 4: Run focused finalizer and runner tests, then the complete backend suite.** Focused: 18 passed. Full backend: 531 passed, 2 expected environment skips.
+- [x] **Step 5: Launch the finalizer beside the active benchmark, update the checklist, commit, and push.** PID 22608 is launchd-managed under PID 1, reports `waiting` on build phase `benchmarking`, and had not invoked Docker at launch verification.

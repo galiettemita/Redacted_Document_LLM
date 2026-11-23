@@ -194,6 +194,15 @@ For the complete local run, use the durable single-instance wrapper instead of k
 
 `start` launches exactly one CPU process under a macOS `launchd`-managed `caffeinate` job so it survives the calling terminal; the tested non-managed fallback uses `nohup` with `caffeinate`. It runs the fixed 100,000-row benchmark first, chooses the smallest measured shard size that preserves the 16-GiB ceiling while targeting at least two-hour embedding checkpoints, requires at least 4 GiB projected free host storage, and only then starts or resumes the 14,549,269-row build. Its ignored state, PID, benchmark/build reports, and append-only log live in `var/corpus/best-available/dense-build-state/`. A stopped benchmark reports that a restart is required; a stopped production build reuses its checksum-verified embedding checkpoints. A PID that belongs to an unrelated live process is reported and never signaled. This runner performs no provider request and changes no model-spending approval.
 
+Start the separate durable finalizer once while the build is running:
+
+```bash
+./scripts/finalize-local-dense-build.zsh start
+./scripts/finalize-local-dense-build.zsh status
+```
+
+The finalizer sleeps while the benchmark/build is active and survives the calling terminal under its own single-instance `launchd`/`caffeinate` process. It does not invoke Docker until the build has published its recall-certified manifest. It then runs the frozen latency certification and final verification commands in the same worker image used for predictions, using a narrowly scoped read-write corpus mount only for the latency report. Its ignored PID, state, command reports, and log live under `var/corpus/best-available/dense-finalizer-state/`. A terminal benchmark, storage, or build failure blocks finalization without deleting artifacts or making a provider call.
+
 After the measured storage gate passes, build the resumable compressed index. Each shard contains at most 1,000,000 consecutive chunks and publishes atomically. Completed `embeddings.i8` checkpoints are checksum-verified and hard-linked into final shards, so an interruption does not force re-encoding or duplicate their physical bytes. Certification combines the 50 frozen public application-shaped queries with 50 stable-hash title/opening-text queries from the verified corpus, scans the stored int8 directions exactly in bounded blocks, and refuses to publish the top manifest below `recall@300 = 0.98` or above the 16 GiB artifact ceiling:
 
 ```bash
