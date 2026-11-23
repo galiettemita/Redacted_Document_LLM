@@ -44,7 +44,7 @@
 - [x] **Step 2: Run the focused runner test red.**
 - [x] **Step 3: Implement status/start/internal-run commands using explicit paths, `nohup`, and `caffeinate`, delegating all artifact writes to the existing builder.**
 - [x] **Step 4: Run focused runner plus existing dense builder/storage suites green.**
-- [ ] **Step 5: Commit and push with `feat: add durable local dense runner`.**
+- [x] **Step 5: Commit and push with `feat: add durable local dense runner`.**
 
 ### Task 2: Launch and monitor the real build
 
