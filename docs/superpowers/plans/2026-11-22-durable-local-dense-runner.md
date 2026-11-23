@@ -58,7 +58,7 @@
 
 - [x] **Step 1: Run full no-spend regression verification and invoke the runner start command.**
 - [x] **Step 2: Confirm the PID is live under `caffeinate`, the state advances, and no competing runner exists.**
-- [ ] **Step 3: Record benchmark size/rate/checkpoint decision and confirm the production build starts only if both storage gates pass.**
+- [x] **Step 3: Record benchmark size/rate/checkpoint decision and confirm the production build starts only if both storage gates pass.** The measured report projected 13,022,045,511 bytes; the conservative 68,572-row checkpoint shape projected 15,669,312,441 bytes with 58,277,482,496 bytes available, and the build started only afterward.
 - [x] **Step 4: Update and push the checklist with measured progress while leaving runtime artifacts ignored and all full four-list approvals unchanged.** Recorded 54,080 contiguous rows (54.1%) at 10:35 PM EST while the single runner remained CPU-active and the live staged stack remained healthy; the final benchmark report and storage decision remain correctly pending Step 3.
 
 ### Task 3: Make post-build certification durable
@@ -141,4 +141,4 @@
 - [x] **Step 1: Record concurrent real-corpus throughput and write failing tests** for reverse checkpoint order, forward-builder reuse, the safety gap, CLI identity, and single-instance durable execution. One extra four-thread encoder measured 11.08 combined rows/s; two extra three-thread encoders measured 11.25, so exactly one accelerator is justified.
 - [x] **Step 2: Implement the reverse accelerator using the existing atomic checkpoint manifest and corpus/offset verification boundaries.** It shares no forward iterator or temporary directory, works from the final shard backward, and stops four shards before the first incomplete forward checkpoint.
 - [x] **Step 3: Run focused and complete verification, commit, and push.** Focused: 64 passed. Full backend: 544 passed with 2 expected environment skips; zsh syntax and diff checks passed.
-- [ ] **Step 4: Launch one accelerator, verify two live non-overlapping encoders and improved combined throughput, then update the checklist.**
+- [x] **Step 4: Run the sustained two-encoder acceptance check and keep only the fastest configuration.** The processes were non-overlapping, but sustained memory compression reduced combined throughput to about 3.2 rows/s. Stop only the accelerator, preserve the primary process, and keep one encoder; the primary recovered to 8.53 rows/s.

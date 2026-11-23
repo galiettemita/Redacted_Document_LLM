@@ -196,14 +196,7 @@ For the complete local run, use the durable single-instance wrapper instead of k
 
 `start` launches exactly one CPU process under a macOS `launchd`-managed `caffeinate` job so it survives the calling terminal; the tested non-managed fallback uses `nohup` with `caffeinate`. The launchd job removes itself after either success or failure, preventing an operating-system restart loop. It runs the fixed 100,000-row benchmark first, chooses the smallest measured shard size that preserves the 16-GiB ceiling while targeting at least two-hour embedding checkpoints, requires at least 4 GiB projected free host storage, and only then starts or resumes the 14,549,269-row build. Its ignored state, PID, benchmark/build reports, and append-only log live in `var/corpus/best-available/dense-build-state/`. A stopped benchmark reports that a restart is required unless its complete checksum-bound sample is already recoverable; a stopped production build reuses its checksum-verified embedding checkpoints. A PID that belongs to an unrelated live process is reported and never signaled. This runner performs no provider request and changes no model-spending approval.
 
-On the supported 10-core local Mac, one additional four-thread encoder can be launched after the primary build has started:
-
-```bash
-./scripts/run-local-dense-accelerator.zsh start
-./scripts/run-local-dense-accelerator.zsh status
-```
-
-The accelerator uses CPU only and encodes from the final shard backward while the primary builder moves forward. It verifies the same corpus, offsets, model semantics, and artifact profile; publishes the same atomic checksummed checkpoint manifests; and stops at least four shards before the forward frontier so the two encoders cannot claim the same work. A second accelerator invocation reports the existing process instead of adding another encoder. Its ignored state lives in `var/corpus/best-available/dense-accelerator-state/`.
+The repository includes a reverse-order CPU accelerator for higher-memory hosts, but do not run it on the current 32-GiB local Mac. A sustained two-model test triggered memory compression and reduced combined throughput; the single primary encoder recovered to approximately 8.5–9.1 passages per second after the accelerator stopped.
 
 Start the separate durable finalizer once while the build is running:
 
