@@ -5,7 +5,7 @@ import { PredictionSidebar } from './PredictionSidebar'
 
 describe('PredictionSidebar', () => {
   it('shows the active passage once and keeps the remaining cards in document order', () => {
-    render(
+    const { container } = render(
       <PredictionSidebar
         passages={TEST_PASSAGES}
         predictions={TEST_PREDICTIONS.slice(0, 3)}
@@ -25,6 +25,8 @@ describe('PredictionSidebar', () => {
       'Open Passage 3 on page 2',
     ])
     expect(screen.getByText('Predicting hidden passages…')).toBeInTheDocument()
+    expect(screen.getAllByText('GPT-6 Astra')).toHaveLength(1)
+    expect(container.querySelector('.prediction-model-name')).toHaveTextContent('GPT-6 Astra')
   })
 
   it('navigates only when a card is activated, not when it is hovered', () => {
@@ -66,7 +68,7 @@ describe('PredictionSidebar', () => {
     expect(onDismissSelection).toHaveBeenCalledOnce()
   })
 
-  it('labels provider output without exposing its model, token, or cost metadata', () => {
+  it('shows the provider model once without exposing token or cost metadata', () => {
     render(
       <PredictionSidebar
         passages={TEST_PASSAGES}
@@ -95,14 +97,14 @@ describe('PredictionSidebar', () => {
     expect(screen.getAllByText(
       'Model-only prediction — no archive evidence used',
     )).toHaveLength(2)
-    expect(screen.queryByText('GPT-6 Astra')).not.toBeInTheDocument()
+    expect(screen.getAllByText('GPT-6 Astra')).toHaveLength(1)
     expect(screen.queryByText(/2,120 tokens/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/\$0\.0260 estimated/i)).not.toBeInTheDocument()
     expect(screen.queryByText('Simulated prediction')).not.toBeInTheDocument()
   })
 
   it('labels invented output as simulated and never as a model result', () => {
-    render(
+    const { container } = render(
       <PredictionSidebar
         passages={TEST_PASSAGES}
         predictions={[{
@@ -121,9 +123,28 @@ describe('PredictionSidebar', () => {
     )
 
     expect(screen.getByText('Simulated prediction')).toBeInTheDocument()
+    expect(screen.queryByText('Demo LLM')).not.toBeInTheDocument()
+    expect(container.querySelector('.prediction-model-name')).not.toBeInTheDocument()
     expect(screen.queryByText(
       'Model-only prediction — no archive evidence used',
     )).not.toBeInTheDocument()
+  })
+
+  it('does not show a model name before a real prediction exists', () => {
+    const { container } = render(
+      <PredictionSidebar
+        passages={TEST_PASSAGES}
+        predictions={[]}
+        phase="idle"
+        error={null}
+        activePassageId={null}
+        onSelectPassage={vi.fn()}
+        onDismissSelection={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: 'Predictions' })).toBeInTheDocument()
+    expect(container.querySelector('.prediction-model-name')).not.toBeInTheDocument()
   })
 
   it('shows staged predictions without any provenance or implementation label', () => {

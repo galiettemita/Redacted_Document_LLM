@@ -27,6 +27,7 @@
 - [x] Audit upload, rendering, paging, zoom, marking, predictions, replacement, and responsive views in real browsers.
 - [x] Restore the feature-branch frontend after its local server exited and verify the app, sample PDF, PDF.js worker, and API proxy endpoints.
 - [x] Remove on-document prediction previews and emphasize the selected sidebar prediction.
+- [x] Show the actual GPT model beneath the Predictions heading only after a real provider result exists, while keeping empty and fictional-demo states unlabeled.
 - [x] Complete an independent software-quality and production-readiness review against the written design.
 
 ## Real retrieval-assisted backend

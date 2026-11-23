@@ -28,6 +28,7 @@ export function PredictionSidebar({
   const activePassage = passages.find((passage) => passage.id === activePassageId) ?? null
   const activePrediction = predictions.find((prediction) => prediction.passageId === activePassageId) ?? null
   const visiblePredictions = predictions.filter((prediction) => prediction.passageId !== activePassageId)
+  const predictionModel = predictions.find((prediction) => prediction.provenance === 'model')?.model
 
   return (
     <aside className="prediction-sidebar" aria-label="Passage predictions">
@@ -40,7 +41,12 @@ export function PredictionSidebar({
         />
 
         <div className="prediction-list-heading">
-          <h2>Predictions</h2>
+          <div>
+            <h2>Predictions</h2>
+            {predictionModel ? (
+              <p className="prediction-model-name">{predictionModel}</p>
+            ) : null}
+          </div>
           {(phase === 'predicting' || phase === 'partial') ? (
             <p className="processing-label"><span aria-hidden="true" />Predicting hidden passages…</p>
           ) : null}
