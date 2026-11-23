@@ -184,6 +184,16 @@ uv run corpus benchmark-best-available-dense \
 
 The benchmark reports setup, encoding, IVF-PQ training, candidate insertion, and recall-certification probe time separately. Its projection scales row-dependent work by corpus rows and fixed candidate overhead by the expected shard count. Record rows per second, peak resident memory, actual bytes per row, projected full-build time and bytes, and current free disk. Do not start the full build unless projected final artifacts are at most 16 GiB and at least 4 GiB of host disk would remain free.
 
+For the complete local run, use the durable single-instance wrapper instead of keeping the manual command attached to a terminal:
+
+```bash
+./scripts/run-local-dense-build.zsh status
+./scripts/run-local-dense-build.zsh start
+./scripts/run-local-dense-build.zsh status
+```
+
+`start` launches exactly one `nohup`/`caffeinate` CPU process. It runs the fixed 100,000-row benchmark first, chooses the smallest measured shard size that preserves the 16-GiB ceiling while targeting at least two-hour embedding checkpoints, requires at least 4 GiB projected free host storage, and only then starts or resumes the 14,549,269-row build. Its ignored state, PID, benchmark/build reports, and append-only log live in `var/corpus/best-available/dense-build-state/`. A stopped benchmark reports that a restart is required; a stopped production build reuses its checksum-verified embedding checkpoints. A PID that belongs to an unrelated live process is reported and never signaled. This runner performs no provider request and changes no model-spending approval.
+
 After the measured storage gate passes, build the resumable compressed index. Each shard contains at most 1,000,000 consecutive chunks and publishes atomically. Completed `embeddings.i8` checkpoints are checksum-verified and hard-linked into final shards, so an interruption does not force re-encoding or duplicate their physical bytes. Certification combines the 50 frozen public application-shaped queries with 50 stable-hash title/opening-text queries from the verified corpus, scans the stored int8 directions exactly in bounded blocks, and refuses to publish the top manifest below `recall@300 = 0.98` or above the 16 GiB artifact ceiling:
 
 ```bash
