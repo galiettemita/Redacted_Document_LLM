@@ -34,6 +34,7 @@ if [[ -n "${DENSE_RUNNER_CAFFEINATE:-}" ]]; then
 else
   CAFFEINATE_COMMAND="$(command -v caffeinate 2>/dev/null || true)"
 fi
+LAUNCHCTL_COMMAND="$(command -v launchctl 2>/dev/null || true)"
 
 iso_now() {
   date -u '+%Y-%m-%dT%H:%M:%SZ'
@@ -251,11 +252,50 @@ start_runner() {
   if [[ "$phase" != "building" && "$phase" != "build_failed" && "$phase" != "storage_rejected" ]]; then
     write_state "starting"
   fi
-  nohup "$CAFFEINATE_COMMAND" -i "$SCRIPT_PATH" internal-run >> "$LOG_FILE" 2>&1 &
-  local runner_pid=$!
-  local temporary_pid="$STATE_DIR/.runner.pid.$$.tmp"
-  print -- "$runner_pid" > "$temporary_pid"
-  mv "$temporary_pid" "$PID_FILE"
+  local runner_pid
+  if [[ "$(uname -s)" == "Darwin" && "${DENSE_RUNNER_TEST_MODE:-0}" != "1" && -x "$LAUNCHCTL_COMMAND" ]]; then
+    local launch_label="com.redacted-document-llm.dense.$(date -u '+%Y%m%dT%H%M%SZ').$$"
+    "$LAUNCHCTL_COMMAND" submit -l "$launch_label" -- \
+      /usr/bin/env \
+      DENSE_RUNNER_PROJECT_ROOT="$PROJECT_ROOT" \
+      DENSE_RUNNER_CORPUS_ROOT="$CORPUS_ROOT" \
+      DENSE_RUNNER_STATE_DIR="$STATE_DIR" \
+      DENSE_RUNNER_CHUNKS="$CHUNKS_PATH" \
+      DENSE_RUNNER_CORPUS_MANIFEST="$CORPUS_MANIFEST_PATH" \
+      DENSE_RUNNER_BENCHMARK_DIRECTORY="$BENCHMARK_DIRECTORY" \
+      DENSE_RUNNER_DENSE_DIRECTORY="$DENSE_DIRECTORY" \
+      DENSE_RUNNER_APPLICATION_QUERIES="$APPLICATION_QUERIES_PATH" \
+      DENSE_RUNNER_CERTIFICATION_QUERIES="$CERTIFICATION_QUERIES_PATH" \
+      DENSE_RUNNER_DENSE_MANIFEST="$DENSE_MANIFEST_PATH" \
+      DENSE_RUNNER_MAX_ARTIFACT_BYTES="$MAX_ARTIFACT_BYTES" \
+      DENSE_RUNNER_MIN_PROJECTED_FREE_BYTES="$MIN_PROJECTED_FREE_BYTES" \
+      DENSE_RUNNER_BATCH_SIZE="$BATCH_SIZE" \
+      DENSE_RUNNER_RECALL_BLOCK_ROWS="$RECALL_BLOCK_ROWS" \
+      DENSE_RUNNER_UV="$UV_COMMAND" \
+      DENSE_RUNNER_CAFFEINATE="$CAFFEINATE_COMMAND" \
+      "$CAFFEINATE_COMMAND" -i "$SCRIPT_PATH" internal-run-managed
+    local launch_attempt
+    runner_pid=""
+    for launch_attempt in {1..40}; do
+      if runner_pid="$(read_pid 2>/dev/null)" && [[ "$(classify_pid "$runner_pid")" == "runner" ]]; then
+        break
+      fi
+      runner_pid=""
+      sleep 0.05
+    done
+    if [[ -z "$runner_pid" ]]; then
+      write_state "launch_failed" 70 "managed_process_did_not_register"
+      rmdir "$launch_lock"
+      trap - EXIT INT TERM
+      return 70
+    fi
+  else
+    nohup "$CAFFEINATE_COMMAND" -i "$SCRIPT_PATH" internal-run >> "$LOG_FILE" 2>&1 &
+    runner_pid=$!
+    local temporary_pid="$STATE_DIR/.runner.pid.$$.tmp"
+    print -- "$runner_pid" > "$temporary_pid"
+    mv "$temporary_pid" "$PID_FILE"
+  fi
   rmdir "$launch_lock"
   trap - EXIT INT TERM
   print -- "Dense runner started with PID $runner_pid."
@@ -418,6 +458,15 @@ run_internal() {
   write_state "completed" 0 "" "$selected_shard_size" "$projected_artifact_bytes" "$current_available_bytes"
 }
 
+run_managed_internal() {
+  mkdir -p "$STATE_DIR"
+  exec >> "$LOG_FILE" 2>&1
+  local temporary_pid="$STATE_DIR/.runner.pid.$$.tmp"
+  print -- "$$" > "$temporary_pid"
+  mv "$temporary_pid" "$PID_FILE"
+  run_internal
+}
+
 usage() {
   print -u2 -- "usage: ${0:t} {status|start|internal-run}"
   return 64
@@ -434,6 +483,9 @@ case "$command_name" in
     ;;
   internal-run)
     run_internal
+    ;;
+  internal-run-managed)
+    run_managed_internal
     ;;
   *)
     usage

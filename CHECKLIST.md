@@ -208,6 +208,7 @@
         - [ ] Complete and verify the first authorized two-stage provider prediction after the user uploads a real PDF and selects **Predict**.
       - [ ] Complete the running 100,000-row real CPU benchmark, then start and verify the resumable 14,549,269-row production build only if the measured storage gate passes.
         - [x] Add and verify the durable CPU-only `nohup`/`caffeinate` runner with single-instance PID safety, atomic state, benchmark-first storage gates, adaptive two-hour checkpoints, and production-checkpoint resume.
+        - [x] Launch the real 100,000-row CPU benchmark as one `launchd`-managed `caffeinate` job, verify PID 81336 is owned by PID 1 with one benchmark process, and leave staged predictions ready while it runs.
     - [x] With a real key configured and generation still disabled, count the exact one-passage request, show expected and maximum cost, and obtain explicit approval before the first paid model call.
       - [x] Align the production input-token request with the current provider schema by excluding generation-only fields, with a regression test and full backend/frontend verification.
       - [x] Count the selected one-passage closed-book request at 131 exact provider input tokens while every paid-generation approval remains disabled.

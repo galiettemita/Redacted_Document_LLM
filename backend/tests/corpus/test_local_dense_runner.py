@@ -125,6 +125,7 @@ def test_runner_source_uses_durable_launch_without_destructive_commands() -> Non
 
     assert "nohup" in source
     assert "caffeinate" in source
+    assert "launchctl" in source
     assert "rm -" not in source
     assert "git clean" not in source
     assert "docker system prune" not in source

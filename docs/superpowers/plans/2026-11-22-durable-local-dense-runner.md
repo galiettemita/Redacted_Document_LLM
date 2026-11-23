@@ -56,7 +56,7 @@
 - Consumes: production source artifacts and the committed runner.
 - Produces: one durable live process, benchmark report, production checkpoints, final certification reports, and eventually full four-list operational readiness with spending unchanged.
 
-- [ ] **Step 1: Run full no-spend regression verification and invoke the runner start command.**
-- [ ] **Step 2: Confirm the PID is live under `caffeinate`, the state advances, and no competing runner exists.**
+- [x] **Step 1: Run full no-spend regression verification and invoke the runner start command.**
+- [x] **Step 2: Confirm the PID is live under `caffeinate`, the state advances, and no competing runner exists.**
 - [ ] **Step 3: Record benchmark size/rate/checkpoint decision and confirm the production build starts only if both storage gates pass.**
 - [ ] **Step 4: Update and push the checklist with measured progress while leaving runtime artifacts ignored and all full four-list approvals unchanged.**
