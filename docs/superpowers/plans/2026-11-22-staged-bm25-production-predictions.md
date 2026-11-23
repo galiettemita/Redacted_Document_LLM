@@ -139,12 +139,12 @@
 - Consumes: staged analysis/SSE payload and the existing upload, prepare, Predict, and fictional-demo flows.
 - Produces: a generic staged prediction card, a fake-transport two-stage upload-to-SSE proof, and deployment instructions with all paid defaults false.
 
-- [ ] **Step 1: Write failing frontend tests** that accept the staged basis and show its prediction text in list/selected cards with no provenance element or implementation wording.
-- [ ] **Step 2: Run frontend tests red, implement the basis decoder and nullable label rendering, then run focused frontend tests green.**
-- [ ] **Step 3: Write a failing integration test** covering PDF upload, detection, preparation, schedule, fake GPT query, two real BM25 searches, fused evidence, fake GPT prediction, durable spend reserve/settle, SSE, and second-passage blocking.
-- [ ] **Step 4: Run the integration test red, complete the narrow wiring gaps, and run it green without network model calls.**
-- [ ] **Step 5: Run the complete backend/frontend suites, typecheck, production build, Compose validation, migration upgrade/downgrade/upgrade, and `git diff --check` with paid flags false.**
-- [ ] **Step 6: Configure the untracked $10.00 ceiling, verify local readiness with flags still false, update the checklist, commit, and push with `feat: ship staged bm25 predictions`.**
+- [x] **Step 1: Write failing frontend tests** that accept the staged basis and show its prediction text in list/selected cards with no provenance element or implementation wording.
+- [x] **Step 2: Run frontend tests red, implement the basis decoder and nullable label rendering, then run focused frontend tests green.**
+- [x] **Step 3: Write a failing integration test** covering PDF upload, detection, preparation, schedule, fake GPT query, two real BM25 searches, fused evidence, fake GPT prediction, durable spend reserve/settle, SSE, and second-passage blocking.
+- [x] **Step 4: Run the integration test red, complete the narrow wiring gaps, and run it green without network model calls.**
+- [x] **Step 5: Run the complete backend/frontend suites, typecheck, production build, Compose validation, migration upgrade/downgrade/upgrade, and `git diff --check` with paid flags false.**
+- [x] **Step 6: Configure the untracked $10.00 ceiling, verify local readiness with flags still false, update the checklist, commit, and push with `feat: ship staged bm25 predictions`.**
 
 ### Task 6: Enable the authorized local prediction path
 

@@ -194,6 +194,7 @@ function parsePrediction(data: string): PredictionEventPayload {
 
 function isPredictionBasis(value: unknown): value is PredictionBasis {
   return value === 'model_only_v1'
+    || value === 'best_available_foiarchive_bm25_v1'
     || value === 'best_available_foiarchive_v1'
     || value === 'paper_exact_v1'
 }

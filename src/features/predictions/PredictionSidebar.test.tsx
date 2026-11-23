@@ -126,6 +126,31 @@ describe('PredictionSidebar', () => {
     )).not.toBeInTheDocument()
   })
 
+  it('shows staged predictions without any provenance or implementation label', () => {
+    const staged = TEST_PREDICTIONS.slice(0, 2).map((prediction) => ({
+      ...prediction,
+      provenance: 'model' as const,
+      predictionBasis: 'best_available_foiarchive_bm25_v1' as const,
+    }))
+
+    const { container } = render(
+      <PredictionSidebar
+        passages={TEST_PASSAGES}
+        predictions={staged}
+        phase="complete"
+        error={null}
+        activePassageId="passage-1"
+        onSelectPassage={vi.fn()}
+        onDismissSelection={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText(staged[0].text)).toBeInTheDocument()
+    expect(screen.getByText(staged[1].text)).toBeInTheDocument()
+    expect(container.querySelectorAll('.prediction-provenance')).toHaveLength(0)
+    expect(container).not.toHaveTextContent(/BM25|dense|staged|Andrew|method|archive-assisted/i)
+  })
+
   it.each<[PredictionBasis, string]>([
     [
       'best_available_foiarchive_v1',

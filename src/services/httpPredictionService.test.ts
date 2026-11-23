@@ -86,6 +86,39 @@ describe('createHttpPredictionService', () => {
     expect(results).toEqual(['Current result.'])
   })
 
+  it('accepts the staged BM25 basis only when it matches the scheduled job', async () => {
+    const body = [
+      'event: passage.prediction',
+      'data: {"job_id":"job-1","passage_id":"passage-1","page_number":1,"model":"gpt-6-astra","prediction_basis":"best_available_foiarchive_bm25_v1","prediction":"Evidence-bound result.","usage":{"input_tokens":100,"output_tokens":10,"total_tokens":110,"reasoning_tokens":0},"estimated_cost_usd":0.002,"pricing_version":"test"}',
+      '',
+      '',
+    ].join('\n')
+    const service = createHttpPredictionService(
+      vi.fn(async () => new Response(body)) as typeof fetch,
+    )
+    const predictions: unknown[] = []
+
+    await service.stream(
+      {
+        id: 'uploaded-1',
+        filename: 'archive.pdf',
+        source: 'blob:test',
+        mode: 'uploaded',
+        backendDocumentId: 'document-1',
+      },
+      new AbortController().signal,
+      (prediction) => predictions.push(prediction),
+      { jobBases: { 'job-1': 'best_available_foiarchive_bm25_v1' } },
+    )
+
+    expect(predictions).toEqual([
+      expect.objectContaining({
+        text: 'Evidence-bound result.',
+        predictionBasis: 'best_available_foiarchive_bm25_v1',
+      }),
+    ])
+  })
+
   it('rejects malformed prediction events instead of displaying them', async () => {
     const fetchMock = vi.fn(async () => new Response(
       'event: passage.prediction\ndata: {"passage_id":"passage-1"}\n\n',

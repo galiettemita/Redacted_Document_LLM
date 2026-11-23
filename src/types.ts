@@ -14,6 +14,7 @@ export interface Passage {
 
 export type PredictionBasis =
   | 'model_only_v1'
+  | 'best_available_foiarchive_bm25_v1'
   | 'best_available_foiarchive_v1'
   | 'paper_exact_v1'
 

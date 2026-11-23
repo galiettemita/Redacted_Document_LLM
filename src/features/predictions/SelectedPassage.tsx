@@ -14,6 +14,7 @@ export function SelectedPassage({
   onDismiss,
   missingPredictionMessage = 'Prediction is still processing…',
 }: SelectedPassageProps) {
+  const provenanceLabel = prediction ? predictionProvenanceLabel(prediction) : null
   return (
     <section className="selected-passage" aria-labelledby="selected-passage-heading">
       <div className="selected-heading-row">
@@ -33,9 +34,9 @@ export function SelectedPassage({
           {prediction ? (
             <>
               <p className="prediction-text">{prediction.text}</p>
-              <p className="prediction-provenance">
-                {predictionProvenanceLabel(prediction)}
-              </p>
+              {provenanceLabel ? (
+                <p className="prediction-provenance">{provenanceLabel}</p>
+              ) : null}
             </>
           ) : (
             <p className="selected-empty">{missingPredictionMessage}</p>

@@ -8,6 +8,7 @@ interface PredictionCardProps {
 }
 
 export function PredictionCard({ passage, prediction, onSelect }: PredictionCardProps) {
+  const provenanceLabel = predictionProvenanceLabel(prediction)
   return (
     <button
       className="prediction-card"
@@ -20,9 +21,9 @@ export function PredictionCard({ passage, prediction, onSelect }: PredictionCard
         <span className="page-label">Page {passage.page}</span>
       </span>
       <span className="prediction-text">{prediction.text}</span>
-      <span className="prediction-provenance">
-        {predictionProvenanceLabel(prediction)}
-      </span>
+      {provenanceLabel ? (
+        <span className="prediction-provenance">{provenanceLabel}</span>
+      ) : null}
     </button>
   )
 }
