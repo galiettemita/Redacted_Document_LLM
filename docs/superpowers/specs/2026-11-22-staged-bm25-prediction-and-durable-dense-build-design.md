@@ -53,7 +53,7 @@ The staged basis is operational only when all of these are true:
 - the live OpenSearch index count is exactly 14,549,269;
 - the staged runtime can execute a real BM25 readiness probe.
 
-The user grants standing authorization for staged-BM25 provider calls and does not require per-call approval. The application cannot currently read the OpenAI account's available-credit balance, so it must enforce a separate local hard ceiling, `REDACTED_STAGED_BM25_SPEND_CAP_USD`, before unattended spending is enabled. The exact ceiling is supplied by the user and stored only in untracked runtime configuration.
+The user grants standing authorization for staged-BM25 provider calls and does not require per-call approval. The application cannot currently read the OpenAI account's available-credit balance, so it must enforce a separate local hard ceiling, `REDACTED_STAGED_BM25_SPEND_CAP_USD=10.00`, before unattended spending is enabled. The ceiling is stored only in untracked runtime configuration.
 
 All paid flags stay false during implementation, tests, deployment, and retrieval checks. For a live eligible job, the backend computes the maximum query-call cost before dispatch. After the query returns and evidence is available, it computes the maximum prediction-call cost. It dispatches a call only when the maximum of that call plus durable staged spend already claimed remains within the configured ceiling. Provider attempts are claimed before dispatch, actual usage is recorded when known, and an uncertain provider outcome retains its maximum reservation. When the ceiling is missing, invalid, exhausted, or insufficient, the job fails closed before another provider request. The browser cannot raise or bypass the ceiling.
 
@@ -70,7 +70,7 @@ No job changes basis after scheduling and no failure falls back inside a job.
 
 ## Durable background dense build
 
-After the staged feature passes its no-spend local deployment checks, the complete int8 dense pipeline starts even if the first paid demonstration is still waiting for its document or cost approval. It runs as an operating-system-level background process rather than a Codex tool session. The runner uses the committed production code and:
+After the staged feature passes its no-spend local deployment checks, the complete int8 dense pipeline starts even if the first paid demonstration is still waiting for its document. It runs as an operating-system-level background process rather than a Codex tool session. The runner uses the committed production code and:
 
 1. runs the fixed 100,000-row CPU benchmark offline;
 2. records the JSON report, logs, PID, timestamps, current phase, and exit code under ignored `var/corpus/best-available/dense-build-state/`;
