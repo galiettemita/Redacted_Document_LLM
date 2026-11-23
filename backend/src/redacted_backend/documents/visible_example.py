@@ -98,7 +98,15 @@ def build_visible_example(
             for word in transcript.visible_words
             if word.page_number == target.page_number
         ]
-        length_cue = estimate_length_cue(target.rects, nearby_words)
+        try:
+            length_cue = estimate_length_cue(target.rects, nearby_words)
+        except LengthCueError as error:
+            if error.code != "insufficient_visible_text_for_length":
+                raise
+            length_cue = estimate_length_cue(
+                target.rects,
+                transcript.visible_words,
+            )
     except (VisibleLayoutError, LengthCueError) as error:
         raise VisibleExampleError(error.code, str(error)) from error
 

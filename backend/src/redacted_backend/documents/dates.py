@@ -15,6 +15,7 @@ from redacted_backend.domain.visible_examples import (
 
 _HEADER_BOTTOM = 0.20
 _MIN_OCR_CONFIDENCE = 0.75
+_MIN_NUMERIC_DAY_OCR_CONFIDENCE = 0.70
 _MONTHS = {
     "january": 1,
     "jan": 1,
@@ -109,13 +110,11 @@ def detect_visible_document_date(
     matches: list[VisibleDateEvidence] = []
     for words in lines.values():
         ordered = sorted(words, key=lambda item: (item.x, item.y))
-        if any(
-            word.source == WordSource.OCR and word.confidence < _MIN_OCR_CONFIDENCE
-            for word in ordered
-        ):
-            continue
         line_text = " ".join(word.text for word in ordered)
-        for parsed_date, precision in _parse_dates(line_text):
+        parsed_dates = _parse_dates(line_text)
+        if not _ocr_line_is_reliable(ordered, parsed_dates):
+            continue
+        for parsed_date, precision in parsed_dates:
             matches.append(
                 VisibleDateEvidence(
                     value=parsed_date,
@@ -183,6 +182,31 @@ def _parse_dates(text: str) -> list[tuple[date, Literal["day", "month"]]]:
             if item not in parsed:
                 parsed.append(item)
     return parsed
+
+
+def _ocr_line_is_reliable(
+    words: list[PageWord],
+    parsed_dates: list[tuple[date, Literal["day", "month"]]],
+) -> bool:
+    low_confidence = [
+        word
+        for word in words
+        if word.source == WordSource.OCR and word.confidence < _MIN_OCR_CONFIDENCE
+    ]
+    if not low_confidence:
+        return True
+    if len(low_confidence) != 1 or len(parsed_dates) != 1:
+        return False
+    word = low_confidence[0]
+    parsed_date, precision = parsed_dates[0]
+    if precision != "day" or word.confidence < _MIN_NUMERIC_DAY_OCR_CONFIDENCE:
+        return False
+    numeric_day = re.fullmatch(
+        r"(?P<day>\d{1,2})(?:st|nd|rd|th)?[,.]?",
+        word.text.strip(),
+        re.IGNORECASE,
+    )
+    return numeric_day is not None and int(numeric_day.group("day")) == parsed_date.day
 
 
 def _append_valid_day(

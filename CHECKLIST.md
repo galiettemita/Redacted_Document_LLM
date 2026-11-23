@@ -127,8 +127,11 @@
     - [x] Remove temporary manual prepare/predict controls and show automatic readiness honestly in the existing sidebar.
     - [x] Verify the real DOJ PDF produces three linked contexts in one request without a retrieval or model call.
     - [x] Accept an unambiguous visible month/year when the day is redacted, persist a conservative first-of-month boundary with month precision, and keep model prompts honest by rendering only the visible month and year.
+    - [x] Accept one standalone numeric OCR day at confidence 0.70 or higher only when the visible month and year remain above the strict 0.75 threshold and the complete line parses as a valid date.
+    - [x] Calibrate redaction length from other visible pages in the same PDF when a heavily redacted target page has fewer than three visible words, without using hidden text or changing target geometry.
     - [x] Surface safe backend preparation errors and provide an in-place retry for an already-open PDF instead of requiring another upload.
     - [x] Verify the real 66-page FISA PDF advances all 259 detected passages to `contexts_ready` from visible `2016 OCT` evidence without creating an analysis job, provider claim, prediction event, or paid model call.
+    - [x] Verify the real 85-page FISA PDF advances all 200 detected passages to `contexts_ready` from visible `FEB 07 2020` evidence, including six sparse-page passages, without creating an analysis job, provider claim, prediction event, or paid model call.
   - [x] Task 12C: Remove false-positive passages from the production review workflow.
     - [x] Require explicit confirmation before tombstoning the selected stable passage.
     - [x] Keep removed automatic detections suppressed across rescans through the existing backend correction record.

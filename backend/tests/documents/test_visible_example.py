@@ -158,3 +158,56 @@ def test_deduplicates_an_automatic_mask_overlapping_the_manual_target() -> None:
 
     assert example.context_window.count("[[TARGET]]") == 1
     assert "[REDACTED]" not in example.context_window
+
+
+def test_uses_other_visible_pages_to_calibrate_a_sparse_target_page() -> None:
+    target_rect = PassageRect(x=0.35, y=0.2, width=0.18, height=0.025)
+    target = passage(TARGET_ID, rects=[target_rect], page_number=2)
+    document = visible_document(
+        pages=[
+            page(
+                word("alpha", x=0.05, y=0.3, width=0.05, block_id=1, line_id=1),
+                word("bravo", x=0.12, y=0.3, width=0.05, block_id=1, line_id=1),
+                word("delta", x=0.19, y=0.3, width=0.05, block_id=1, line_id=1),
+            ),
+            page(
+                word(
+                    "before",
+                    x=0.1,
+                    y=0.2,
+                    page_number=2,
+                    block_id=2,
+                    line_id=1,
+                ),
+                word(
+                    "after",
+                    x=0.65,
+                    y=0.2,
+                    page_number=2,
+                    block_id=2,
+                    line_id=1,
+                ),
+                page_number=2,
+            ),
+        ],
+        discoveries=[
+            discovery(1),
+            discovery(
+                2,
+                mask(
+                    TARGET_ID,
+                    x=0.35,
+                    y=0.19,
+                    width=0.18,
+                    height=0.05,
+                    page_number=2,
+                ),
+            ),
+        ],
+    )
+
+    example = build_visible_example(document, [target], UUID(TARGET_ID))
+
+    assert example.context_window.endswith("before [[TARGET]] after")
+    assert example.length_cue.estimated_words == 3
+    assert example.length_cue.bucket == "a few words"

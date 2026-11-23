@@ -64,6 +64,63 @@ def test_accepts_date_words_extracted_by_ocr() -> None:
     assert {item.source.value for item in evidence.words} == {"ocr"}
 
 
+def test_accepts_a_slightly_lower_confidence_numeric_day_in_a_clear_ocr_date() -> None:
+    tokens = [
+        ("FEB", 0.96),
+        ("07", 0.73),
+        ("2020", 0.96),
+    ]
+    words = [
+        PageWord.model_validate(
+            word(
+                token,
+                x=0.08 + index * 0.12,
+                y=0.09,
+                block_id=1,
+                line_id=1,
+            ).model_dump()
+            | {"source": "ocr", "confidence": confidence}
+        )
+        for index, (token, confidence) in enumerate(tokens)
+    ]
+
+    evidence = detect_visible_document_date([page(*words)], [discovery(1)])
+
+    assert evidence.value == date(2020, 2, 7)
+    assert evidence.precision == "day"
+
+
+@pytest.mark.parametrize(
+    ("tokens", "confidences"),
+    [
+        (["FEB", "07", "2020"], [0.73, 0.96, 0.96]),
+        (["FEB", "07", "2020"], [0.96, 0.69, 0.96]),
+    ],
+)
+def test_keeps_low_confidence_months_and_unreliable_days_fail_closed(
+    tokens: list[str],
+    confidences: list[float],
+) -> None:
+    words = [
+        PageWord.model_validate(
+            word(
+                token,
+                x=0.08 + index * 0.12,
+                y=0.09,
+                block_id=1,
+                line_id=1,
+            ).model_dump()
+            | {"source": "ocr", "confidence": confidences[index]}
+        )
+        for index, token in enumerate(tokens)
+    ]
+
+    with pytest.raises(VisibleDateDetectionError) as error:
+        detect_visible_document_date([page(*words)], [discovery(1)])
+
+    assert error.value.code == "visible_date_not_found"
+
+
 @pytest.mark.parametrize(
     "tokens",
     [
