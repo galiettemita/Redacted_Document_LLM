@@ -107,6 +107,7 @@ def test_finalizer_source_is_durable_and_has_no_destructive_commands() -> None:
     assert "git clean" not in source
     assert "docker system prune" not in source
     assert "kill -9" not in source
+    assert "DENSE_FINALIZER_LAUNCH_LABEL" in source
 
 
 def test_completed_build_is_certified_and_verified_in_worker_image(
@@ -207,6 +208,39 @@ def test_latency_failure_is_recorded_and_verification_does_not_run(
     commands = command_log.read_text(encoding="utf-8")
     assert "certify-best-available-dense-latency" in commands
     assert "verify-best-available-dense" not in commands
+
+
+def test_managed_finalizer_removes_its_launchd_job_after_failure(
+    finalizer_environment: tuple[dict[str, str], Path, Path],
+    tmp_path: Path,
+) -> None:
+    environment, state, _command_log = finalizer_environment
+    environment["DENSE_FINALIZER_TEST_LATENCY_FAIL"] = "1"
+    launchctl_log = tmp_path / "launchctl.log"
+    fake_launchctl = tmp_path / "fake-launchctl"
+    _write_executable(
+        fake_launchctl,
+        """#!/bin/zsh
+set -eu
+print -r -- "$*" >> "$DENSE_FINALIZER_TEST_LAUNCHCTL_LOG"
+""",
+    )
+    environment.update(
+        {
+            "DENSE_FINALIZER_LAUNCHCTL": str(fake_launchctl),
+            "DENSE_FINALIZER_LAUNCH_LABEL": "com.example.one-shot-finalizer",
+            "DENSE_FINALIZER_TEST_LAUNCHCTL_LOG": str(launchctl_log),
+        }
+    )
+
+    result = _run(environment, "internal-run-managed")
+
+    assert result.returncode == 17
+    assert launchctl_log.read_text(encoding="utf-8").splitlines() == [
+        "remove com.example.one-shot-finalizer"
+    ]
+    current = json.loads((state / "state.json").read_text(encoding="utf-8"))
+    assert current["phase"] == "failed"
 
 
 def test_start_archives_stale_pid_and_launches_one_detached_finalizer(

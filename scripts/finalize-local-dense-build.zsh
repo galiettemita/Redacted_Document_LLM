@@ -30,7 +30,11 @@ if [[ -n "${DENSE_FINALIZER_CAFFEINATE:-}" ]]; then
 else
   CAFFEINATE_COMMAND="$(command -v caffeinate 2>/dev/null || true)"
 fi
-LAUNCHCTL_COMMAND="$(command -v launchctl 2>/dev/null || true)"
+if [[ -n "${DENSE_FINALIZER_LAUNCHCTL:-}" ]]; then
+  LAUNCHCTL_COMMAND="$DENSE_FINALIZER_LAUNCHCTL"
+else
+  LAUNCHCTL_COMMAND="$(command -v launchctl 2>/dev/null || true)"
+fi
 
 iso_now() {
   date -u '+%Y-%m-%dT%H:%M:%SZ'
@@ -256,6 +260,8 @@ start_finalizer() {
       DENSE_FINALIZER_POLL_SECONDS="$POLL_SECONDS" \
       DENSE_FINALIZER_DOCKER="$DOCKER_COMMAND" \
       DENSE_FINALIZER_CAFFEINATE="$CAFFEINATE_COMMAND" \
+      DENSE_FINALIZER_LAUNCHCTL="$LAUNCHCTL_COMMAND" \
+      DENSE_FINALIZER_LAUNCH_LABEL="$launch_label" \
       "$CAFFEINATE_COMMAND" -i "$SCRIPT_PATH" internal-run-managed
     local launch_attempt
     finalizer_pid=""
@@ -369,10 +375,20 @@ run_finalizer() {
 run_managed_internal() {
   mkdir -p "$STATE_DIR"
   exec >> "$LOG_FILE" 2>&1
+  cleanup_managed_launch() {
+    if [[ -n "${DENSE_FINALIZER_LAUNCH_LABEL:-}" && -x "$LAUNCHCTL_COMMAND" ]]; then
+      "$LAUNCHCTL_COMMAND" remove "$DENSE_FINALIZER_LAUNCH_LABEL" >/dev/null 2>&1 || true
+    fi
+  }
+  trap cleanup_managed_launch EXIT
   local temporary_pid="$STATE_DIR/.finalizer.pid.$$.tmp"
   print -- "$$" > "$temporary_pid"
   mv "$temporary_pid" "$PID_FILE"
-  run_finalizer
+  local run_exit=0
+  run_finalizer || run_exit=$?
+  cleanup_managed_launch
+  trap - EXIT
+  return "$run_exit"
 }
 
 usage() {

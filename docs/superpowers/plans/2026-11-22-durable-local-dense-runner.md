@@ -79,6 +79,7 @@
 - [x] **Step 3: Implement a launchd/nohup/caffeinate finalizer with atomic state and no destructive operations or provider path.**
 - [x] **Step 4: Run focused finalizer and runner tests, then the complete backend suite.** Focused: 18 passed. Full backend: 531 passed, 2 expected environment skips.
 - [x] **Step 5: Launch the finalizer beside the active benchmark, update the checklist, commit, and push.** PID 22608 is launchd-managed under PID 1, reports `waiting` on build phase `benchmarking`, and had not invoked Docker at launch verification.
+- [x] **Step 6: Make the managed finalizer one-shot before terminal certification.** A regression test reproduced the missing launch-label removal; the finalizer now propagates its terminal exit and removes the exact submitted launchd job after success or failure, matching the proven runner lifecycle without signaling the encoder.
 
 ### Task 4: Apply the measured CPU throughput setting
 
