@@ -223,6 +223,8 @@
         - [x] Diagnose the post-encoding native crash as incompatible PyTorch/FAISS OpenMP runtimes on macOS, stop the launchd restart loop before it could overwrite the sample, and preserve all 100,000 completed int8 rows.
         - [x] Isolate benchmark and production FAISS construction/certification in a fresh Torch-free process, make the managed runner one-shot after terminal exit, and pass 59 focused plus 539 full backend tests with 2 expected skips.
         - [x] Validate every preserved benchmark row, re-derive and verify all 14,549,269 chunk offsets, and bind the recovered sample to corpus, semantics, selection, offset, and embedding checksums without a model/provider call.
+        - [x] Finish the recovered benchmark without rewriting its sample: isolated FAISS training/add/probe took 13.91 seconds, measured 9.52 encoded rows/s, and projected 13.02 GB of final artifacts.
+        - [x] Pass both storage gates and start the real 14,549,269-row production build as PID 45140 under PID 1 with 68,572-row resumable checkpoints, a conservative 15.67 GB runner projection, 58.28 GB available at launch, and the finalizer still waiting.
     - [x] With a real key configured and generation still disabled, count the exact one-passage request, show expected and maximum cost, and obtain explicit approval before the first paid model call.
       - [x] Align the production input-token request with the current provider schema by excluding generation-only fields, with a regression test and full backend/frontend verification.
       - [x] Count the selected one-passage closed-book request at 131 exact provider input tokens while every paid-generation approval remains disabled.
