@@ -203,6 +203,9 @@
         - [x] Accept staged SSE results in the uploaded-document frontend and render only the provider prediction, with no staged, retrieval, or research-method label.
         - [x] Pass the no-spend upload-to-SSE staged loopback, full regression suites, typecheck, production build, Compose validation, and migration round-trip.
         - [x] Configure the ignored cumulative $10.00 ceiling and verify the deployed staged basis is operational against all 14,549,269 BM25 passages while both paid-call switches remain false.
+        - [x] Enable only the master and staged approvals locally, verify staged readiness is selected against all 14,549,269 BM25 passages, and confirm readiness leaves the durable ledger at $0 with zero provider claims.
+        - [x] Serve the updated frontend at `http://127.0.0.1:5173`, verify its backend proxy reports the staged path ready, and leave it waiting for the user's real PDF.
+        - [ ] Complete and verify the first authorized two-stage provider prediction after the user uploads a real PDF and selects **Predict**.
       - [ ] Complete the running 100,000-row real CPU benchmark, then start and verify the resumable 14,549,269-row production build only if the measured storage gate passes.
     - [x] With a real key configured and generation still disabled, count the exact one-passage request, show expected and maximum cost, and obtain explicit approval before the first paid model call.
       - [x] Align the production input-token request with the current provider schema by excluding generation-only fields, with a regression test and full backend/frontend verification.

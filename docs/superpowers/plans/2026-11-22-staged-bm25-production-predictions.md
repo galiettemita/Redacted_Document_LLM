@@ -156,7 +156,7 @@
 - Consumes: verified no-spend deployment, existing user API key, `10.00` cap, staged flags, and a user-uploaded PDF.
 - Produces: a ready local Predict control for the first prepared redaction and durable cost/provenance records.
 
-- [ ] **Step 1: Recreate backend and worker with the master and staged flags enabled and the hard ceiling fixed at `10.00`; leave all other basis flags unchanged.**
-- [ ] **Step 2: Verify readiness selects the staged basis, the BM25 live count is 14,549,269, and no provider call occurs during readiness.**
+- [x] **Step 1: Recreate backend and worker with the master and staged flags enabled and the hard ceiling fixed at `10.00`; leave all other basis flags unchanged.**
+- [x] **Step 2: Verify readiness selects the staged basis, the BM25 live count is 14,549,269, and no provider call occurs during readiness.**
 - [ ] **Step 3: Leave the site ready for the user's uploaded document; on Predict, allow the authorized two-stage call and verify the prediction event, ledger settlement, and generic UI.**
 - [ ] **Step 4: Update the checklist with actual readiness/call evidence and commit/push any documentation-only state change.**
