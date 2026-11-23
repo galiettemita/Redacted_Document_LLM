@@ -23,6 +23,7 @@ from redacted_backend.domain.retrieval import (
 from redacted_backend.domain.visible_examples import VisibleExample
 from redacted_backend.models.pricing import (
     OPENAI_GPT6_ASTRA_PRICING,
+    estimate_maximum_cost,
     estimate_usage_cost,
 )
 from redacted_backend.models.prompts import (
@@ -85,6 +86,24 @@ class GenerationStore(Protocol):
     def save(self, scope: str, key: str, value: StoredGeneration) -> None: ...
 
 
+class SpendBudget(Protocol):
+    def reserve(
+        self,
+        scope: str,
+        idempotency_key: str,
+        request_sha256: str,
+        maximum_cost_usd: float,
+    ) -> bool: ...
+
+    def settle(
+        self,
+        scope: str,
+        idempotency_key: str,
+        request_sha256: str,
+        actual_cost_usd: float,
+    ) -> None: ...
+
+
 class InMemoryGenerationStore:
     def __init__(self) -> None:
         self._values: dict[tuple[str, str], StoredGeneration] = {}
@@ -142,10 +161,12 @@ class OpenAIGateway:
         *,
         transport: ModelTransport,
         store: GenerationStore,
+        spend_budget: SpendBudget | None = None,
         scientific: ScientificConfig | None = None,
     ) -> None:
         self.transport = transport
         self.store = store
+        self.spend_budget = spend_budget
         self.scientific = scientific or ScientificConfig()
 
     def generate_query(
@@ -350,6 +371,28 @@ class OpenAIGateway:
                 "analysis_cancelled",
                 "Analysis changed before provider generation",
             )
+        if self.spend_budget is not None:
+            maximum_cost = estimate_maximum_cost(
+                budget.input_tokens,
+                self.scientific.model_max_output_tokens,
+            )
+            try:
+                reserved = self.spend_budget.reserve(
+                    scope,
+                    idempotency_key,
+                    request_hash,
+                    maximum_cost,
+                )
+            except Exception as error:
+                raise ModelGatewayError(
+                    str(getattr(error, "code", "spend_budget_error")),
+                    "Provider spending authorization failed closed",
+                ) from error
+            if not reserved:
+                raise ModelGatewayError(
+                    "provider_outcome_unknown",
+                    "A provider spending reservation already exists for this generation",
+                )
         if not self.store.claim(scope, idempotency_key, request_hash, kind):
             raise ModelGatewayError(
                 "provider_outcome_unknown",
@@ -371,8 +414,21 @@ class OpenAIGateway:
                 "provider_incomplete",
                 "Provider response did not complete",
             )
-        output = _output_text(body)
         usage = _usage(body)
+        if self.spend_budget is not None:
+            try:
+                self.spend_budget.settle(
+                    scope,
+                    idempotency_key,
+                    request_hash,
+                    estimate_usage_cost(usage),
+                )
+            except Exception as error:
+                raise ModelGatewayError(
+                    str(getattr(error, "code", "spend_budget_error")),
+                    "Provider spending settlement failed closed",
+                ) from error
+        output = _output_text(body)
         return budget.input_tokens, response, output, usage
 
     def _existing(

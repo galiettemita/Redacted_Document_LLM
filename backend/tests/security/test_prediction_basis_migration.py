@@ -250,6 +250,123 @@ def test_downgrade_reupgrade_preserves_model_only_provenance(
     assert _json(restored_event)["prediction_basis"] == "model_only_v1"
 
 
+def test_staged_spend_schema_round_trip_is_fresh_and_seeded(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database_url = f"sqlite+pysqlite:///{tmp_path / 'staged-spend.db'}"
+    monkeypatch.setenv("REDACTED_DATABASE_URL", database_url)
+    config = Config(str(Path(__file__).parents[2] / "alembic.ini"))
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+
+    inspector = inspect(engine)
+    assert {
+        "staged_spend_ledgers",
+        "staged_spend_claims",
+    }.issubset(inspector.get_table_names())
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT prediction_basis, committed_microusd, actual_microusd "
+                "FROM staged_spend_ledgers"
+            )
+        ).one()
+    assert tuple(row) == ("best_available_foiarchive_bm25_v1", 0, 0)
+
+    command.downgrade(config, "0010_prediction_basis")
+    tables = set(inspect(engine).get_table_names())
+    assert "staged_spend_ledgers" not in tables
+    assert "staged_spend_claims" not in tables
+
+    command.upgrade(config, "head")
+    with engine.connect() as connection:
+        assert connection.scalar(
+            text("SELECT count(*) FROM staged_spend_ledgers")
+        ) == 1
+        assert connection.scalar(
+            text("SELECT count(*) FROM staged_spend_claims")
+        ) == 0
+
+
+def test_downgrade_reupgrade_preserves_staged_bm25_provenance(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database_url = f"sqlite+pysqlite:///{tmp_path / 'staged-basis-roundtrip.db'}"
+    monkeypatch.setenv("REDACTED_DATABASE_URL", database_url)
+    config = Config(str(Path(__file__).parents[2] / "alembic.ini"))
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    document_id, passage_id = _insert_parent_records(engine)
+    job_id = "00000000-0000-0000-0000-000000000033"
+    basis = "best_available_foiarchive_bm25_v1"
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO analysis_jobs "
+                "(id, passage_id, document_id, passage_revision, prediction_basis, "
+                "idempotency_key, request_hash, status, stage, blockers, "
+                "prediction_payload) VALUES "
+                "(:id, :passage_id, :document_id, 1, :basis, 'staged-roundtrip', "
+                ":hash, 'complete', 'complete', '[]', :prediction)"
+            ),
+            {
+                "id": job_id,
+                "passage_id": passage_id,
+                "document_id": document_id,
+                "basis": basis,
+                "hash": "a" * 64,
+                "prediction": json.dumps(
+                    {
+                        "prediction_basis": basis,
+                        "prediction": "Stored staged prediction",
+                        "retrieval_trace_sha256": "b" * 64,
+                    }
+                ),
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO analysis_events "
+                "(job_id, document_id, passage_id, sequence, event_type, payload) "
+                "VALUES (:job_id, :document_id, :passage_id, 1, "
+                "'passage.prediction', :payload)"
+            ),
+            {
+                "job_id": job_id,
+                "document_id": document_id,
+                "passage_id": passage_id,
+                "payload": json.dumps(
+                    {
+                        "job_id": job_id,
+                        "prediction_basis": basis,
+                        "prediction": "Stored staged prediction",
+                    }
+                ),
+            },
+        )
+
+    command.downgrade(config, "0009_storage_cleanup_state")
+    command.upgrade(config, "head")
+
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT prediction_basis, prediction_payload "
+                "FROM analysis_jobs WHERE id = :id"
+            ),
+            {"id": job_id},
+        ).one()
+        event = connection.scalar(
+            text("SELECT payload FROM analysis_events WHERE job_id = :id"),
+            {"id": job_id},
+        )
+    assert row.prediction_basis == basis
+    assert _json(row.prediction_payload)["prediction_basis"] == basis
+    assert _json(event)["prediction_basis"] == basis
+
+
 def _insert_parent_records(engine) -> tuple[str, str]:
     document_id = "00000000-0000-0000-0000-000000000011"
     passage_id = "00000000-0000-0000-0000-000000000012"

@@ -74,12 +74,12 @@
 - Consumes: exact pre-dispatch input-token count, `estimate_maximum_cost(...)`, actual `TokenUsage`, and configured `Decimal('10.00')` ceiling.
 - Produces: `StagedSpendBudget.reserve(scope, key, request_sha256, maximum_cost_usd)`, `settle(..., actual_cost_usd)`, immutable per-attempt claims, and atomic cumulative committed spend.
 
-- [ ] **Step 1: Write failing migration and budget tests** for fresh/upgrade/downgrade schema, atomic first claim, idempotent replay, cap exhaustion, cap reduction, completed settlement, and uncertain maximum retention.
-- [ ] **Step 2: Run the focused tests and verify missing schema/budget failures.**
-- [ ] **Step 3: Implement integer-microdollar ledger rows and a locked singleton aggregate so reserve happens before dispatch and settle can release only the unused maximum after a completed response.**
-- [ ] **Step 4: Write failing gateway tests** proving maximum cost is reserved after token counting but before transport, actual cost settles on success, and transport uncertainty leaves the maximum committed.
-- [ ] **Step 5: Run those tests red, inject the budget only into the staged runtime gateway, and run the focused budget/gateway/migration tests green.**
-- [ ] **Step 6: Commit and push with `feat: enforce staged provider spend ceiling`.**
+- [x] **Step 1: Write failing migration and budget tests** for fresh/upgrade/downgrade schema, atomic first claim, idempotent replay, cap exhaustion, cap reduction, completed settlement, and uncertain maximum retention.
+- [x] **Step 2: Run the focused tests and verify missing schema/budget failures.**
+- [x] **Step 3: Implement integer-microdollar ledger rows and a locked singleton aggregate so reserve happens before dispatch and settle can release only the unused maximum after a completed response.**
+- [x] **Step 4: Write failing gateway tests** proving maximum cost is reserved after token counting but before transport, actual cost settles on success, and transport uncertainty leaves the maximum committed.
+- [x] **Step 5: Run those tests red, inject the budget only into the staged runtime gateway, and run the focused budget/gateway/migration tests green.**
+- [x] **Step 6: Commit and push with `feat: enforce staged provider spend ceiling`.**
 
 ### Task 3: Add staged readiness and worker construction
 

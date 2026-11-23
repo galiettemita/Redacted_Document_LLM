@@ -58,6 +58,131 @@ class AcceptThenTimeoutTransport(RecordingTransport):
         raise TimeoutError("response lost after provider acceptance")
 
 
+class RecordingSpendBudget:
+    def __init__(self, events: list[str], *, reserve_result: bool = True) -> None:
+        self.events = events
+        self.reserve_result = reserve_result
+        self.reservations: list[tuple[str, str, str, float]] = []
+        self.settlements: list[tuple[str, str, str, float]] = []
+
+    def reserve(
+        self,
+        scope: str,
+        idempotency_key: str,
+        request_sha256: str,
+        maximum_cost_usd: float,
+    ) -> bool:
+        self.events.append("reserve")
+        self.reservations.append(
+            (scope, idempotency_key, request_sha256, maximum_cost_usd)
+        )
+        return self.reserve_result
+
+    def settle(
+        self,
+        scope: str,
+        idempotency_key: str,
+        request_sha256: str,
+        actual_cost_usd: float,
+    ) -> None:
+        self.events.append("settle")
+        self.settlements.append(
+            (scope, idempotency_key, request_sha256, actual_cost_usd)
+        )
+
+
+def test_gateway_reserves_maximum_after_count_and_settles_after_response() -> None:
+    events: list[str] = []
+
+    class OrderedTransport(RecordingTransport):
+        def count_input_tokens(self, request: dict[str, object]) -> int:
+            events.append("count")
+            return super().count_input_tokens(request)
+
+        def create_response(
+            self,
+            request: dict[str, object],
+            *,
+            client_request_id: str,
+        ) -> ProviderHttpResponse:
+            events.append("create")
+            return super().create_response(
+                request,
+                client_request_id=client_request_id,
+            )
+
+    budget = RecordingSpendBudget(events)
+    gateway = OpenAIGateway(
+        transport=OrderedTransport([_response("specific actors paris meeting")]),
+        store=InMemoryGenerationStore(),
+        spend_budget=budget,
+    )
+
+    result = gateway.generate_query(_example(), "budgeted-query")
+
+    assert events == ["count", "reserve", "create", "settle"]
+    assert budget.reservations[0][:2] == (
+        f"query:{_example().passage_id}",
+        "budgeted-query",
+    )
+    assert budget.reservations[0][3] == pytest.approx(0.20801)
+    assert budget.settlements[0][3] == pytest.approx(0.00521)
+    assert result.estimated_cost_usd == pytest.approx(0.00521)
+
+
+def test_gateway_uncertainty_keeps_maximum_reserved_without_settlement() -> None:
+    events: list[str] = []
+
+    class OrderedTimeoutTransport(AcceptThenTimeoutTransport):
+        def count_input_tokens(self, request: dict[str, object]) -> int:
+            events.append("count")
+            return super().count_input_tokens(request)
+
+        def create_response(
+            self,
+            request: dict[str, object],
+            *,
+            client_request_id: str,
+        ) -> ProviderHttpResponse:
+            events.append("create")
+            return super().create_response(
+                request,
+                client_request_id=client_request_id,
+            )
+
+    budget = RecordingSpendBudget(events)
+    gateway = OpenAIGateway(
+        transport=OrderedTimeoutTransport(),
+        store=InMemoryGenerationStore(),
+        spend_budget=budget,
+    )
+
+    with pytest.raises(ModelGatewayError, match="provider_outcome_unknown"):
+        gateway.generate_query(_example(), "uncertain-budgeted-query")
+
+    assert events == ["count", "reserve", "create"]
+    assert len(budget.reservations) == 1
+    assert budget.settlements == []
+
+
+def test_gateway_refuses_dispatch_when_reservation_already_exists() -> None:
+    events: list[str] = []
+    transport = RecordingTransport([_response("must not be used")])
+    budget = RecordingSpendBudget(events, reserve_result=False)
+    gateway = OpenAIGateway(
+        transport=transport,
+        store=InMemoryGenerationStore(),
+        spend_budget=budget,
+    )
+
+    with pytest.raises(ModelGatewayError, match="provider_outcome_unknown"):
+        gateway.generate_query(_example(), "already-reserved-query")
+
+    assert len(transport.count_requests) == 1
+    assert transport.create_requests == []
+    assert budget.settlements == []
+
+
 def test_gateway_sends_one_user_message_with_exact_frozen_settings() -> None:
     transport = RecordingTransport([_response("specific actors paris 1960 meeting")])
     gateway = OpenAIGateway(

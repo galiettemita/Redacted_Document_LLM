@@ -22,6 +22,7 @@ from redacted_backend.domain.readiness import (
 )
 from redacted_backend.jobs.generation_store import AnalysisGenerationStore
 from redacted_backend.jobs.orchestrator import AnalysisOrchestrator
+from redacted_backend.jobs.spend_budget import StagedSpendBudget
 from redacted_backend.models.openai_gateway import OpenAIGateway, OpenAIHttpTransport
 from redacted_backend.retrieval.bm25 import Bm25Index, OpenSearchHttpTransport
 from redacted_backend.retrieval.dense import BgeEncoder, DenseIndex
@@ -62,11 +63,20 @@ def build_analysis_orchestrator(
         assert settings.database_url is not None
         database = Database.connect(settings.database_url)
     scientific = ScientificConfig()
+    spend_budget = None
+    if prediction_basis == PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1:
+        if settings.staged_bm25_spend_cap_usd is None:
+            raise RuntimeError("Analysis worker staged spending cap is not configured")
+        spend_budget = StagedSpendBudget(
+            database,
+            cap_usd=settings.staged_bm25_spend_cap_usd,
+        )
     gateway = OpenAIGateway(
         transport=OpenAIHttpTransport(
             settings.openai_api_key.get_secret_value(),
         ),
         store=AnalysisGenerationStore(database),
+        spend_budget=spend_budget,
         scientific=scientific,
     )
     if prediction_basis == PredictionBasis.MODEL_ONLY_V1:

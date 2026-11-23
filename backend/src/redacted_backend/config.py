@@ -1,3 +1,4 @@
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,7 @@ class Settings(BaseSettings):
     allow_model_only_calls: bool = False
     allow_best_available_calls: bool = False
     allow_paper_exact_calls: bool = False
+    staged_bm25_spend_cap_usd: Decimal | None = Field(default=None, gt=0)
     worker_heartbeat_key: str = "redacted:analysis-worker:heartbeat"
     worker_heartbeat_ttl_seconds: int = 30
     document_storage_root: Path = Path("/var/lib/redacted/documents")
@@ -59,6 +61,13 @@ class Settings(BaseSettings):
     @field_validator("openai_api_key", mode="before")
     @classmethod
     def empty_model_key_is_unconfigured(cls, value: Any) -> Any:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @field_validator("staged_bm25_spend_cap_usd", mode="before")
+    @classmethod
+    def empty_spend_cap_is_unconfigured(cls, value: Any) -> Any:
         if isinstance(value, str) and not value.strip():
             return None
         return value

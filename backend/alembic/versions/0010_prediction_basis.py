@@ -18,6 +18,7 @@ depends_on: str | Sequence[str] | None = None
 _LEGACY_BASIS = "paper_exact_v1"
 _VALID_BASES = {
     "model_only_v1",
+    "best_available_foiarchive_bm25_v1",
     "best_available_foiarchive_v1",
     "paper_exact_v1",
 }

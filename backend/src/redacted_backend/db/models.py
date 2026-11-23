@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
     JSON,
     Date,
     DateTime,
@@ -277,6 +279,83 @@ class AnalysisEvent(Base):
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class StagedSpendLedger(Base):
+    __tablename__ = "staged_spend_ledgers"
+    __table_args__ = (
+        CheckConstraint(
+            "committed_microusd >= 0",
+            name="ck_staged_spend_ledgers_committed_nonnegative",
+        ),
+        CheckConstraint(
+            "actual_microusd >= 0",
+            name="ck_staged_spend_ledgers_actual_nonnegative",
+        ),
+    )
+
+    prediction_basis: Mapped[str] = mapped_column(String(64), primary_key=True)
+    committed_microusd: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    actual_microusd: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class StagedSpendClaim(Base):
+    __tablename__ = "staged_spend_claims"
+    __table_args__ = (
+        UniqueConstraint(
+            "scope",
+            "idempotency_key",
+            name="uq_staged_spend_claim_scope_key",
+        ),
+        CheckConstraint(
+            "maximum_cost_microusd > 0",
+            name="ck_staged_spend_claims_maximum_positive",
+        ),
+        CheckConstraint(
+            "actual_cost_microusd IS NULL OR actual_cost_microusd >= 0",
+            name="ck_staged_spend_claims_actual_nonnegative",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    prediction_basis: Mapped[str] = mapped_column(
+        ForeignKey("staged_spend_ledgers.prediction_basis", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    scope: Mapped[str] = mapped_column(String(512), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    request_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    maximum_cost_microusd: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    actual_cost_microusd: Mapped[int | None] = mapped_column(
+        BigInteger,
+        nullable=True,
+    )
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
