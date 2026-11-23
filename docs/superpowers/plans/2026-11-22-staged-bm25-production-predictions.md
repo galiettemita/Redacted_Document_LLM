@@ -97,11 +97,11 @@
 - Consumes: verified best-available corpus and BM25 manifests, exact live count, real BM25 probe, API key, worker/database readiness, staged flags, and positive spend cap.
 - Produces: `resolve_staged_bm25_corpus_readiness(...)`, staged basis priority, and a BM25-only `AnalysisOrchestrator`.
 
-- [ ] **Step 1: Write failing readiness tests** for manifest identity, missing path, live-count mismatch, probe failure, independent approval, positive spend cap, and priority below full four-list but above model-only.
-- [ ] **Step 2: Run readiness tests red, implement staged readiness/configuration, and run them green.**
-- [ ] **Step 3: Write failing runtime-provider tests** proving only the staged basis loads/probes BM25 without requiring dense artifacts and refuses construction without flags or budget.
-- [ ] **Step 4: Run runtime tests red, implement staged construction and Compose variables with safe false/empty defaults, then run focused tests green.**
-- [ ] **Step 5: Commit and push with `feat: wire staged bm25 runtime readiness`.**
+- [x] **Step 1: Write failing readiness tests** for manifest identity, missing path, live-count mismatch, probe failure, independent approval, positive spend cap, and priority below full four-list but above model-only.
+- [x] **Step 2: Run readiness tests red, implement staged readiness/configuration, and run them green.**
+- [x] **Step 3: Write failing runtime-provider tests** proving only the staged basis loads/probes BM25 without requiring dense artifacts and refuses construction without flags or budget.
+- [x] **Step 4: Run runtime tests red, implement staged construction and Compose variables with safe false/empty defaults, then run focused tests green.**
+- [x] **Step 5: Commit and push with `feat: wire staged bm25 runtime readiness`.**
 
 ### Task 4: Enforce one staged prediction per document
 

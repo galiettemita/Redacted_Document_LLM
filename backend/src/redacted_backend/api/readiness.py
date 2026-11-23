@@ -24,6 +24,7 @@ from redacted_backend.domain.readiness import (
     ReadinessResponse,
     verify_best_available_corpus_readiness,
     verify_corpus_readiness,
+    verify_staged_bm25_readiness,
 )
 from redacted_backend.retrieval.bm25 import OpenSearchHttpTransport
 from redacted_backend.retrieval.dense_sharded import (
@@ -58,6 +59,7 @@ def create_readiness_router(
         database_readiness = resolve_database_readiness(database)
         worker = resolve_worker_readiness(settings)
         corpus = resolve_corpus_readiness(settings)
+        staged_bm25_corpus = resolve_staged_bm25_corpus_readiness(settings)
         best_available_corpus = resolve_best_available_corpus_readiness(settings)
         model = resolve_model_readiness(settings)
         prediction_bases = resolve_prediction_basis_readiness(
@@ -65,6 +67,7 @@ def create_readiness_router(
             database=database_readiness,
             worker=worker,
             corpus=corpus,
+            staged_bm25_corpus=staged_bm25_corpus,
             best_available_corpus=best_available_corpus,
         )
         strongest = select_prediction_basis(prediction_bases)
@@ -101,6 +104,7 @@ def resolve_prediction_basis_readiness(
     database: ComponentReadiness,
     worker: ComponentReadiness,
     corpus: ComponentReadiness,
+    staged_bm25_corpus: ComponentReadiness | None = None,
     best_available_corpus: ComponentReadiness | None = None,
 ) -> dict[PredictionBasis, BasisReadiness]:
     model_only_operational, model_only_detail = _operational(
@@ -124,12 +128,38 @@ def resolve_prediction_basis_readiness(
         ),
         model_configured=settings.openai_api_key is not None,
     )
+    staged_operational, staged_detail = _operational(
+        ("database", database),
+        ("worker", worker),
+        (
+            "corpus",
+            staged_bm25_corpus
+            or ComponentReadiness(ready=False, detail="not configured"),
+        ),
+        (
+            "spend cap",
+            ComponentReadiness(
+                ready=settings.staged_bm25_spend_cap_usd is not None,
+                detail=(
+                    "configured"
+                    if settings.staged_bm25_spend_cap_usd is not None
+                    else "not configured"
+                ),
+            ),
+        ),
+        model_configured=settings.openai_api_key is not None,
+    )
     master = settings.allow_paid_model_calls
     return {
         PredictionBasis.MODEL_ONLY_V1: _basis_readiness(
             operational=model_only_operational,
             approved=master and settings.allow_model_only_calls,
             unavailable_detail=model_only_detail,
+        ),
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1: _basis_readiness(
+            operational=staged_operational,
+            approved=master and settings.allow_staged_bm25_calls,
+            unavailable_detail=staged_detail,
         ),
         PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1: _basis_readiness(
             operational=best_operational,
@@ -150,6 +180,7 @@ def select_prediction_basis(
     for basis in (
         PredictionBasis.PAPER_EXACT_V1,
         PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1,
         PredictionBasis.MODEL_ONLY_V1,
     ):
         if readiness[basis].ready:
@@ -324,6 +355,70 @@ def resolve_corpus_readiness(
     )
 
 
+def resolve_staged_bm25_corpus_readiness(
+    settings: Settings,
+    *,
+    index_counter: Callable[[str, str], int] | None = None,
+    search_probe: Callable[[str, str], None] | None = None,
+    contract: BestAvailableRetrievalContract = (
+        PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT
+    ),
+) -> ComponentReadiness:
+    corpus_path = settings.best_available_corpus_manifest_path
+    bm25_path = settings.best_available_bm25_manifest_path
+    if corpus_path is None or bm25_path is None:
+        return ComponentReadiness(ready=False, detail="not configured")
+    if not corpus_path.is_file() or not bm25_path.is_file():
+        return ComponentReadiness(ready=False, detail="manifest not verified")
+    try:
+        corpus = BestAvailableCorpusManifest.model_validate_json(
+            corpus_path.read_text(encoding="utf-8")
+        )
+        index = Bm25IndexManifest.model_validate_json(
+            bm25_path.read_text(encoding="utf-8")
+        )
+    except (OSError, ValidationError, ValueError):
+        return ComponentReadiness(ready=False, detail="manifest invalid")
+    manifest_readiness = verify_staged_bm25_readiness(
+        corpus,
+        index,
+        ScientificConfig(),
+        contract=contract,
+    )
+    if not manifest_readiness.ready:
+        return manifest_readiness
+    if settings.opensearch_url is None:
+        return ComponentReadiness(
+            ready=False,
+            detail="retrieval service not configured",
+        )
+    counter = index_counter or _count_opensearch_chunks
+    try:
+        live_count = counter(settings.opensearch_url, index.index_name)
+    except Exception:
+        return ComponentReadiness(
+            ready=False,
+            detail="retrieval index probe failed",
+        )
+    if live_count != index.chunk_count or live_count != contract.chunk_count:
+        return ComponentReadiness(
+            ready=False,
+            detail="BM25 live index count mismatch",
+        )
+    probe = search_probe or _probe_opensearch_bm25
+    try:
+        probe(settings.opensearch_url, index.index_name)
+    except Exception:
+        return ComponentReadiness(
+            ready=False,
+            detail="BM25 search probe failed",
+        )
+    return ComponentReadiness(
+        ready=True,
+        detail="best-available corpus and BM25 index operational",
+    )
+
+
 def resolve_best_available_corpus_readiness(
     settings: Settings,
     *,
@@ -473,3 +568,14 @@ def resolve_best_available_corpus_readiness(
 
 def _count_opensearch_chunks(base_url: str, index_name: str) -> int:
     return OpenSearchHttpTransport(base_url, timeout_seconds=2.0).count(index_name)
+
+
+def _probe_opensearch_bm25(base_url: str, index_name: str) -> None:
+    OpenSearchHttpTransport(base_url, timeout_seconds=2.0).search(
+        index_name,
+        {
+            "size": 1,
+            "_source": False,
+            "query": {"match": {"text": "worker readiness probe"}},
+        },
+    )

@@ -141,6 +141,90 @@ def verify_corpus_readiness(
     )
 
 
+def verify_staged_bm25_readiness(
+    corpus: BestAvailableCorpusManifest,
+    index: Bm25IndexManifest,
+    scientific: ScientificConfig,
+    *,
+    contract: BestAvailableRetrievalContract = (
+        PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT
+    ),
+) -> ComponentReadiness:
+    scientific_hash = scientific.manifest_hash()
+    corpus_hash = corpus.manifest_hash()
+    if corpus.paper_coverage_ready:
+        return ComponentReadiness(
+            ready=False,
+            detail="best-available corpus cannot claim exact-paper coverage",
+        )
+    if corpus.retrieval_profile != "best_available_foiarchive_v1":
+        return ComponentReadiness(
+            ready=False,
+            detail="best-available corpus profile mismatch",
+        )
+    if corpus.scientific_hash != scientific_hash:
+        return ComponentReadiness(
+            ready=False,
+            detail="best-available corpus scientific manifest mismatch",
+        )
+    if (
+        corpus.manifest_hash() != contract.corpus_manifest_hash
+        or corpus.chunks_sha256 != contract.chunks_sha256
+        or corpus.parsed_row_count != contract.parsed_row_count
+        or corpus.document_count != contract.document_count
+        or corpus.chunk_count != contract.chunk_count
+    ):
+        return ComponentReadiness(
+            ready=False,
+            detail="best-available production corpus identity mismatch",
+        )
+    if (
+        index.retrieval_profile != "best_available_foiarchive_v1"
+        or index.index_name != BEST_AVAILABLE_BM25_INDEX_NAME
+    ):
+        return ComponentReadiness(
+            ready=False,
+            detail="best-available BM25 profile mismatch",
+        )
+    if index.scientific_hash != scientific_hash:
+        return ComponentReadiness(
+            ready=False,
+            detail="BM25 scientific manifest mismatch",
+        )
+    if index.stopwords_hash != scientific.context_stopwords_hash():
+        return ComponentReadiness(
+            ready=False,
+            detail="BM25 stop-word manifest mismatch",
+        )
+    if index.index_definition_hash != index_definition_hash(scientific):
+        return ComponentReadiness(
+            ready=False,
+            detail="BM25 index definition mismatch",
+        )
+    if index.corpus_manifest_hash != corpus_hash:
+        return ComponentReadiness(
+            ready=False,
+            detail="BM25 corpus manifest mismatch",
+        )
+    if (
+        index.document_count != corpus.document_count
+        or index.chunk_count != corpus.chunk_count
+    ):
+        return ComponentReadiness(
+            ready=False,
+            detail="BM25 corpus count mismatch",
+        )
+    if index.opensearch_version != scientific.opensearch_version:
+        return ComponentReadiness(
+            ready=False,
+            detail="BM25 runtime version mismatch",
+        )
+    return ComponentReadiness(
+        ready=True,
+        detail="best-available corpus and BM25 index verified",
+    )
+
+
 def verify_best_available_corpus_readiness(
     corpus: BestAvailableCorpusManifest,
     index: Bm25IndexManifest,

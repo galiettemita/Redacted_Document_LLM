@@ -17,6 +17,7 @@ from redacted_backend.jobs.runtime_provider import (
     AnalysisRuntimeProvider,
     RuntimeInitializationError,
 )
+from redacted_backend.retrieval.service import Bm25RetrievalService
 from tests.test_readiness import (
     _best_available_test_contract,
     _compatible_best_available_settings,
@@ -176,6 +177,18 @@ def test_runtime_keeps_each_basis_fail_closed(tmp_path) -> None:
             PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
             database=database,
         )
+    with pytest.raises(RuntimeError, match="staged BM25 access is not approved"):
+        build_analysis_orchestrator(
+            Settings(**base, staged_bm25_spend_cap_usd="10.00"),
+            PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1,
+            database=database,
+        )
+    with pytest.raises(RuntimeError, match="staged spending cap is not configured"):
+        build_analysis_orchestrator(
+            Settings(**base, allow_staged_bm25_calls=True),
+            PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1,
+            database=database,
+        )
     with pytest.raises(RuntimeError, match="OpenSearch is not configured"):
         build_analysis_orchestrator(
             Settings(**base, allow_paper_exact_calls=True),
@@ -259,3 +272,74 @@ def test_best_available_runtime_loads_only_its_separate_verified_artifacts(
     assert captured["candidate_loader"] == runtime_module.FaissIvfPqIndex.load
     assert captured["bm25_probe_count"] == 1
     assert captured["dense_probe_count"] == 1
+
+
+def test_staged_runtime_loads_and_probes_bm25_without_dense_artifacts(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    settings, corpus, bm25_manifest, dense_manifest = (
+        _compatible_best_available_settings(tmp_path)
+    )
+    settings = settings.model_copy(
+        update={
+            "openai_api_key": SecretStr("secret"),
+            "allow_paid_model_calls": True,
+            "allow_staged_bm25_calls": True,
+            "staged_bm25_spend_cap_usd": 10,
+            "best_available_dense_manifest_path": None,
+            "best_available_dense_artifact_directory": None,
+            "best_available_chunks_path": None,
+            "best_available_recall_queries_path": None,
+            "best_available_latency_report_path": None,
+        }
+    )
+    database = Database.connect(f"sqlite+pysqlite:///{tmp_path / 'staged.db'}")
+    captured: dict[str, object] = {}
+
+    class FakeBm25:
+        def __init__(self, _transport, **kwargs) -> None:
+            captured["bm25_manifest"] = kwargs["index_manifest"]
+            captured["corpus_manifest"] = kwargs["corpus_manifest"]
+            captured["index_name"] = kwargs["index_name"]
+
+        def search(self, *_args, **_kwargs):
+            captured["bm25_probe_count"] = int(
+                captured.get("bm25_probe_count", 0)
+            ) + 1
+            return []
+
+    class FakeTransport:
+        def __init__(self, url: str) -> None:
+            captured["opensearch_url"] = url
+
+        def count(self, index_name: str) -> int:
+            assert index_name == bm25_manifest.index_name
+            return bm25_manifest.chunk_count
+
+    class ForbiddenDense:
+        def __init__(self, **_kwargs) -> None:
+            raise AssertionError("staged runtime must not load dense artifacts")
+
+    monkeypatch.setattr(runtime_module, "Bm25Index", FakeBm25)
+    monkeypatch.setattr(runtime_module, "OpenSearchHttpTransport", FakeTransport)
+    monkeypatch.setattr(runtime_module, "ShardedDenseIndex", ForbiddenDense)
+
+    runtime = build_analysis_orchestrator(
+        settings,
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1,
+        database=database,
+        best_available_contract=_best_available_test_contract(
+            corpus,
+            dense_manifest,
+        ),
+    )
+
+    assert runtime.prediction_basis == (
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1
+    )
+    assert isinstance(runtime.retrieval, Bm25RetrievalService)
+    assert captured["bm25_manifest"] == bm25_manifest
+    assert captured["corpus_manifest"] == corpus
+    assert captured["index_name"] == "foiarchive-best-available-bm25-v1"
+    assert captured["bm25_probe_count"] == 1

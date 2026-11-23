@@ -32,9 +32,11 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = None
     allow_paid_model_calls: bool = False
     allow_model_only_calls: bool = False
+    allow_staged_bm25_calls: bool = False
     allow_best_available_calls: bool = False
     allow_paper_exact_calls: bool = False
     staged_bm25_spend_cap_usd: Decimal | None = Field(default=None, gt=0)
+    bm25_stage_max_predictions_per_document: int = Field(default=1, ge=1)
     worker_heartbeat_key: str = "redacted:analysis-worker:heartbeat"
     worker_heartbeat_ttl_seconds: int = 30
     document_storage_root: Path = Path("/var/lib/redacted/documents")

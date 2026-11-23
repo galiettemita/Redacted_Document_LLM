@@ -19,6 +19,7 @@ from redacted_backend.db.base import Database
 from redacted_backend.domain.analysis import PredictionBasis
 from redacted_backend.domain.readiness import (
     verify_best_available_corpus_readiness,
+    verify_staged_bm25_readiness,
 )
 from redacted_backend.jobs.generation_store import AnalysisGenerationStore
 from redacted_backend.jobs.orchestrator import AnalysisOrchestrator
@@ -31,7 +32,10 @@ from redacted_backend.retrieval.dense_sharded import (
     verify_compressed_dense_artifacts,
 )
 from redacted_backend.retrieval.faiss_ivfpq import FaissIvfPqIndex
-from redacted_backend.retrieval.service import RealisticRetrievalService
+from redacted_backend.retrieval.service import (
+    Bm25RetrievalService,
+    RealisticRetrievalService,
+)
 from redacted_backend.retrieval.types import (
     Bm25IndexManifest,
     CompressedShardedDenseIndexManifest,
@@ -65,6 +69,8 @@ def build_analysis_orchestrator(
     scientific = ScientificConfig()
     spend_budget = None
     if prediction_basis == PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1:
+        if not settings.allow_staged_bm25_calls:
+            raise RuntimeError("Analysis worker staged BM25 access is not approved")
         if settings.staged_bm25_spend_cap_usd is None:
             raise RuntimeError("Analysis worker staged spending cap is not configured")
         spend_budget = StagedSpendBudget(
@@ -88,6 +94,14 @@ def build_analysis_orchestrator(
             retrieval=None,
             prediction_basis=prediction_basis,
             scientific=scientific,
+        )
+    if prediction_basis == PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1:
+        return _build_staged_bm25_orchestrator(
+            settings,
+            database=database,
+            gateway=gateway,
+            scientific=scientific,
+            contract=best_available_contract,
         )
     if prediction_basis == PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1:
         if not settings.allow_best_available_calls:
@@ -145,6 +159,60 @@ def build_analysis_orchestrator(
             scientific=scientific,
         ),
         prediction_basis=prediction_basis,
+        scientific=scientific,
+    )
+
+
+def _build_staged_bm25_orchestrator(
+    settings: Settings,
+    *,
+    database: Database,
+    gateway: OpenAIGateway,
+    scientific: ScientificConfig,
+    contract: BestAvailableRetrievalContract,
+) -> AnalysisOrchestrator:
+    corpus_path = settings.best_available_corpus_manifest_path
+    bm25_path = settings.best_available_bm25_manifest_path
+    if corpus_path is None or bm25_path is None:
+        raise RuntimeError(
+            "Analysis worker is missing staged corpus or BM25 manifest"
+        )
+    if settings.opensearch_url is None:
+        raise RuntimeError("Analysis worker OpenSearch is not configured")
+    corpus = BestAvailableCorpusManifest.model_validate_json(
+        corpus_path.read_text(encoding="utf-8")
+    )
+    bm25_manifest = Bm25IndexManifest.model_validate_json(
+        bm25_path.read_text(encoding="utf-8")
+    )
+    readiness = verify_staged_bm25_readiness(
+        corpus,
+        bm25_manifest,
+        scientific,
+        contract=contract,
+    )
+    if not readiness.ready:
+        raise RuntimeError(readiness.detail)
+    transport = OpenSearchHttpTransport(settings.opensearch_url)
+    live_count = transport.count(bm25_manifest.index_name)
+    if live_count != bm25_manifest.chunk_count or live_count != contract.chunk_count:
+        raise RuntimeError("BM25 live index count mismatch")
+    bm25 = Bm25Index(
+        transport,
+        scientific=scientific,
+        index_manifest=bm25_manifest,
+        corpus_manifest=corpus,
+        index_name=BEST_AVAILABLE_BM25_INDEX_NAME,
+    )
+    bm25.search("worker readiness probe", limit=1, query_kind="context")
+    return AnalysisOrchestrator(
+        database=database,
+        model=gateway,
+        retrieval=Bm25RetrievalService(
+            bm25=bm25,
+            scientific=scientific,
+        ),
+        prediction_basis=PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1,
         scientific=scientific,
     )
 

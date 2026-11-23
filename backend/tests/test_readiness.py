@@ -12,6 +12,7 @@ import redacted_backend.api.readiness as readiness_api
 from redacted_backend.api.readiness import (
     resolve_best_available_corpus_readiness,
     resolve_corpus_readiness,
+    resolve_staged_bm25_corpus_readiness,
     resolve_worker_readiness,
 )
 from redacted_backend.config import Settings
@@ -25,6 +26,7 @@ from redacted_backend.corpus.manifest import CorpusManifest
 from redacted_backend.domain.readiness import (
     verify_best_available_corpus_readiness,
     verify_corpus_readiness,
+    verify_staged_bm25_readiness,
 )
 from redacted_backend.domain.analysis import PredictionBasis
 from redacted_backend.domain.readiness import ComponentReadiness
@@ -93,6 +95,7 @@ def test_readiness_never_equates_http_health_with_prediction_readiness() -> None
     assert body["strongest_ready_basis"] is None
     assert set(body["prediction_bases"]) == {
         "model_only_v1",
+        "best_available_foiarchive_bm25_v1",
         "best_available_foiarchive_v1",
         "paper_exact_v1",
     }
@@ -298,6 +301,167 @@ def test_best_available_basis_is_operational_without_contaminating_exact() -> No
     assert readiness_api.select_prediction_basis(bases) == (
         PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1
     )
+
+
+def test_staged_basis_requires_its_own_approval_cap_and_priority() -> None:
+    ready = ComponentReadiness(ready=True, detail="ready")
+    unavailable = ComponentReadiness(ready=False, detail="not configured")
+    settings = Settings(
+        openai_api_key="secret",
+        allow_paid_model_calls=True,
+        allow_model_only_calls=True,
+        allow_staged_bm25_calls=True,
+        allow_best_available_calls=True,
+        allow_paper_exact_calls=True,
+        staged_bm25_spend_cap_usd="10.00",
+    )
+
+    all_ready = readiness_api.resolve_prediction_basis_readiness(
+        settings,
+        database=ready,
+        worker=ready,
+        corpus=ready,
+        staged_bm25_corpus=ready,
+        best_available_corpus=ready,
+    )
+    assert readiness_api.select_prediction_basis(all_ready) == (
+        PredictionBasis.PAPER_EXACT_V1
+    )
+
+    without_exact = readiness_api.resolve_prediction_basis_readiness(
+        settings,
+        database=ready,
+        worker=ready,
+        corpus=unavailable,
+        staged_bm25_corpus=ready,
+        best_available_corpus=ready,
+    )
+    assert readiness_api.select_prediction_basis(without_exact) == (
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1
+    )
+
+    staged_only = readiness_api.resolve_prediction_basis_readiness(
+        settings,
+        database=ready,
+        worker=ready,
+        corpus=unavailable,
+        staged_bm25_corpus=ready,
+        best_available_corpus=unavailable,
+    )
+    assert staged_only[
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1
+    ].model_dump() == {
+        "operational": True,
+        "approved": True,
+        "ready": True,
+        "detail": "operational and approved",
+    }
+    assert readiness_api.select_prediction_basis(staged_only) == (
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1
+    )
+
+    missing_cap = readiness_api.resolve_prediction_basis_readiness(
+        settings.model_copy(update={"staged_bm25_spend_cap_usd": None}),
+        database=ready,
+        worker=ready,
+        corpus=unavailable,
+        staged_bm25_corpus=ready,
+        best_available_corpus=unavailable,
+    )[PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1]
+    assert missing_cap.operational is False
+    assert missing_cap.detail == "spend cap: not configured"
+
+    unapproved = readiness_api.resolve_prediction_basis_readiness(
+        settings.model_copy(update={"allow_staged_bm25_calls": False}),
+        database=ready,
+        worker=ready,
+        corpus=unavailable,
+        staged_bm25_corpus=ready,
+        best_available_corpus=unavailable,
+    )[PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1]
+    assert unapproved.operational is True
+    assert unapproved.approved is False
+    assert unapproved.ready is False
+
+
+def test_staged_bm25_readiness_needs_only_verified_corpus_and_bm25(
+    tmp_path: Path,
+) -> None:
+    settings, corpus, bm25, dense = _compatible_best_available_settings(tmp_path)
+    settings = settings.model_copy(
+        update={
+            "best_available_dense_manifest_path": None,
+            "best_available_dense_artifact_directory": None,
+            "best_available_chunks_path": None,
+            "best_available_recall_queries_path": None,
+            "best_available_latency_report_path": None,
+        }
+    )
+    probes: list[tuple[str, str]] = []
+
+    result = resolve_staged_bm25_corpus_readiness(
+        settings,
+        index_counter=lambda _url, _index: bm25.chunk_count,
+        search_probe=lambda url, index: probes.append((url, index)),
+        contract=_best_available_test_contract(corpus, dense),
+    )
+
+    assert verify_staged_bm25_readiness(
+        corpus,
+        bm25,
+        ScientificConfig(),
+        contract=_best_available_test_contract(corpus, dense),
+    ).ready is True
+    assert result.model_dump() == {
+        "ready": True,
+        "detail": "best-available corpus and BM25 index operational",
+    }
+    assert probes == [(settings.opensearch_url, bm25.index_name)]
+
+
+def test_staged_bm25_readiness_fails_closed_on_paths_count_probe_or_identity(
+    tmp_path: Path,
+) -> None:
+    settings, corpus, bm25, dense = _compatible_best_available_settings(tmp_path)
+    contract = _best_available_test_contract(corpus, dense)
+
+    missing = resolve_staged_bm25_corpus_readiness(
+        settings.model_copy(update={"best_available_bm25_manifest_path": None}),
+        contract=contract,
+    )
+    assert missing.model_dump() == {"ready": False, "detail": "not configured"}
+
+    mismatch = resolve_staged_bm25_corpus_readiness(
+        settings,
+        index_counter=lambda _url, _index: bm25.chunk_count + 1,
+        search_probe=lambda _url, _index: None,
+        contract=contract,
+    )
+    assert mismatch.detail == "BM25 live index count mismatch"
+
+    def failed_probe(_url: str, _index: str) -> None:
+        raise RuntimeError("private search detail")
+
+    probe_failure = resolve_staged_bm25_corpus_readiness(
+        settings,
+        index_counter=lambda _url, _index: bm25.chunk_count,
+        search_probe=failed_probe,
+        contract=contract,
+    )
+    assert probe_failure.detail == "BM25 search probe failed"
+
+    assert settings.best_available_bm25_manifest_path is not None
+    settings.best_available_bm25_manifest_path.write_text(
+        bm25.model_copy(update={"index_name": "wrong-index"}).model_dump_json(),
+        encoding="utf-8",
+    )
+    identity = resolve_staged_bm25_corpus_readiness(
+        settings,
+        index_counter=lambda _url, _index: bm25.chunk_count,
+        search_probe=lambda _url, _index: None,
+        contract=contract,
+    )
+    assert identity.detail == "best-available BM25 profile mismatch"
 
 
 def test_corpus_readiness_requires_dense_artifact_files(
