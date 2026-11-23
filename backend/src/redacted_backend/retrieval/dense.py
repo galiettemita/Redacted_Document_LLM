@@ -41,6 +41,7 @@ class QueryEncoder(Protocol):
 
 
 ModelFactory = Callable[[str, str], SentenceModel]
+ThreadConfigurator = Callable[[int], None]
 Ranker = Callable[[str], Sequence[str]]
 
 
@@ -50,9 +51,17 @@ class BgeEncoder:
         *,
         scientific: ScientificConfig | None = None,
         model_factory: ModelFactory | None = None,
+        intra_op_threads: int | None = None,
+        thread_configurator: ThreadConfigurator | None = None,
     ) -> None:
+        if intra_op_threads is not None and (
+            isinstance(intra_op_threads, bool) or intra_op_threads < 1
+        ):
+            raise ValueError("BGE intra-op thread count must be positive")
         self.scientific = scientific or ScientificConfig()
         self._model_factory = model_factory or _load_sentence_transformer
+        self._intra_op_threads = intra_op_threads
+        self._thread_configurator = thread_configurator or _set_torch_threads
         self._model: SentenceModel | None = None
 
     def encode_documents(self, texts: Sequence[str]) -> NDArray[np.float32]:
@@ -69,6 +78,8 @@ class BgeEncoder:
     def _encode(self, texts: Sequence[str]) -> NDArray[np.float32]:
         model = self._model
         if model is None:
+            if self._intra_op_threads is not None:
+                self._thread_configurator(self._intra_op_threads)
             model = self._model_factory(
                 self.scientific.embedding_model,
                 self.scientific.embedding_model_revision,
@@ -251,3 +262,11 @@ def _load_sentence_transformer(model_name: str, revision: str) -> SentenceModel:
         trust_remote_code=False,
         device="cpu",
     )
+
+
+def _set_torch_threads(thread_count: int) -> None:
+    try:
+        import torch
+    except ImportError as error:
+        raise RuntimeError("torch is required for real BGE encoding") from error
+    torch.set_num_threads(thread_count)

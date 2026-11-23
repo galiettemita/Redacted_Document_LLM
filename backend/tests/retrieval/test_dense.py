@@ -109,6 +109,37 @@ def test_production_sentence_transformer_is_explicitly_cpu_only(
     }
 
 
+def test_bge_encoder_configures_requested_threads_before_loading_model() -> None:
+    scientific = ScientificConfig(embedding_dimension=2)
+    model = RecordingSentenceModel()
+    events: list[tuple[str, object]] = []
+
+    def configure_threads(thread_count: int) -> None:
+        events.append(("threads", thread_count))
+
+    def construct(model_name: str, revision: str) -> RecordingSentenceModel:
+        events.append(("model", (model_name, revision)))
+        return model
+
+    encoder = BgeEncoder(
+        scientific=scientific,
+        model_factory=construct,
+        intra_op_threads=8,
+        thread_configurator=configure_threads,
+    )
+
+    encoder.encode_documents(["first document"])
+    encoder.encode_query("first query")
+
+    assert events == [
+        ("threads", 8),
+        (
+            "model",
+            (scientific.embedding_model, scientific.embedding_model_revision),
+        ),
+    ]
+
+
 def test_dense_search_exactly_rescores_candidates_and_uses_stable_ties() -> None:
     scientific = ScientificConfig(embedding_dimension=2)
     chunks = [_chunk(index) for index in range(4)]

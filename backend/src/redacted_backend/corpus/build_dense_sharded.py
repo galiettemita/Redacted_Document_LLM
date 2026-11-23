@@ -179,6 +179,7 @@ def build_sharded_dense_from_files(
     scientific: ScientificConfig | None = None,
     profile: DenseArtifactProfile | None = None,
     batch_size: int = 64,
+    encoder_threads: int = 8,
     shard_size: int = MAX_DENSE_SHARD_CHUNKS,
     application_query_count: int = 50,
     corpus_query_count: int = 50,
@@ -198,6 +199,7 @@ def build_sharded_dense_from_files(
             scientific=scientific,
             profile=profile,
             batch_size=batch_size,
+            encoder_threads=encoder_threads,
             shard_size=shard_size,
             application_query_count=application_query_count,
             corpus_query_count=corpus_query_count,
@@ -218,6 +220,7 @@ def _build_sharded_dense_from_files_unlocked(
     scientific: ScientificConfig | None = None,
     profile: DenseArtifactProfile | None = None,
     batch_size: int = 64,
+    encoder_threads: int = 8,
     shard_size: int = MAX_DENSE_SHARD_CHUNKS,
     application_query_count: int = 50,
     corpus_query_count: int = 50,
@@ -226,6 +229,8 @@ def _build_sharded_dense_from_files_unlocked(
 ) -> ShardedDenseBuildReport:
     if batch_size < 1:
         raise ValueError("Dense encoding batch size must be positive")
+    if encoder_threads < 1:
+        raise ValueError("Dense encoder thread count must be positive")
     if shard_size < 1 or shard_size > MAX_DENSE_SHARD_CHUNKS:
         raise ValueError(
             f"Dense shard size must be between 1 and {MAX_DENSE_SHARD_CHUNKS}"
@@ -288,7 +293,10 @@ def _build_sharded_dense_from_files_unlocked(
         chunks_sha256=corpus.chunks_sha256,
         profile=artifact_profile,
     )
-    embedding_encoder = encoder or BgeEncoder(scientific=config)
+    embedding_encoder = encoder or BgeEncoder(
+        scientific=config,
+        intra_op_threads=encoder_threads,
+    )
     checkpoints = _build_embedding_shards(
         chunks_path,
         output_directory,
@@ -347,6 +355,7 @@ def benchmark_sharded_dense_build(
     profile: DenseArtifactProfile | None = None,
     sample_rows: int = 100_000,
     batch_size: int = 64,
+    encoder_threads: int = 8,
     contract: BestAvailableRetrievalContract | None = None,
 ) -> DenseBuildBenchmarkReport:
     started = time.monotonic()
@@ -355,6 +364,8 @@ def benchmark_sharded_dense_build(
         raise ValueError("Dense benchmark sample rows must be positive")
     if batch_size < 1:
         raise ValueError("Dense benchmark batch size must be positive")
+    if encoder_threads < 1:
+        raise ValueError("Dense benchmark encoder thread count must be positive")
     config = scientific or ScientificConfig()
     base_profile = profile or DenseArtifactProfile(
         embedding_dimension=config.embedding_dimension
@@ -396,7 +407,10 @@ def benchmark_sharded_dense_build(
         mode="w+",
         shape=(sample_rows, config.embedding_dimension),
     )
-    effective_encoder = encoder or BgeEncoder(scientific=config)
+    effective_encoder = encoder or BgeEncoder(
+        scientific=config,
+        intra_op_threads=encoder_threads,
+    )
     with ChunkOffsetIndex.open(
         chunks_path,
         offsets_path,

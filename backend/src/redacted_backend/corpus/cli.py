@@ -226,6 +226,7 @@ def run(argv: Sequence[str] | None = None) -> int:
             Path(args.output_directory),
             sample_rows=100_000,
             batch_size=args.batch_size,
+            encoder_threads=args.encoder_threads,
             contract=PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT,
         )
         print(json.dumps(report.model_dump(mode="json"), sort_keys=True, indent=2))
@@ -239,6 +240,7 @@ def run(argv: Sequence[str] | None = None) -> int:
             application_queries_path=Path(args.application_queries),
             certification_queries_path=Path(args.certification_queries),
             batch_size=args.batch_size,
+            encoder_threads=args.encoder_threads,
             shard_size=args.shard_size,
             recall_block_rows=args.recall_block_rows,
             contract=PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT,
@@ -376,6 +378,11 @@ def _parser() -> argparse.ArgumentParser:
     benchmark_dense.add_argument("--corpus-manifest", required=True)
     benchmark_dense.add_argument("--output-directory", required=True)
     benchmark_dense.add_argument("--batch-size", type=_positive_int, default=64)
+    benchmark_dense.add_argument(
+        "--encoder-threads",
+        type=lambda value: _bounded_int(value, maximum=64),
+        default=8,
+    )
 
     best_dense = subparsers.add_parser("build-best-available-dense")
     best_dense.add_argument("--chunks", required=True)
@@ -385,6 +392,11 @@ def _parser() -> argparse.ArgumentParser:
     best_dense.add_argument("--output-directory", required=True)
     best_dense.add_argument("--output-manifest", required=True)
     best_dense.add_argument("--batch-size", type=_positive_int, default=64)
+    best_dense.add_argument(
+        "--encoder-threads",
+        type=lambda value: _bounded_int(value, maximum=64),
+        default=8,
+    )
     best_dense.add_argument(
         "--shard-size",
         type=lambda value: _bounded_int(value, maximum=1_000_000),

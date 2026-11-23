@@ -79,3 +79,22 @@
 - [x] **Step 3: Implement a launchd/nohup/caffeinate finalizer with atomic state and no destructive operations or provider path.**
 - [x] **Step 4: Run focused finalizer and runner tests, then the complete backend suite.** Focused: 18 passed. Full backend: 531 passed, 2 expected environment skips.
 - [x] **Step 5: Launch the finalizer beside the active benchmark, update the checklist, commit, and push.** PID 22608 is launchd-managed under PID 1, reports `waiting` on build phase `benchmarking`, and had not invoked Docker at launch verification.
+
+### Task 4: Apply the measured CPU throughput setting
+
+**Files:**
+- Modify: `backend/src/redacted_backend/retrieval/dense.py`
+- Modify: `backend/src/redacted_backend/corpus/build_dense_sharded.py`
+- Modify: `backend/src/redacted_backend/corpus/cli.py`
+- Modify: `backend/tests/retrieval/test_dense.py`
+- Modify: `backend/tests/corpus/test_cli.py`
+- Modify: `CHECKLIST.md`
+
+**Interfaces:**
+- Consumes: the pinned CPU-only BGE encoder and the benchmark/build CLI used by the already-running durable runner.
+- Produces: an explicit offline encoder thread setting that defaults to the measured fastest safe value while leaving query-time worker encoding unchanged.
+
+- [x] **Step 1: Record controlled real-corpus batch and thread measurements without interrupting the live benchmark.** Batch 32 measured 5.57/5.76 rows/s versus batch 64 at 5.45/5.53; four threads measured 5.68/5.62 rows/s, six 5.97, eight 6.06, and ten 5.98 on the same real passages. Observed vectors were identical at eight threads.
+- [x] **Step 2: Write failing tests** proving thread configuration precedes model loading and both dense CLI commands pass the offline default of eight threads. Three tests failed on the missing interface/default.
+- [x] **Step 3: Implement the minimal builder-only thread configuration without changing model identity, prompts, vector normalization, or runtime query encoding.** Focused retrieval/CLI suite: 20 passed.
+- [x] **Step 4: Run focused and full backend verification, update the checklist, commit, and push before the production child process starts.** Focused: 20 passed. Full backend: 532 passed, 2 expected environment skips.

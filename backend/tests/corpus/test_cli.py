@@ -482,6 +482,7 @@ def test_build_best_available_dense_cli_reports_verified_sharded_manifest(
         "application_queries_path": tmp_path / "application.txt",
         "certification_queries_path": tmp_path / "certification.txt",
         "batch_size": 32,
+        "encoder_threads": 8,
         "shard_size": 1_000_000,
         "recall_block_rows": 8_192,
         "contract": cli.PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT,
@@ -555,6 +556,7 @@ def test_benchmark_best_available_dense_cli_uses_exact_paths_and_100k_rows(
         "kwargs": {
             "sample_rows": 100_000,
             "batch_size": 32,
+            "encoder_threads": 8,
             "contract": cli.PRODUCTION_BEST_AVAILABLE_RETRIEVAL_CONTRACT,
         },
     }
