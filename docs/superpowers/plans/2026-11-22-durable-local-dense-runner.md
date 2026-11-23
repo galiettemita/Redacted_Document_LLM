@@ -160,3 +160,20 @@
 - [x] **Step 2: Implement the minimal fail-closed activator with atomic state/config writes and one-shot launchd lifecycle.** It changes only the full-basis flag after the final report passes, never calls a prediction/provider endpoint, and requires the live API to select the full basis.
 - [x] **Step 3: Run focused and complete verification, document the operator contract, update the checklist, commit, and push.** Focused scripts: 32 passed. Full backend: 557 passed with 2 expected skips. Frontend: 290 passed; typecheck, production build, Compose validation, zsh syntax, and diff checks passed.
 - [x] **Step 4: Launch the activator beside the encoder/finalizer and prove all three processes are independently durable without making a provider call.** Encoder PID 45140, finalizer PID 63781, and activator PID 67952 are separately launchd-managed under PID 1. Activation remains `waiting`, the full flag remains false, and database counts stayed exactly 13 analysis jobs and 6 staged provider claims across launch.
+
+### Task 8: Re-evaluate two-encoder throughput with a bounded search heap
+
+**Files:**
+- Modify: `compose.yaml`
+- Create: `backend/tests/test_compose_config.py`
+- Modify: `README.md`
+- Modify: `CHECKLIST.md`
+
+**Interfaces:**
+- Consumes: the live 14,549,269-document OpenSearch index, the optional reverse accelerator, and the current single-encoder 6.40 rows/second baseline.
+- Produces: an operator-only OpenSearch heap override, a validated live search/readiness configuration, and a sustained two-encoder accept/reject measurement without changing embedding semantics or using a GPU.
+
+- [x] **Step 1: Add a failing Compose-boundary test** proving the search heap can be overridden without changing the default. The rendered override stayed at 4 GiB before the change.
+- [x] **Step 2: Add the minimal override, run focused/full verification, and commit before touching the live search service.** The default remains 4 GiB, the 2 GiB override renders exactly, Compose validates, and 558 backend tests passed with 2 expected skips.
+- [ ] **Step 3: Recreate only OpenSearch at 2 GiB, verify the full BM25 index/readiness/search latency, and roll back immediately if any gate fails.**
+- [ ] **Step 4: Re-run a sustained non-overlapping accelerator test, keep it only if combined throughput beats the single encoder without memory-pressure regression, and update the checklist.**
