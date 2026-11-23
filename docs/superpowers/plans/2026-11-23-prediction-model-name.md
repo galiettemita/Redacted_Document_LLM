@@ -63,6 +63,6 @@ Run: `npm test -- --run && npm run typecheck && npm run build`
 
 Expected: 0 failed tests, 0 TypeScript errors, and a successful Vite production build.
 
-- [ ] **Step 5: Record and ship the completed task**
+- [x] **Step 5: Record and ship the completed task**
 
 Mark the model-name item complete in `CHECKLIST.md`, inspect the diff, commit the spec/plan/code/tests, and push `main`.
