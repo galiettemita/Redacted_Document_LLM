@@ -268,15 +268,10 @@ class PassageRepository:
     ) -> PassageRecord:
         model = self._get_live(passage_id)
         mask_set_changed = page_number is not None or rects is not None
-        document = (
-            self._lock_document_for_mask_mutation(model.document_id)
-            if mask_set_changed
-            else None
-        )
+        document = self._lock_document_for_mask_mutation(model.document_id)
         if label is not None:
             model.label = label
         if page_number is not None:
-            assert document is not None
             self._validate_page(document, page_number)
             model.page_number = page_number
         if rects is not None:
@@ -287,7 +282,6 @@ class PassageRepository:
             model.source = PassageSource.MANUAL.value
         self._invalidate(model, "passage_corrected")
         if mask_set_changed:
-            assert document is not None
             document.mask_set_revision += 1
             self.invalidate_mask_dependents(
                 model.document_id,
@@ -451,6 +445,12 @@ class PassageRepository:
         )
         if not _document_is_live(document):
             raise PassageNotFoundError("document not found")
+        if AnalysisJobRepository(self._session).document_has_active_jobs(
+            document_id
+        ):
+            raise PassageConflictError(
+                "Wait for the active prediction to finish before changing passages"
+            )
         return document
 
     @staticmethod

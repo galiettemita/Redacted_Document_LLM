@@ -390,6 +390,20 @@ class AnalysisJobRepository:
         )
         return not bool(active)
 
+    def document_has_active_jobs(self, document_id: UUID | str) -> bool:
+        active = self._session.scalar(
+            select(AnalysisJob.id).where(
+                AnalysisJob.document_id == str(document_id),
+                AnalysisJob.status.in_(
+                    (
+                        AnalysisStatus.QUEUED.value,
+                        AnalysisStatus.RUNNING.value,
+                    )
+                ),
+            ).limit(1)
+        )
+        return active is not None
+
     def cancel_active_for_passage(
         self,
         passage_id: UUID | str,

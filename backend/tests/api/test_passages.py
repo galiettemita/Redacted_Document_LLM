@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -10,8 +11,10 @@ from sqlalchemy import func, select
 
 from redacted_backend.config import Settings
 from redacted_backend.db.base import Base
-from redacted_backend.db.models import Passage
+from redacted_backend.db.models import AnalysisJob, Passage
+from redacted_backend.db.repositories.analysis import AnalysisJobRepository
 from redacted_backend.db.repositories.documents import DocumentRepository
+from redacted_backend.domain.analysis import PredictionBasis
 from redacted_backend.main import create_app
 
 
@@ -194,6 +197,100 @@ def test_delete_tombstones_the_passage_and_increments_revision(tmp_path: Path) -
     assert deleted["id"] == original["id"]
     assert deleted["status"] == "deleted"
     assert deleted["revision"] == original["revision"] + 1
+
+
+@pytest.mark.parametrize("status", ["queued", "running"])
+@pytest.mark.parametrize("mutation", ["patch", "delete", "create"])
+def test_active_analysis_blocks_patch_delete_and_sibling_creation(
+    tmp_path: Path,
+    status: str,
+    mutation: str,
+) -> None:
+    app, document_id = create_test_app_and_document(tmp_path)
+    original = create_passage(app, document_id, y=0.2, key="create-active")
+    with app.state.database.session_factory() as session, session.begin():
+        job = AnalysisJobRepository(session).schedule(
+            passage_id=UUID(original["id"]),
+            document_id=UUID(document_id),
+            passage_revision=original["revision"],
+            idempotency_key=f"active-{status}",
+            blockers=[],
+            prediction_basis=PredictionBasis.MODEL_ONLY_V1,
+        )
+        if status == "running":
+            AnalysisJobRepository(session).start(job.id)
+
+    if mutation == "patch":
+        response = asyncio.run(
+            request(
+                app,
+                "PATCH",
+                f"/v1/passages/{original['id']}",
+                json={"label": "Changed while predicting"},
+            )
+        )
+    elif mutation == "delete":
+        response = asyncio.run(
+            request(app, "DELETE", f"/v1/passages/{original['id']}")
+        )
+    else:
+        response = asyncio.run(
+            request(
+                app,
+                "POST",
+                f"/v1/documents/{document_id}/passages",
+                json=passage_body(y=0.5),
+            )
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "passage_conflict"
+    assert "prediction" in response.json()["detail"]["message"].lower()
+    with app.state.database.session_factory() as session:
+        persisted = session.get(Passage, original["id"])
+        assert persisted is not None
+        assert persisted.revision == original["revision"]
+        assert persisted.status != "deleted"
+
+
+@pytest.mark.parametrize("terminal", ["complete", "failed", "cancelled"])
+def test_terminal_analysis_allows_passage_correction(
+    tmp_path: Path,
+    terminal: str,
+) -> None:
+    app, document_id = create_test_app_and_document(tmp_path)
+    original = create_passage(app, document_id, y=0.2, key="create-terminal")
+    with app.state.database.session_factory() as session, session.begin():
+        repository = AnalysisJobRepository(session)
+        job = repository.schedule(
+            passage_id=UUID(original["id"]),
+            document_id=UUID(document_id),
+            passage_revision=original["revision"],
+            idempotency_key=f"terminal-{terminal}",
+            blockers=[],
+            prediction_basis=PredictionBasis.MODEL_ONLY_V1,
+        )
+        if terminal == "complete":
+            model = session.get(AnalysisJob, str(job.id))
+            assert model is not None
+            model.status = "complete"
+            model.stage = "complete"
+        elif terminal == "failed":
+            repository.fail(job.id, code="test_failure", detail="test")
+        else:
+            repository.cancel(job.id, code="test_cancel", detail="test")
+
+    response = asyncio.run(
+        request(
+            app,
+            "PATCH",
+            f"/v1/passages/{original['id']}",
+            json={"label": "Correction after prediction"},
+        )
+    )
+
+    assert response.status_code == 200
+    assert response.json()["revision"] == original["revision"] + 1
 
 
 def test_deleting_a_document_tombstones_its_live_passages(tmp_path: Path) -> None:

@@ -32,10 +32,10 @@
 - Modify: `backend/src/redacted_backend/api/passages.py`
 - Test: `backend/tests/api/test_passages.py`
 
-- [ ] Add failing tests that patch, delete, and create are rejected while a document has queued/running analysis and allowed after terminal completion/failure.
-- [ ] Add an analysis-repository active-work guard and map its passage conflict to a stable HTTP 409 response.
-- [ ] Preserve existing invalidation/cancellation behavior for non-active and internal retention paths.
-- [ ] Run focused passage and analysis tests, update this checklist, commit, and push.
+- [x] Add failing tests that patch, delete, and create are rejected while a document has queued/running analysis and allowed after terminal completion/failure/cancellation.
+- [x] Add an analysis-repository active-work guard and map its passage conflict to a stable HTTP 409 response.
+- [x] Preserve existing invalidation/cancellation behavior for non-active and internal retention paths.
+- [x] Run focused passage and analysis tests (38 passed), update this checklist, commit, and push.
 
 ### Task 3: Stream accepted jobs and recover stored predictions in the browser
 

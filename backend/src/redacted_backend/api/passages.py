@@ -142,6 +142,8 @@ def create_passages_router(
                     )
             except PassageNotFoundError as error:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) from error
+            except PassageConflictError as error:
+                raise _conflict(error) from error
         return PassageDetectionResponse(
             document_id=document_id,
             pages_scanned=result.pages_scanned,
@@ -223,6 +225,8 @@ def create_passages_router(
                 )
         except PassageNotFoundError as error:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) from error
+        except PassageConflictError as error:
+            raise _conflict(error) from error
         except PassagePageOutOfRangeError as error:
             raise _page_out_of_range(error) from error
 
@@ -234,6 +238,8 @@ def create_passages_router(
                 return PassageRepository(session).mark_deleted(passage_id)
         except PassageNotFoundError as error:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) from error
+        except PassageConflictError as error:
+            raise _conflict(error) from error
 
     @router.post("/passages:merge", response_model=PassageMergeResult)
     def merge_passages(request: MergePassagesRequest) -> PassageMergeResult:
@@ -273,6 +279,8 @@ def create_passages_router(
                 return PassageSplitResult(passages=passages)
         except PassageNotFoundError as error:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) from error
+        except PassageConflictError as error:
+            raise _conflict(error) from error
         except PassagePageOutOfRangeError as error:
             raise _page_out_of_range(error) from error
 
