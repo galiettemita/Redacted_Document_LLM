@@ -30,6 +30,8 @@ from redacted_backend.db.repositories.visible_examples import VisibleExampleRepo
 from redacted_backend.domain.analysis import (
     AnalysisBlocker,
     AnalysisJobRecord,
+    DocumentAnalysisScheduleResult,
+    DocumentAnalysisState,
     PredictionBasis,
 )
 from redacted_backend.domain.readiness import ComponentReadiness
@@ -52,6 +54,154 @@ def create_analysis_router(
     router = APIRouter()
 
     @router.post(
+        "/documents/{document_id}/analysis",
+        response_model=DocumentAnalysisScheduleResult,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    def schedule_document_analysis(
+        document_id: UUID,
+        idempotency_key: str = Header(
+            alias="Idempotency-Key", min_length=1, max_length=512
+        ),
+    ) -> DocumentAnalysisScheduleResult:
+        ready_database = _require_database(database)
+        _validate_idempotency_key(idempotency_key)
+        new_jobs: list[AnalysisJobRecord] = []
+        try:
+            with ready_database.session_factory() as session, session.begin():
+                _begin_analysis_write_lock(ready_database, session)
+                document = DocumentRepository(session).get_live(document_id)
+                if document is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail={"code": "document_not_found"},
+                    )
+                _lock_analysis_document(session, document_id)
+                passages = PassageRepository(session).list_live_for_document(document_id)
+                if not passages:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "code": "visible_context_not_ready",
+                            "message": "Prepare visible-only context before analysis",
+                        },
+                    )
+                artifacts = {}
+                for passage in passages:
+                    artifact = VisibleExampleRepository(session).get_current(
+                        passage.id,
+                        passage.revision,
+                    )
+                    if artifact is None:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail={
+                                "code": "visible_context_not_ready",
+                                "message": "Prepare visible-only context before analysis",
+                            },
+                        )
+                    _require_complete_query_metadata(artifact)
+                    artifacts[passage.id] = artifact
+
+                repository = AnalysisJobRepository(session)
+                accepted = {
+                    job.passage_id: job
+                    for job in repository.recoverable_for_document(document_id)
+                }
+                deferred: list[UUID] = []
+                readiness_blockers: list[AnalysisBlocker] = []
+                for passage in passages:
+                    if passage.id in accepted:
+                        continue
+                    artifact = artifacts[passage.id]
+                    query_fields = _query_fields(artifact)
+                    prediction_basis, blockers = _analysis_decision(
+                        settings,
+                        context_query_ready=all(
+                            value is not None for value in query_fields
+                        ),
+                    )
+                    passage_key = f"{idempotency_key}:{passage.id}"
+                    if (
+                        prediction_basis
+                        == PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1
+                        and not blockers
+                    ):
+                        limit_blocker = repository.staged_prediction_blocker(
+                            document_id=document_id,
+                            passage_id=passage.id,
+                            idempotency_key=passage_key,
+                            limit=settings.bm25_stage_max_predictions_per_document,
+                        )
+                        if limit_blocker is not None:
+                            blockers.append(limit_blocker)
+                    if blockers:
+                        deferred.append(passage.id)
+                        readiness_blockers.extend(
+                            blocker
+                            for blocker in blockers
+                            if blocker.component != "staged_prediction_limit"
+                        )
+                        continue
+                    replayed = repository.get_by_idempotency(
+                        passage.id, passage_key
+                    ) is not None
+                    job = repository.schedule(
+                        passage_id=passage.id,
+                        document_id=document_id,
+                        passage_revision=passage.revision,
+                        idempotency_key=passage_key,
+                        blockers=[],
+                        prediction_basis=prediction_basis,
+                    )
+                    accepted[passage.id] = job
+                    if job.status == "queued" and not replayed:
+                        new_jobs.append(job)
+
+                accepted_jobs = [
+                    accepted[passage.id]
+                    for passage in passages
+                    if passage.id in accepted
+                ]
+                blockers = (
+                    []
+                    if accepted_jobs
+                    else _unique_blockers(readiness_blockers)
+                )
+                result = DocumentAnalysisScheduleResult(
+                    document_id=document_id,
+                    accepted_jobs=accepted_jobs,
+                    deferred_passage_ids=deferred,
+                    blockers=blockers,
+                )
+            for job in new_jobs:
+                _dispatch_job(dispatcher, job)
+            return result
+        except AnalysisConflictError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "idempotency_conflict", "message": str(error)},
+            ) from error
+
+    @router.get(
+        "/documents/{document_id}/analysis",
+        response_model=DocumentAnalysisState,
+    )
+    def get_document_analysis(document_id: UUID) -> DocumentAnalysisState:
+        ready_database = _require_database(database)
+        with ready_database.session_factory() as session:
+            document = DocumentRepository(session).get_live(document_id)
+            if document is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"code": "document_not_found"},
+                )
+            jobs = AnalysisJobRepository(session).recoverable_for_document(
+                document_id
+            )
+        return DocumentAnalysisState(document_id=document_id, jobs=jobs)
+
+    @router.post(
         "/passages/{passage_id}/analysis",
         response_model=AnalysisJobRecord,
         status_code=status.HTTP_202_ACCEPTED,
@@ -64,11 +214,7 @@ def create_analysis_router(
         ),
     ) -> AnalysisJobRecord:
         ready_database = _require_database(database)
-        if not idempotency_key.isascii():
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={"code": "invalid_idempotency_key"},
-            )
+        _validate_idempotency_key(idempotency_key)
         try:
             with ready_database.session_factory() as session, session.begin():
                 _begin_analysis_write_lock(ready_database, session)
@@ -97,22 +243,9 @@ def create_analysis_router(
                         },
                     )
                 query_fields = (
-                    artifact.context_query,
-                    artifact.context_query_sha256,
-                    artifact.context_query_term_count,
-                    artifact.context_query_version,
-                    artifact.context_stopwords_version,
+                    _query_fields(artifact)
                 )
-                if any(value is None for value in query_fields) and not all(
-                    value is None for value in query_fields
-                ):
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail={
-                            "code": "visible_context_not_ready",
-                            "message": "Prepared context query metadata is incomplete",
-                        },
-                    )
+                _require_complete_query_metadata(artifact)
                 prediction_basis, blockers = _analysis_decision(
                     settings,
                     context_query_ready=all(
@@ -348,3 +481,66 @@ def _not_found() -> HTTPException:
         status_code=status.HTTP_404_NOT_FOUND,
         detail={"code": "passage_not_found"},
     )
+
+
+def _query_fields(artifact) -> tuple[object | None, ...]:
+    return (
+        artifact.context_query,
+        artifact.context_query_sha256,
+        artifact.context_query_term_count,
+        artifact.context_query_version,
+        artifact.context_stopwords_version,
+    )
+
+
+def _require_complete_query_metadata(artifact) -> None:
+    query_fields = _query_fields(artifact)
+    if any(value is None for value in query_fields) and not all(
+        value is None for value in query_fields
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "visible_context_not_ready",
+                "message": "Prepared context query metadata is incomplete",
+            },
+        )
+
+
+def _validate_idempotency_key(idempotency_key: str) -> None:
+    if not idempotency_key.isascii():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "invalid_idempotency_key"},
+        )
+
+
+def _unique_blockers(blockers: list[AnalysisBlocker]) -> list[AnalysisBlocker]:
+    unique: dict[tuple[str, str], AnalysisBlocker] = {}
+    for blocker in blockers:
+        unique[(blocker.component, blocker.detail)] = blocker
+    return list(unique.values())
+
+
+def _dispatch_job(
+    dispatcher: AnalysisDispatcher | None,
+    job: AnalysisJobRecord,
+) -> None:
+    if dispatcher is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "worker_dispatch_unavailable",
+                "message": "Analysis worker dispatch is unavailable",
+            },
+        )
+    try:
+        dispatcher.dispatch(job.id)
+    except Exception as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "worker_dispatch_failed",
+                "message": "Analysis worker dispatch failed; retry with the same idempotency key",
+            },
+        ) from error

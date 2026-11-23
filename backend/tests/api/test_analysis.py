@@ -74,6 +74,133 @@ def test_staged_limit_allows_only_first_prepared_passage_and_replay(
     assert len(jobs) == 3
 
 
+def test_document_schedule_accepts_the_first_passage_and_defers_the_rest(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dispatcher = RecordingDispatcher()
+    app, document, first, second = _staged_app(
+        tmp_path,
+        monkeypatch,
+        dispatcher=dispatcher,
+    )
+
+    response = asyncio.run(
+        request(
+            app,
+            "POST",
+            f"/v1/documents/{document.id}/analysis",
+            headers={"Idempotency-Key": "document-run-one"},
+        )
+    )
+
+    assert response.status_code == 202
+    result = response.json()
+    assert result["document_id"] == str(document.id)
+    assert [job["passage_id"] for job in result["accepted_jobs"]] == [
+        str(first.id)
+    ]
+    assert result["accepted_jobs"][0]["status"] == "queued"
+    assert result["deferred_passage_ids"] == [str(second.id)]
+    assert result["blockers"] == []
+    assert dispatcher.job_ids == [UUID(result["accepted_jobs"][0]["id"])]
+    with app.state.database.session_factory() as session:
+        jobs = session.scalars(
+            select(AnalysisJob).where(
+                AnalysisJob.document_id == str(document.id)
+            )
+        ).all()
+    assert len(jobs) == 1
+    assert jobs[0].status == "queued"
+
+
+def test_document_schedule_replays_the_same_job_without_redispatch(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dispatcher = RecordingDispatcher()
+    app, document, _first, _second = _staged_app(
+        tmp_path,
+        monkeypatch,
+        dispatcher=dispatcher,
+    )
+    headers = {"Idempotency-Key": "stable-document-run"}
+
+    first = asyncio.run(
+        request(app, "POST", f"/v1/documents/{document.id}/analysis", headers=headers)
+    )
+    replay = asyncio.run(
+        request(app, "POST", f"/v1/documents/{document.id}/analysis", headers=headers)
+    )
+
+    assert first.status_code == replay.status_code == 202
+    assert replay.json() == first.json()
+    assert len(dispatcher.job_ids) == 1
+
+
+def test_document_analysis_state_recovers_only_current_nonfailed_jobs(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dispatcher = RecordingDispatcher()
+    app, document, first, second = _staged_app(
+        tmp_path,
+        monkeypatch,
+        dispatcher=dispatcher,
+        limit=2,
+    )
+    first_job = _schedule(app, first.id, first.revision, "recover-first")
+    second_job = _schedule(app, second.id, second.revision, "recover-second")
+    with app.state.database.session_factory() as session, session.begin():
+        first_model = session.get(AnalysisJob, first_job["id"])
+        assert first_model is not None
+        first_model.status = "complete"
+        first_model.stage = "complete"
+        AnalysisJobRepository(session).fail(
+            second_job["id"], code="test_failure", detail="test"
+        )
+
+    response = asyncio.run(
+        request(app, "GET", f"/v1/documents/{document.id}/analysis")
+    )
+
+    assert response.status_code == 200
+    assert response.json()["document_id"] == str(document.id)
+    assert [job["id"] for job in response.json()["jobs"]] == [first_job["id"]]
+    assert response.json()["jobs"][0]["status"] == "complete"
+
+
+def test_document_schedule_returns_readiness_blockers_without_creating_jobs(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app, document, passage = create_test_app_and_passage(tmp_path)
+    install_fake_preparation(monkeypatch, calls=[])
+    assert asyncio.run(
+        request(app, "POST", f"/v1/passages/{passage.id}:prepare-context")
+    ).status_code == 200
+
+    response = asyncio.run(
+        request(
+            app,
+            "POST",
+            f"/v1/documents/{document.id}/analysis",
+            headers={"Idempotency-Key": "unavailable-document-run"},
+        )
+    )
+
+    assert response.status_code == 202
+    result = response.json()
+    assert result["accepted_jobs"] == []
+    assert result["deferred_passage_ids"] == [str(passage.id)]
+    assert {blocker["component"] for blocker in result["blockers"]} == {
+        "model",
+        "worker",
+    }
+    with app.state.database.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(AnalysisJob)) == 0
+
+
 @pytest.mark.parametrize("terminal_status", ["failed", "cancelled"])
 def test_failed_or_cancelled_staged_job_releases_the_document_limit(
     tmp_path: Path,

@@ -121,6 +121,43 @@ class AnalysisJobRepository:
         )
         return _job_record(model) if model is not None else None
 
+    def recoverable_for_document(
+        self,
+        document_id: UUID | str,
+    ) -> list[AnalysisJobRecord]:
+        rows = self._session.execute(
+            select(AnalysisJob, Passage)
+            .join(Passage, AnalysisJob.passage_id == Passage.id)
+            .where(
+                AnalysisJob.document_id == str(document_id),
+                AnalysisJob.passage_revision == Passage.revision,
+                AnalysisJob.status.in_(
+                    (
+                        AnalysisStatus.QUEUED.value,
+                        AnalysisStatus.RUNNING.value,
+                        AnalysisStatus.COMPLETE.value,
+                    )
+                ),
+                Passage.status != "deleted",
+            )
+        ).all()
+        latest_by_passage: dict[str, AnalysisJob] = {}
+        passages: dict[str, Passage] = {}
+        for job, passage in rows:
+            passages[passage.id] = passage
+            current = latest_by_passage.get(passage.id)
+            if current is None or _as_utc(job.updated_at) > _as_utc(
+                current.updated_at
+            ):
+                latest_by_passage[passage.id] = job
+        return [
+            _job_record(latest_by_passage[passage_id])
+            for passage_id in sorted(
+                latest_by_passage,
+                key=lambda value: _passage_order_key(passages[value]),
+            )
+        ]
+
     def staged_prediction_blocker(
         self,
         *,

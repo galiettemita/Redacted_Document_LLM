@@ -18,11 +18,11 @@
 - Modify: `backend/src/redacted_backend/api/analysis.py`
 - Test: `backend/tests/api/test_analysis.py`
 
-- [ ] Add failing API tests proving a two-passage staged document returns one accepted job and one deferred passage without persisting a blocked job.
-- [ ] Add failing tests proving same-key replay returns the same accepted job, a completed current-revision job is returned by state and scheduling without dispatch, and global unavailability returns no accepted jobs.
-- [ ] Add immutable document schedule/state response models and a repository query for recoverable current-revision jobs in document order.
-- [ ] Implement locked document scheduling by reusing existing readiness, staged-limit, idempotency, and dispatcher behavior.
-- [ ] Run focused analysis tests, update this checklist, commit, and push.
+- [x] Add failing API tests proving a two-passage staged document returns one accepted job and one deferred passage without persisting a blocked job.
+- [x] Add failing tests proving same-key replay returns the same accepted job, a completed current-revision job is returned by state and scheduling without dispatch, and global unavailability returns no accepted jobs.
+- [x] Add immutable document schedule/state response models and a repository query for recoverable current-revision jobs in document order.
+- [x] Implement locked document scheduling by reusing existing readiness, staged-limit, idempotency, and dispatcher behavior.
+- [x] Run focused analysis tests (17 passed), update this checklist, commit, and push.
 
 ### Task 2: Protect active paid work from passage mutation
 

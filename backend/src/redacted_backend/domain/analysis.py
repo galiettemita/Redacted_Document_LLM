@@ -56,6 +56,22 @@ class AnalysisJobRecord(BaseModel):
     updated_at: datetime
 
 
+class DocumentAnalysisScheduleResult(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    document_id: UUID
+    accepted_jobs: list[AnalysisJobRecord]
+    deferred_passage_ids: list[UUID]
+    blockers: list[AnalysisBlocker]
+
+
+class DocumentAnalysisState(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    document_id: UUID
+    jobs: list[AnalysisJobRecord]
+
+
 class AnalysisEventRecord(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
