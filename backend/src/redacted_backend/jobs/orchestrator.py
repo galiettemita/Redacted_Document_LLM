@@ -20,7 +20,11 @@ from redacted_backend.domain.analysis import AnalysisStatus, PredictionBasis
 from redacted_backend.domain.documents import DocumentStatus
 from redacted_backend.domain.passages import PassageStatus
 from redacted_backend.domain.predictions import PredictionRecord, QueryResult
-from redacted_backend.domain.retrieval import RetrievalTrace
+from redacted_backend.domain.retrieval import (
+    Bm25RetrievalTrace,
+    RetrievalTrace,
+    RetrievalTraceLike,
+)
 from redacted_backend.domain.visible_examples import VisibleExample
 from redacted_backend.models.openai_gateway import ModelGatewayError
 from redacted_backend.scientific_config import ScientificConfig
@@ -38,7 +42,7 @@ class ModelGateway(Protocol):
     def generate_prediction(
         self,
         example: VisibleExample,
-        retrieval: RetrievalTrace,
+        retrieval: RetrievalTraceLike,
         idempotency_key: str,
         *,
         prediction_basis: PredictionBasis,
@@ -59,7 +63,7 @@ class RetrievalService(Protocol):
         self,
         example: VisibleExample,
         own_query: str,
-    ) -> RetrievalTrace: ...
+    ) -> RetrievalTraceLike: ...
 
 
 class AnalysisOrchestrator:
@@ -138,7 +142,7 @@ class AnalysisOrchestrator:
 
         if not self._still_current(job_key):
             return
-        trace = self._stored_trace(job_key)
+        trace = self._stored_trace(job_key, record.prediction_basis)
         if trace is None:
             trace = self.retrieval.retrieve_realistic(example, query.query)
             if not self._still_current(job_key):
@@ -263,9 +267,17 @@ class AnalysisOrchestrator:
         payload = self._payload(job_id, "query_payload")
         return QueryResult.model_validate(payload) if payload is not None else None
 
-    def _stored_trace(self, job_id: str) -> RetrievalTrace | None:
+    def _stored_trace(
+        self,
+        job_id: str,
+        prediction_basis: PredictionBasis,
+    ) -> RetrievalTraceLike | None:
         payload = self._payload(job_id, "retrieval_trace")
-        return RetrievalTrace.model_validate(payload) if payload is not None else None
+        if payload is None:
+            return None
+        if prediction_basis == PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1:
+            return Bm25RetrievalTrace.model_validate(payload)
+        return RetrievalTrace.model_validate(payload)
 
     def _stored_prediction(self, job_id: str) -> PredictionRecord | None:
         payload = self._payload(job_id, "prediction_payload")

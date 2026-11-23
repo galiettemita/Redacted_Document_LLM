@@ -6,7 +6,12 @@ from pathlib import PurePosixPath
 from typing import Literal, Protocol
 from urllib.parse import unquote, urlparse
 
-from redacted_backend.domain.retrieval import FourRankedLists, RetrievalTrace
+from redacted_backend.domain.retrieval import (
+    Bm25RetrievalTrace,
+    FourRankedLists,
+    RetrievalTrace,
+    TwoRankedLists,
+)
 from redacted_backend.domain.visible_examples import VisibleExample
 from redacted_backend.retrieval.context_query import prepare_context_query
 from redacted_backend.retrieval.fusion import fuse_documents
@@ -136,7 +141,89 @@ class RealisticRetrievalService:
         )
 
 
-def _corpus_candidates(lists: FourRankedLists) -> list[CorpusDocumentCandidate]:
+class Bm25RetrievalService:
+    def __init__(
+        self,
+        *,
+        bm25: Retriever,
+        self_matcher: SelfDocumentMatcher | None = None,
+        scientific: ScientificConfig | None = None,
+    ) -> None:
+        self.scientific = scientific or ScientificConfig()
+        self.bm25 = bm25
+        self.self_matcher = self_matcher or SelfDocumentMatcher(self.scientific)
+
+    def retrieve_realistic(
+        self,
+        example: VisibleExample,
+        own_query: str,
+    ) -> Bm25RetrievalTrace:
+        if not own_query.strip():
+            raise RetrievalError("invalid_own_query", "Own query must not be empty")
+        context = prepare_context_query(example, self.scientific)
+        limit = self.scientific.top_chunks_per_list
+        lists = TwoRankedLists(
+            context_bm25=self.bm25.search(
+                context.text,
+                limit,
+                query_kind="context",
+            ),
+            own_bm25=self.bm25.search(
+                own_query,
+                limit,
+                query_kind="own",
+            ),
+        )
+        for name, ranked in lists.named():
+            if len(ranked) != limit:
+                raise RetrievalError(
+                    "incomplete_bm25_retrieval",
+                    f"{name} returned {len(ranked)} of {limit} required results",
+                )
+        try:
+            decision = self.self_matcher.match(
+                UploadIdentity(
+                    filename=f"{example.document_id}.pdf",
+                    visible_text=(
+                        f"{example.before_target} {example.after_target}"
+                    ).strip(),
+                ),
+                _corpus_candidates(lists),
+            )
+        except SelfDocumentIdentityError as error:
+            raise RetrievalError(error.code, str(error)) from error
+        excluded = set(decision.excluded_document_ids)
+        filtered = TwoRankedLists(
+            **{
+                name: [chunk for chunk in ranked if chunk.document_id not in excluded]
+                for name, ranked in lists.named()
+            }
+        )
+        documents = fuse_documents(
+            filtered,
+            rrf_k=self.scientific.rrf_k,
+            limit=self.scientific.top_documents,
+            chunks_per_document=self.scientific.chunks_per_document,
+            scientific=self.scientific,
+        )
+        if not documents:
+            raise RetrievalError(
+                "no_evidence_retrieved",
+                "Both real BM25 retrieval lists were empty after self-exclusion",
+            )
+        return Bm25RetrievalTrace(
+            context_query_sha256=context.sha256,
+            own_query_sha256=hashlib.sha256(own_query.encode("utf-8")).hexdigest(),
+            lists=lists,
+            excluded_document_ids=sorted(excluded),
+            documents=documents,
+            serialized_documents=serialize_prompt_documents(documents),
+        )
+
+
+def _corpus_candidates(
+    lists: FourRankedLists | TwoRankedLists,
+) -> list[CorpusDocumentCandidate]:
     chunks_by_document: dict[str, list[RankedChunk]] = defaultdict(list)
     for _name, ranked in lists.named():
         for chunk in ranked:

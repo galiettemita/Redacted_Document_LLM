@@ -5,7 +5,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from redacted_backend.domain.retrieval import RetrievalTrace
+from redacted_backend.domain.retrieval import RetrievalTraceLike
 from redacted_backend.domain.visible_examples import VisibleExample
 
 _PROMPT_ROOT = Path(__file__).resolve().parents[3] / "prompts"
@@ -36,7 +36,7 @@ def render_query_prompt(example: VisibleExample) -> RenderedPrompt:
 
 def render_prediction_prompt(
     example: VisibleExample,
-    retrieval: RetrievalTrace,
+    retrieval: RetrievalTraceLike,
 ) -> RenderedPrompt:
     return _render(
         _PREDICTION_PATH,

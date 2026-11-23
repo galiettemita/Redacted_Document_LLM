@@ -4,7 +4,7 @@ import hashlib
 
 import pytest
 
-from redacted_backend.domain.retrieval import FourRankedLists
+from redacted_backend.domain.retrieval import FourRankedLists, TwoRankedLists
 from redacted_backend.retrieval.fusion import fuse_documents
 from redacted_backend.retrieval.types import RankedChunk
 
@@ -26,6 +26,21 @@ def test_document_rrf_uses_each_lists_best_chunk_and_chunk_rrf_selects_two() -> 
     assert fused[0].rrf_score == pytest.approx(
         1 / 61 + 1 / 62 + 1 / 64 + 1 / 65
     )
+    assert [chunk.chunk_id for chunk in fused[0].chunks] == [
+        _chunk_id("a1"),
+        _chunk_id("a2"),
+    ]
+
+
+def test_document_rrf_accepts_two_bm25_lists_without_dense_placeholders() -> None:
+    lists = TwoRankedLists(
+        context_bm25=[_ranked("doc-a", "a1", 1, "bm25", "context")],
+        own_bm25=[_ranked("doc-a", "a2", 2, "bm25", "own")],
+    )
+
+    fused = fuse_documents(lists, rrf_k=60, limit=100, chunks_per_document=2)
+
+    assert fused[0].rrf_score == pytest.approx(1 / 61 + 1 / 62)
     assert [chunk.chunk_id for chunk in fused[0].chunks] == [
         _chunk_id("a1"),
         _chunk_id("a2"),

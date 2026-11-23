@@ -15,7 +15,11 @@ from redacted_backend.domain.predictions import (
     QueryResult,
     TokenUsage,
 )
-from redacted_backend.domain.retrieval import RetrievalTrace
+from redacted_backend.domain.retrieval import (
+    Bm25RetrievalTrace,
+    RetrievalTrace,
+    RetrievalTraceLike,
+)
 from redacted_backend.domain.visible_examples import VisibleExample
 from redacted_backend.models.pricing import (
     OPENAI_GPT6_ASTRA_PRICING,
@@ -191,7 +195,7 @@ class OpenAIGateway:
     def generate_prediction(
         self,
         example: VisibleExample,
-        retrieval: RetrievalTrace,
+        retrieval: RetrievalTraceLike,
         idempotency_key: str,
         *,
         prediction_basis: PredictionBasis,
@@ -201,6 +205,17 @@ class OpenAIGateway:
             raise ModelGatewayError(
                 "invalid_prediction_basis",
                 "Retrieval-assisted generation requires a retrieval basis",
+            )
+        if (
+            prediction_basis == PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1
+            and not isinstance(retrieval, Bm25RetrievalTrace)
+        ) or (
+            prediction_basis != PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1
+            and not isinstance(retrieval, RetrievalTrace)
+        ):
+            raise ModelGatewayError(
+                "invalid_retrieval_trace",
+                "Retrieval trace shape does not match the prediction basis",
             )
         prompt = render_prediction_prompt(example, retrieval)
         request = self._request(prompt)

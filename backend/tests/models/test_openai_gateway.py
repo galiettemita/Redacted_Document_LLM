@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from redacted_backend.domain.analysis import PredictionBasis
 from redacted_backend.domain.predictions import PredictionRecord, TokenUsage
+from redacted_backend.domain.retrieval import Bm25RetrievalTrace, TwoRankedLists
 from redacted_backend.models.openai_gateway import (
     InMemoryGenerationStore,
     ModelGatewayError,
@@ -127,6 +128,45 @@ def test_gateway_retrieval_prediction_preserves_best_available_basis() -> None:
     )
 
     assert result.prediction_basis == PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1
+    assert result.retrieval_trace_sha256 is not None
+
+
+def test_gateway_staged_basis_requires_the_two_bm25_list_trace() -> None:
+    gateway = OpenAIGateway(
+        transport=RecordingTransport([_response("must not be used")]),
+        store=InMemoryGenerationStore(),
+    )
+
+    with pytest.raises(ModelGatewayError, match="invalid_retrieval_trace"):
+        gateway.generate_prediction(
+            _example(),
+            _retrieval(),
+            "staged-wrong-trace",
+            prediction_basis=(
+                PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1
+            ),
+        )
+
+
+def test_gateway_staged_basis_renders_evidence_and_preserves_basis() -> None:
+    transport = RecordingTransport([_response("Staged archive prediction")])
+    gateway = OpenAIGateway(
+        transport=transport,
+        store=InMemoryGenerationStore(),
+    )
+
+    result = gateway.generate_prediction(
+        _example(),
+        _bm25_retrieval(),
+        "staged-bm25-prediction",
+        prediction_basis=PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1,
+    )
+
+    prompt = transport.create_requests[0][0]["input"][0]["content"][0]["text"]
+    assert "Public evidence." in prompt
+    assert result.prediction_basis == (
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1
+    )
     assert result.retrieval_trace_sha256 is not None
 
 
@@ -417,6 +457,18 @@ def _response(text: str) -> dict[str, Any]:
             "output_tokens_details": {"reasoning_tokens": 12},
         },
     }
+
+
+def _bm25_retrieval() -> Bm25RetrievalTrace:
+    retrieval = _retrieval()
+    return Bm25RetrievalTrace(
+        context_query_sha256=retrieval.context_query_sha256,
+        own_query_sha256=retrieval.own_query_sha256,
+        lists=TwoRankedLists(context_bm25=[], own_bm25=[]),
+        excluded_document_ids=retrieval.excluded_document_ids,
+        documents=retrieval.documents,
+        serialized_documents=retrieval.serialized_documents,
+    )
 
 
 def _refusal_response() -> dict[str, Any]:

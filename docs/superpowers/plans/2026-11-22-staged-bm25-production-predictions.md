@@ -50,12 +50,12 @@
 - Consumes: `Bm25Index.search(...)`, prepared visible context, generated own query, existing self-exclusion and fusion.
 - Produces: `PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1`, `TwoRankedLists`, `Bm25RetrievalTrace`, `RetrievalTraceLike`, and `Bm25RetrievalService.retrieve_realistic(...) -> Bm25RetrievalTrace`.
 
-- [ ] **Step 1: Write failing retrieval tests** proving exactly two independent non-empty BM25 searches, no dense fields, self-exclusion, deterministic RRF, and rejection of an empty own query or empty post-filter evidence.
-- [ ] **Step 2: Run the focused retrieval tests and verify they fail because the new types and service do not exist.**
-- [ ] **Step 3: Implement the two-list models and BM25 service, and generalize fusion/candidate collection over the shared `named()` list contract without changing four-list behavior.**
-- [ ] **Step 4: Write failing gateway/orchestrator tests** proving staged traces render through the existing evidence-bound prompt, persist and resume as the two-list type, and retain the staged basis in the final payload.
-- [ ] **Step 5: Run those tests red, implement the minimum trace union parsing and basis-aware generation, then run all four focused files green.**
-- [ ] **Step 6: Commit and push with `feat: add staged bm25 retrieval contract`.**
+- [x] **Step 1: Write failing retrieval tests** proving exactly two independent non-empty BM25 searches, no dense fields, self-exclusion, deterministic RRF, and rejection of an empty own query or empty post-filter evidence.
+- [x] **Step 2: Run the focused retrieval tests and verify they fail because the new types and service do not exist.**
+- [x] **Step 3: Implement the two-list models and BM25 service, and generalize fusion/candidate collection over the shared `named()` list contract without changing four-list behavior.**
+- [x] **Step 4: Write failing gateway/orchestrator tests** proving staged traces render through the existing evidence-bound prompt, persist and resume as the two-list type, and retain the staged basis in the final payload.
+- [x] **Step 5: Run those tests red, implement the minimum trace union parsing and basis-aware generation, then run all four focused files green.**
+- [x] **Step 6: Commit and push with `feat: add staged bm25 retrieval contract`.**
 
 ### Task 2: Enforce the durable $10 provider ceiling
 

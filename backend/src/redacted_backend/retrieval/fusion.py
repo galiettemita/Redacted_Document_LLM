@@ -5,10 +5,10 @@ import re
 import unicodedata
 from collections import defaultdict
 from pathlib import PurePosixPath
+from typing import Protocol
 from urllib.parse import unquote, urlparse
 
 from redacted_backend.domain.retrieval import (
-    FourRankedLists,
     FusedChunk,
     FusedDocument,
 )
@@ -18,8 +18,12 @@ from redacted_backend.scientific_config import ScientificConfig
 _TOKEN = re.compile(r"[^\W_]+", flags=re.UNICODE)
 
 
+class RankedLists(Protocol):
+    def named(self) -> tuple[tuple[str, list[RankedChunk]], ...]: ...
+
+
 def fuse_documents(
-    lists: FourRankedLists,
+    lists: RankedLists,
     *,
     rrf_k: int = 60,
     limit: int = 100,

@@ -14,6 +14,7 @@ from redacted_backend.domain.predictions import (
     QueryResult,
     TokenUsage,
 )
+from redacted_backend.domain.retrieval import Bm25RetrievalTrace, TwoRankedLists
 from redacted_backend.jobs.orchestrator import AnalysisOrchestrator
 from redacted_backend.models.openai_gateway import ModelGatewayError
 from tests.api.test_context import (
@@ -116,12 +117,13 @@ class RecordingGateway:
 
 
 class RecordingRetrieval:
-    def __init__(self) -> None:
+    def __init__(self, *, staged: bool = False) -> None:
         self.calls: list[str] = []
+        self.staged = staged
 
     def retrieve_realistic(self, example, own_query: str):
         self.calls.append(own_query)
-        return _retrieval().model_copy(
+        retrieval = _retrieval().model_copy(
             update={
                 "context_query_sha256": hashlib.sha256(
                     b"visible before visible after"
@@ -130,6 +132,16 @@ class RecordingRetrieval:
                     own_query.encode("utf-8")
                 ).hexdigest(),
             }
+        )
+        if not self.staged:
+            return retrieval
+        return Bm25RetrievalTrace(
+            context_query_sha256=retrieval.context_query_sha256,
+            own_query_sha256=retrieval.own_query_sha256,
+            lists=TwoRankedLists(context_bm25=[], own_bm25=[]),
+            excluded_document_ids=retrieval.excluded_document_ids,
+            documents=retrieval.documents,
+            serialized_documents=retrieval.serialized_documents,
         )
 
 
@@ -408,6 +420,57 @@ def test_best_available_orchestrator_preserves_basis_through_prediction_event(
         PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1
     ]
     assert retrieval.calls == ["specific actors paris 1960 meeting"]
+
+
+def test_staged_orchestrator_resumes_two_list_trace_and_preserves_basis(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app, document, passage = create_test_app_and_passage(tmp_path)
+    install_fake_preparation(monkeypatch, calls=[])
+    _prepare(app, passage.id)
+    basis = PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1
+    job_id = _schedule_ready(
+        app,
+        document.id,
+        passage.id,
+        passage.revision,
+        basis=basis,
+    )
+    gateway = RecordingGateway(fail_prediction_once=True)
+    retrieval = RecordingRetrieval(staged=True)
+    orchestrator = AnalysisOrchestrator(
+        database=app.state.database,
+        model=gateway,
+        retrieval=retrieval,
+        prediction_basis=basis,
+    )
+
+    with pytest.raises(TimeoutError):
+        orchestrator.run(job_id)
+    orchestrator.run(job_id)
+
+    with app.state.database.session_factory() as session:
+        job = session.get(AnalysisJob, job_id)
+        events = session.scalars(
+            select(AnalysisEvent)
+            .where(AnalysisEvent.job_id == job_id)
+            .order_by(AnalysisEvent.sequence)
+        ).all()
+    assert job is not None
+    assert job.status == "complete"
+    assert set(job.retrieval_trace["lists"]) == {
+        "context_bm25",
+        "own_bm25",
+    }
+    assert job.prediction_payload["prediction_basis"] == basis.value
+    assert events[-2].payload["prediction_basis"] == basis.value
+    assert gateway.query_calls == [f"{job_id}:query"]
+    assert retrieval.calls == ["specific actors paris 1960 meeting"]
+    assert gateway.prediction_calls == [
+        f"{job_id}:prediction",
+        f"{job_id}:prediction",
+    ]
 
 
 def test_basis_bound_runtime_refuses_a_job_from_another_basis(

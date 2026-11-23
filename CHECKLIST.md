@@ -196,6 +196,7 @@
       - [x] Obtain approval for the staged-BM25/durable-build architecture and remove all customer-facing implementation labels at the user's request.
       - [x] Record the user's hard staged-provider dollar ceiling as $10.00 with standing authorization inside that ceiling.
       - [ ] Implement the approved staged-BM25 prediction design test-first.
+        - [x] Add the immutable staged basis, exact two-list BM25 trace, self-exclusion/RRF retrieval, evidence-bound generation, and durable trace resume without dense placeholders.
       - [ ] Complete the running 100,000-row real CPU benchmark, then start and verify the resumable 14,549,269-row production build only if the measured storage gate passes.
     - [x] With a real key configured and generation still disabled, count the exact one-passage request, show expected and maximum cost, and obtain explicit approval before the first paid model call.
       - [x] Align the production input-token request with the current provider schema by excluding generation-only fields, with a regression test and full backend/frontend verification.

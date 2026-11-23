@@ -27,6 +27,7 @@ class AnalysisStage(StrEnum):
 
 class PredictionBasis(StrEnum):
     MODEL_ONLY_V1 = "model_only_v1"
+    BEST_AVAILABLE_FOIARCHIVE_BM25_V1 = "best_available_foiarchive_bm25_v1"
     BEST_AVAILABLE_FOIARCHIVE_V1 = "best_available_foiarchive_v1"
     PAPER_EXACT_V1 = "paper_exact_v1"
 
