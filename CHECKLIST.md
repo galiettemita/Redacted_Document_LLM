@@ -205,7 +205,15 @@
         - [x] Configure the ignored cumulative $10.00 ceiling and verify the deployed staged basis is operational against all 14,549,269 BM25 passages while both paid-call switches remain false.
         - [x] Enable only the master and staged approvals locally, verify staged readiness is selected against all 14,549,269 BM25 passages, and confirm readiness leaves the durable ledger at $0 with zero provider claims.
         - [x] Serve the merged `main` frontend under a durable macOS `launchd` job at `http://127.0.0.1:5173`, verify its backend proxy reports the staged path ready, and leave it waiting for the user's real PDF.
-        - [ ] Complete and verify the first authorized two-stage provider prediction after the user uploads a real PDF and selects **Predict**.
+        - [x] Complete and verify the first authorized two-stage provider prediction after the user uploads a real PDF and selects **Predict**.
+          - [x] Persist completed job `9e975b99-43c8-4e25-926d-2b35c43780a0` and ordered prediction event 35 for passage revision 1, with the real archive-assisted result available for replay.
+          - [x] Diagnose the missing UI result as browser fan-out discarding one accepted job when sibling passages were truthfully deferred by the one-prediction document limit.
+          - [x] Replace fan-out with locked document scheduling that returns accepted jobs separately from deferred passages and creates no unnecessary blocked jobs.
+          - [x] Recover queued, running, or completed current-revision jobs after context preparation and replay only their durable SSE events without scheduling another provider call.
+          - [x] Reuse completed jobs, suppress duplicate clicks, bound derived idempotency keys, safely redispatch committed queued jobs, and reject passage edits/removal/addition while generation is active.
+          - [x] Keep one generic **Predict passage** control and all scheduling, method, retrieval, cost, and evidence diagnostics out of the customer UI while leaving the fictional demo unchanged.
+          - [x] Merge and deploy commit `4141e38`; verify healthy API/worker/frontend, 522 backend tests, 290 main-workspace frontend tests, typecheck, production build, Compose validation, and migration round-trip.
+          - [x] Prove deployment/recovery made no provider call: before and after remained 4 claims, 1,288,680 microusd actual/committed spend, and one prediction event (ID 35).
       - [ ] Complete the running 100,000-row real CPU benchmark, then start and verify the resumable 14,549,269-row production build only if the measured storage gate passes.
         - [x] Add and verify the durable CPU-only `nohup`/`caffeinate` runner with single-instance PID safety, atomic state, benchmark-first storage gates, adaptive two-hour checkpoints, and production-checkpoint resume.
         - [x] Launch the real 100,000-row CPU benchmark as one `launchd`-managed `caffeinate` job, verify PID 81336 is owned by PID 1 with one benchmark process, and leave staged predictions ready while it runs.

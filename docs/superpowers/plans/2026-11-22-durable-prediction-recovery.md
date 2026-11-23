@@ -58,8 +58,8 @@
 - Modify: `CHECKLIST.md`
 - Modify: this plan
 
-- [ ] Run the full backend and frontend suites, typecheck, production build, migration round-trip, and Compose validation.
-- [ ] Record provider-claim count and spend ledger before deployment.
-- [ ] Merge the reviewed branch to `main`, restart only the local API/worker/frontend services required for the fix, and verify readiness.
-- [ ] Recover the existing completed prediction through document state plus SSE and prove provider claims/spend are unchanged.
-- [ ] Update the master checklist and this checklist with measured evidence, commit, and push.
+- [x] Run the full backend and frontend suites (522 backend; 99 clean-worktree frontend and 290 main-workspace frontend), typecheck, production build, migration round-trip, and Compose validation.
+- [x] Record provider-claim count and spend ledger before deployment: 4 claims; 1,288,680 microusd actual/committed; one prediction event, ID 35.
+- [x] Merge reviewed commit `4141e38` to `main`, rebuild only the local API/worker, retain the durable frontend service, and verify API/database/worker/model/staged readiness.
+- [x] Recover completed job `9e975b99-43c8-4e25-926d-2b35c43780a0` through document state plus SSE event 35 and prove provider claims/spend/event count are unchanged.
+- [x] Update the master checklist and this checklist with measured evidence, commit, and push.
