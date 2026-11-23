@@ -72,6 +72,14 @@ const blockedAnalysis: AnalysisJobRecord = {
   updated_at: '2026-11-13T12:00:00Z',
 }
 
+const queuedAnalysis: AnalysisJobRecord = {
+  ...blockedAnalysis,
+  status: 'queued',
+  stage: 'query',
+  blockers: [],
+  prediction_basis: 'best_available_foiarchive_bm25_v1',
+}
+
 const detectionResult: PassageDetectionResult = {
   document_id: documentRecord.id,
   status: 'detection_ready',
@@ -218,6 +226,47 @@ describe('BackendApi', () => {
         body: JSON.stringify({ expected_revision: 1 }),
         signal: controller.signal,
       },
+    )
+  })
+
+  it('schedules a document atomically and preserves accepted and deferred passages', async () => {
+    const result = {
+      document_id: documentRecord.id,
+      accepted_jobs: [queuedAnalysis],
+      deferred_passage_ids: ['44444444-4444-4444-8444-444444444444'],
+      blockers: [],
+    }
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(result, 202))
+    const api = createBackendApi(fetchMock)
+    const controller = new AbortController()
+
+    await expect(api.scheduleDocumentAnalysis(
+      documentRecord.id,
+      { signal: controller.signal, idempotencyKey: 'document-analysis-1' },
+    )).resolves.toEqual(result)
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/v1/documents/${documentRecord.id}/analysis`,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': 'document-analysis-1' },
+        signal: controller.signal,
+      },
+    )
+  })
+
+  it('reads recoverable document jobs without scheduling', async () => {
+    const state = { document_id: documentRecord.id, jobs: [queuedAnalysis] }
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(state))
+    const api = createBackendApi(fetchMock)
+    const controller = new AbortController()
+
+    await expect(api.getDocumentAnalysis(
+      documentRecord.id,
+      controller.signal,
+    )).resolves.toEqual(state)
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/v1/documents/${documentRecord.id}/analysis`,
+      { signal: controller.signal },
     )
   })
 

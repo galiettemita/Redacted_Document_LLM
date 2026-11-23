@@ -117,6 +117,18 @@ export interface AnalysisJobRecord {
   updated_at: string
 }
 
+export interface DocumentAnalysisScheduleResult {
+  document_id: string
+  accepted_jobs: AnalysisJobRecord[]
+  deferred_passage_ids: string[]
+  blockers: AnalysisBlocker[]
+}
+
+export interface DocumentAnalysisState {
+  document_id: string
+  jobs: AnalysisJobRecord[]
+}
+
 export interface PassageMutation {
   label?: string
   page: number
@@ -182,6 +194,15 @@ export interface BackendApi {
     options: Required<Pick<PassageRequestOptions, 'idempotencyKey'>>
       & Pick<PassageRequestOptions, 'signal'>,
   ): Promise<AnalysisJobRecord>
+  scheduleDocumentAnalysis(
+    documentId: string,
+    options: Required<Pick<PassageRequestOptions, 'idempotencyKey'>>
+      & Pick<PassageRequestOptions, 'signal'>,
+  ): Promise<DocumentAnalysisScheduleResult>
+  getDocumentAnalysis(
+    documentId: string,
+    signal?: AbortSignal,
+  ): Promise<DocumentAnalysisState>
 }
 
 export function createBackendApi(fetchImplementation?: typeof fetch): BackendApi {
@@ -292,6 +313,26 @@ export function createBackendApi(fetchImplementation?: typeof fetch): BackendApi
           body: JSON.stringify({ expected_revision: expectedRevision }),
           signal: options.signal,
         },
+      )
+    },
+
+    scheduleDocumentAnalysis(documentId, options) {
+      return requestJson<DocumentAnalysisScheduleResult>(
+        fetchRequest,
+        `/v1/documents/${encodeURIComponent(documentId)}/analysis`,
+        {
+          method: 'POST',
+          headers: { 'Idempotency-Key': options.idempotencyKey },
+          signal: options.signal,
+        },
+      )
+    },
+
+    getDocumentAnalysis(documentId, signal) {
+      return requestJson<DocumentAnalysisState>(
+        fetchRequest,
+        `/v1/documents/${encodeURIComponent(documentId)}/analysis`,
+        { signal },
       )
     },
   }

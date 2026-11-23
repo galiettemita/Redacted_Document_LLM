@@ -145,10 +145,13 @@ export function DocumentWorkspace({
   const backendReady = backendDocument?.status === 'ready'
     && Boolean(document.backendDocumentId)
   const deletionInProgress = backendDocument?.status === 'deleting'
+  const predictionWorkActive = analysisScheduleStatus === 'scheduling'
+    || analysisScheduleStatus === 'running'
   const markingUnavailable = !backendReady
     || detectionStatus === 'detecting'
     || passageSaveStatus === 'saving'
     || passageRemovalStatus !== 'idle'
+    || predictionWorkActive
   const selectedPassage = state.passages.find((passage) => passage.id === state.pinnedId)
     ?? state.passages[0]
     ?? null
@@ -199,8 +202,28 @@ export function DocumentWorkspace({
           throw new Error('The backend returned contexts for the wrong passages.')
         }
       }
+      const recovered = await backendApi.getDocumentAnalysis(
+        documentId,
+        controller.signal,
+      )
+      if (recovered.document_id !== documentId) {
+        throw new Error('The backend returned predictions for a different document.')
+      }
+      for (const job of recovered.jobs) {
+        const summary = byPassage[job.passage_id]
+        if (!summary || summary.passage_revision !== job.passage_revision) {
+          throw new Error('The backend returned a prediction for an old passage revision.')
+        }
+      }
       setContextSummaries(byPassage)
       setContextStatus('ready')
+      if (recovered.jobs.length > 0) {
+        setAnalysisScheduleStatus('running')
+        setPredictionJobBases(Object.fromEntries(
+          recovered.jobs.map((job) => [job.id, job.prediction_basis]),
+        ))
+        setPredictionRunKey((current) => current + 1)
+      }
     } catch (error) {
       if (isAbortError(error)) return
       setContextStatus('failed')
@@ -395,11 +418,9 @@ export function DocumentWorkspace({
       || contextStatus !== 'ready'
       || !document.backendDocumentId
     ) return
-    const targets = state.passages.flatMap((passage) => {
-      if (passage.id.startsWith('pending-')) return []
-      const summary = contextSummaries[passage.id]
-      return summary ? [{ passage, summary }] : []
-    })
+    const targets = state.passages.filter((passage) => (
+      !passage.id.startsWith('pending-') && contextSummaries[passage.id]
+    ))
     if (targets.length !== state.passages.length || targets.length === 0) {
       setAnalysisError('Every live passage needs a matching prepared revision before prediction.')
       return
@@ -412,18 +433,14 @@ export function DocumentWorkspace({
     const runId = analysisRunId.current ?? createIdempotencyKey()
     analysisRunId.current = runId
     try {
-      const jobs = await Promise.all(targets.map(({ passage, summary }) => (
-        backendApi.schedulePassageAnalysis(
-          passage.id,
-          summary.passage_revision,
-          {
-            idempotencyKey: `${runId}:${passage.id}`,
-            signal: controller.signal,
-          },
-        )
-      )))
-      const blockers = jobs.flatMap((job) => job.blockers)
-      if (blockers.length > 0) {
+      const result = await backendApi.scheduleDocumentAnalysis(
+        document.backendDocumentId,
+        { idempotencyKey: runId, signal: controller.signal },
+      )
+      if (result.document_id !== document.backendDocumentId) {
+        throw new Error('The backend returned predictions for a different document.')
+      }
+      if (result.accepted_jobs.length === 0) {
         analysisRunId.current = null
         setAnalysisScheduleStatus('blocked')
         setAnalysisError('Predictions are not available yet. Please try again later.')
@@ -431,7 +448,7 @@ export function DocumentWorkspace({
       }
       setAnalysisScheduleStatus('running')
       setPredictionJobBases(Object.fromEntries(
-        jobs.map((job) => [job.id, job.prediction_basis]),
+        result.accepted_jobs.map((job) => [job.id, job.prediction_basis]),
       ))
       setPredictionRunKey((current) => current + 1)
       analysisRunId.current = null
@@ -472,7 +489,7 @@ export function DocumentWorkspace({
             className="secondary-button"
             type="button"
             aria-label={deletionInProgress ? 'Removing document…' : 'Replace document'}
-            disabled={deletionInProgress}
+            disabled={deletionInProgress || predictionWorkActive}
             onClick={onReplace}
           >
             {deletionInProgress ? 'Removing document…' : 'Replace document'}
@@ -660,16 +677,15 @@ export function DocumentWorkspace({
                       deletionInProgress
                       || analysisScheduleStatus === 'scheduling'
                       || analysisScheduleStatus === 'running'
+                      || predictions.length > 0
                     }
                     onClick={() => void handlePredictAllPassages()}
                   >
                     {analysisScheduleStatus === 'scheduling'
-                      ? 'Starting predictions…'
+                      ? 'Starting prediction…'
                       : analysisScheduleStatus === 'running'
-                        ? 'Predictions running…'
-                        : predictions.length > 0
-                          ? 'Run predictions again'
-                          : `Predict ${passages.length === 1 ? 'passage' : 'all passages'}`}
+                        ? 'Prediction running…'
+                        : 'Predict passage'}
                   </button>
                 ) : null}
               </div>

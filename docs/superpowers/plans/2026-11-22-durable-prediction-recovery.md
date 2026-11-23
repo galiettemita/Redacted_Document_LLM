@@ -45,12 +45,12 @@
 - Modify: `src/features/workspace/DocumentWorkspace.tsx`
 - Modify: `src/features/workspace/DocumentWorkspace.test.tsx`
 
-- [ ] Add failing transport tests for document scheduling and state recovery.
-- [ ] Replace passage fan-out with one document scheduling request and prove accepted jobs stream even when passages are deferred.
-- [ ] Add failing workspace tests for completed-job recovery without scheduling, all-deferred messaging, duplicate-click suppression, singular **Predict passage** copy, and mutation/replacement locking while active.
-- [ ] Implement one-time revision-set recovery after context preparation and feed recovered/accepted job bases into the existing SSE service.
-- [ ] Keep customer copy generic and leave the fictional demo unchanged.
-- [ ] Run focused frontend tests, typecheck, update this checklist, commit, and push.
+- [x] Add failing transport tests for document scheduling and state recovery.
+- [x] Replace passage fan-out with one document scheduling request and prove accepted jobs stream even when passages are deferred.
+- [x] Add failing workspace tests for completed-job recovery without scheduling, all-deferred messaging, duplicate-click suppression, singular **Predict passage** copy, and mutation/replacement locking while active.
+- [x] Implement revision-bound recovery during context preparation and feed recovered/accepted job bases into the existing SSE service.
+- [x] Keep customer copy generic and leave the fictional demo unchanged.
+- [x] Run focused and full frontend tests (99 passed), typecheck, production build, update this checklist, commit, and push.
 
 ### Task 4: Full verification and no-spend deployment
 
