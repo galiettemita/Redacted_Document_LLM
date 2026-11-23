@@ -256,6 +256,15 @@ REDACTED_ALLOW_BEST_AVAILABLE_CALLS=true
 REDACTED_ALLOW_PAPER_EXACT_CALLS=false
 ```
 
+For an already authorized local stack, the guarded activator can be started before the dense build finishes:
+
+```bash
+scripts/activate-local-full-predictions.zsh start
+scripts/activate-local-full-predictions.zsh status
+```
+
+It waits for the independent finalizer, requires the verified 14,549,269-passage report, `recall@300 >= 0.98`, and warm search at or below five seconds, then atomically enables only `REDACTED_ALLOW_BEST_AVAILABLE_CALLS`, recreates the API and worker, and records success only when `/v1/readiness` selects `best_available_foiarchive_v1`. The activator never invokes an upload, prediction, token-count, or provider endpoint. A failed finalizer, invalid report, disabled master approval, failed Compose recreation, or unready live service remains a visible terminal failure instead of silently falling back.
+
 Full archive-assisted prediction cards show their concise basis label and the provider result. The staged path shows only the provider result. Corpus audit details, queries, evidence, checkpoints, implementation state, and research limitations remain in backend provenance and documentation rather than the document UI.
 
 Freeze a downloaded copy of the Office of the Historian's official FRUS metadata:

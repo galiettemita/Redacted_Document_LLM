@@ -143,3 +143,20 @@
 - [x] **Step 2: Implement the reverse accelerator using the existing atomic checkpoint manifest and corpus/offset verification boundaries.** It shares no forward iterator or temporary directory, works from the final shard backward, and stops four shards before the first incomplete forward checkpoint.
 - [x] **Step 3: Run focused and complete verification, commit, and push.** Focused: 64 passed. Full backend: 544 passed with 2 expected environment skips; zsh syntax and diff checks passed.
 - [x] **Step 4: Run the sustained two-encoder acceptance check and keep only the fastest configuration.** The processes were non-overlapping, but sustained memory compression reduced combined throughput to about 3.2 rows/s. Stop only the accelerator, preserve the primary process, and keep one encoder; the primary recovered to 8.53 rows/s.
+
+### Task 7: Activate verified full predictions on the local site
+
+**Files:**
+- Create: `scripts/activate-local-full-predictions.zsh`
+- Create: `backend/tests/corpus/test_local_full_prediction_activator.py`
+- Modify: `README.md`
+- Modify: `CHECKLIST.md`
+
+**Interfaces:**
+- Consumes: Task 3's completed finalizer state/report, the ignored root `.env`, Docker Compose, and the loopback readiness endpoint.
+- Produces: one durable one-shot waiter that enables only `best_available_foiarchive_v1` after verification, recreates API/worker, and records activation only after live readiness selects the full basis. It never invokes a prediction or provider endpoint.
+
+- [x] **Step 1: Write failing subprocess tests** for waiting, failed finalization, invalid verification, exact `.env` mutation, Docker failure, live readiness proof, secret non-disclosure, and managed launch cleanup. All 12 tests failed on the absent activator.
+- [x] **Step 2: Implement the minimal fail-closed activator with atomic state/config writes and one-shot launchd lifecycle.** It changes only the full-basis flag after the final report passes, never calls a prediction/provider endpoint, and requires the live API to select the full basis.
+- [x] **Step 3: Run focused and complete verification, document the operator contract, update the checklist, commit, and push.** Focused scripts: 32 passed. Full backend: 557 passed with 2 expected skips. Frontend: 290 passed; typecheck, production build, Compose validation, zsh syntax, and diff checks passed.
+- [ ] **Step 4: Launch the activator beside the encoder/finalizer and prove all three processes are independently durable without making a provider call.**
