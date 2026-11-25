@@ -2,11 +2,48 @@ import {
   BackendApiError,
   createBackendApi,
   type AnalysisJobRecord,
+  type BackendReadiness,
   type BackendDocumentRecord,
   type BackendPassageRecord,
   type PassageDetectionResult,
   type VisibleContextSummary,
 } from './backendApi'
+
+const readiness: BackendReadiness = {
+  http: { ready: true, detail: 'ready' },
+  database: { ready: true, detail: 'ready' },
+  worker: { ready: true, detail: 'heartbeat current' },
+  corpus: { ready: false, detail: 'not configured' },
+  model: { ready: true, detail: 'configured and paid calls approved' },
+  prediction_ready: true,
+  prediction_bases: {
+    model_only_v1: {
+      operational: true,
+      approved: false,
+      ready: false,
+      detail: 'operational; spending not approved',
+    },
+    best_available_foiarchive_bm25_v1: {
+      operational: true,
+      approved: true,
+      ready: true,
+      detail: 'operational and approved',
+    },
+    best_available_foiarchive_v1: {
+      operational: false,
+      approved: false,
+      ready: false,
+      detail: 'corpus: dense artifacts not available',
+    },
+    paper_exact_v1: {
+      operational: false,
+      approved: false,
+      ready: false,
+      detail: 'corpus: not configured',
+    },
+  },
+  strongest_ready_basis: 'best_available_foiarchive_bm25_v1',
+}
 
 const documentRecord: BackendDocumentRecord = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -105,6 +142,17 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 describe('BackendApi', () => {
+  it('reads the complete prediction-basis readiness contract', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(readiness))
+    const api = createBackendApi(fetchMock)
+    const controller = new AbortController()
+
+    await expect(api.getReadiness(controller.signal)).resolves.toEqual(readiness)
+    expect(fetchMock).toHaveBeenCalledWith('/v1/readiness', {
+      signal: controller.signal,
+    })
+  })
+
   it('uploads the original File as multipart data and preserves the AbortSignal', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(documentRecord, 201))
     const api = createBackendApi(fetchMock)

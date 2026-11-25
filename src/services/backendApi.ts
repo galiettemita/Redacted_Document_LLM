@@ -5,6 +5,13 @@ export interface ComponentReadiness {
   detail: string
 }
 
+export interface PredictionBasisReadiness {
+  operational: boolean
+  approved: boolean
+  ready: boolean
+  detail: string
+}
+
 export interface BackendReadiness {
   http: ComponentReadiness
   database: ComponentReadiness
@@ -12,6 +19,8 @@ export interface BackendReadiness {
   corpus: ComponentReadiness
   model: ComponentReadiness
   prediction_ready: boolean
+  prediction_bases: Record<PredictionBasis, PredictionBasisReadiness>
+  strongest_ready_basis: PredictionBasis | null
 }
 
 export interface BackendDocumentRecord {

@@ -6,6 +6,7 @@ import {
   backendApi as defaultBackendApi,
   type BackendApi,
   type BackendPassageRecord,
+  type BackendReadiness,
   type PassageDetectionResult,
   type VisibleContextSummary,
 } from '../../services/backendApi'
@@ -65,6 +66,7 @@ export function DocumentWorkspace({
   const [passageRemovalId, setPassageRemovalId] = useState<string | null>(null)
   const [analysisScheduleStatus, setAnalysisScheduleStatus] = useState<AnalysisScheduleStatus>('idle')
   const [analysisError, setAnalysisError] = useState<string | null>(null)
+  const [fullDocumentPredictionReady, setFullDocumentPredictionReady] = useState(false)
   const [predictionRunKey, setPredictionRunKey] = useState(0)
   const [predictionJobBases, setPredictionJobBases] = useState<
     Record<string, PredictionBasis>
@@ -87,6 +89,8 @@ export function DocumentWorkspace({
     predictionRunKey,
     predictionJobBases,
   )
+  const backendReady = backendDocument?.status === 'ready'
+    && Boolean(document.backendDocumentId)
 
   useEffect(() => {
     dispatch({ type: 'reset' })
@@ -102,6 +106,7 @@ export function DocumentWorkspace({
     setPassageRemovalId(null)
     setAnalysisScheduleStatus('idle')
     setAnalysisError(null)
+    setFullDocumentPredictionReady(false)
     setPredictionRunKey(0)
     setPredictionJobBases({})
     passageRequest.current?.abort()
@@ -123,6 +128,24 @@ export function DocumentWorkspace({
   }, [])
 
   useEffect(() => {
+    setFullDocumentPredictionReady(false)
+    if (!backendReady) return
+    const controller = new AbortController()
+    void backendApi.getReadiness(controller.signal)
+      .then((readiness) => {
+        if (!controller.signal.aborted) {
+          setFullDocumentPredictionReady(isFullDocumentPredictionReady(readiness))
+        }
+      })
+      .catch((error: unknown) => {
+        if (!isAbortError(error) && !controller.signal.aborted) {
+          setFullDocumentPredictionReady(false)
+        }
+      })
+    return () => controller.abort()
+  }, [backendApi, backendReady, document.id])
+
+  useEffect(() => {
     if (!isInteractive) return
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') dispatch({ type: 'dismiss' })
@@ -142,8 +165,6 @@ export function DocumentWorkspace({
   const predictions = modelStream.predictions
   const phase = modelStream.phase
   const activePassageId = getEffectivePassageId(state.hoveredId, state.pinnedId)
-  const backendReady = backendDocument?.status === 'ready'
-    && Boolean(document.backendDocumentId)
   const deletionInProgress = backendDocument?.status === 'deleting'
   const predictionWorkActive = analysisScheduleStatus === 'scheduling'
     || analysisScheduleStatus === 'running'
@@ -710,7 +731,9 @@ export function DocumentWorkspace({
                       ? 'Starting prediction…'
                       : analysisScheduleStatus === 'running'
                         ? 'Prediction running…'
-                        : 'Predict passage'}
+                        : fullDocumentPredictionReady
+                          ? 'Predict all passages'
+                          : 'Predict passage'}
                   </button>
                 ) : null}
               </div>
@@ -720,6 +743,19 @@ export function DocumentWorkspace({
       </div>
     </main>
   )
+}
+
+function isFullDocumentPredictionReady(readiness: BackendReadiness): boolean {
+  if (!readiness.prediction_ready) return false
+  const basis = readiness.strongest_ready_basis
+  if (
+    basis !== 'best_available_foiarchive_v1'
+    && basis !== 'paper_exact_v1'
+  ) return false
+  const status = readiness.prediction_bases?.[basis]
+  return status?.operational === true
+    && status.approved === true
+    && status.ready === true
 }
 
 function toPassage(record: BackendPassageRecord): Passage {

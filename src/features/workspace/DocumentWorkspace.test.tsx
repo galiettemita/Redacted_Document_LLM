@@ -3,6 +3,7 @@ import { StrictMode } from 'react'
 import type {
   AnalysisJobRecord,
   BackendApi,
+  BackendReadiness,
   BackendPassageRecord,
   DocumentVisibleContextsSummary,
   PassageDetectionResult,
@@ -129,6 +130,56 @@ const preparedDocumentContexts: DocumentVisibleContextsSummary = {
   ],
 }
 
+const stagedReadiness: BackendReadiness = {
+  http: { ready: true, detail: 'ready' },
+  database: { ready: true, detail: 'ready' },
+  worker: { ready: true, detail: 'heartbeat current' },
+  corpus: { ready: false, detail: 'not configured' },
+  model: { ready: true, detail: 'configured and paid calls approved' },
+  prediction_ready: true,
+  prediction_bases: {
+    model_only_v1: {
+      operational: true,
+      approved: false,
+      ready: false,
+      detail: 'operational; spending not approved',
+    },
+    best_available_foiarchive_bm25_v1: {
+      operational: true,
+      approved: true,
+      ready: true,
+      detail: 'operational and approved',
+    },
+    best_available_foiarchive_v1: {
+      operational: false,
+      approved: false,
+      ready: false,
+      detail: 'corpus: dense artifacts not available',
+    },
+    paper_exact_v1: {
+      operational: false,
+      approved: false,
+      ready: false,
+      detail: 'corpus: not configured',
+    },
+  },
+  strongest_ready_basis: 'best_available_foiarchive_bm25_v1',
+}
+
+const fullReadiness: BackendReadiness = {
+  ...stagedReadiness,
+  prediction_bases: {
+    ...stagedReadiness.prediction_bases,
+    best_available_foiarchive_v1: {
+      operational: true,
+      approved: true,
+      ready: true,
+      detail: 'operational and approved',
+    },
+  },
+  strongest_ready_basis: 'best_available_foiarchive_v1',
+}
+
 function analysisJob(
   passageId: string,
   status: AnalysisJobRecord['status'] = 'queued',
@@ -170,7 +221,7 @@ function apiWithCreate(
   overrides: Partial<BackendApi> = {},
 ): BackendApi {
   return {
-    getReadiness: vi.fn(),
+    getReadiness: vi.fn().mockResolvedValue(stagedReadiness),
     uploadDocument: vi.fn(),
     deleteDocument: vi.fn(),
     createPassage,
@@ -556,6 +607,49 @@ describe('DocumentWorkspace', () => {
     expect(screen.getByRole('button', { name: 'Predict passage' })).toBeInTheDocument()
     expect(container.querySelector('.pdf-page-shell')).toHaveTextContent('')
     expect(screen.queryByText('Predicted hidden passage')).not.toBeInTheDocument()
+  })
+
+  it('keeps staged retrieval in selected-passage mode', async () => {
+    vi.useRealTimers()
+    const getReadiness = vi.fn().mockResolvedValue(stagedReadiness)
+    const api = apiWithCreate(undefined, {
+      getReadiness,
+      detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
+    })
+    render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={api}
+        onReplace={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByRole('button', { name: 'Predict passage' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Predict all passages' })).not.toBeInTheDocument()
+    expect(getReadiness).toHaveBeenCalledWith(expect.any(AbortSignal))
+  })
+
+  it('offers all-passage mode only when a full dense basis is ready', async () => {
+    vi.useRealTimers()
+    const api = apiWithCreate(undefined, {
+      getReadiness: vi.fn().mockResolvedValue(fullReadiness),
+      detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
+    })
+    render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={api}
+        onReplace={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByRole('button', {
+      name: 'Predict all passages',
+    })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Predict passage' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/dense artifacts/i)).not.toBeInTheDocument()
   })
 
   it('schedules only the passage the user selected', async () => {
