@@ -209,6 +209,7 @@ def test_model_only_basis_is_operational_without_corpus_but_separately_approved(
         allow_model_only_calls=True,
         allow_best_available_calls=True,
         allow_paper_exact_calls=True,
+        provider_spend_cap_usd="10.00",
     )
 
     bases = resolve(
@@ -251,6 +252,7 @@ def test_model_only_basis_requires_master_and_its_own_spending_approval() -> Non
             openai_api_key="secret",
             allow_paid_model_calls=True,
             allow_model_only_calls=False,
+            provider_spend_cap_usd="10.00",
         ),
         database=ready,
         worker=ready,
@@ -262,6 +264,7 @@ def test_model_only_basis_requires_master_and_its_own_spending_approval() -> Non
             openai_api_key="secret",
             allow_paid_model_calls=False,
             allow_model_only_calls=True,
+            provider_spend_cap_usd="10.00",
         ),
         database=ready,
         worker=ready,
@@ -286,6 +289,7 @@ def test_best_available_basis_is_operational_without_contaminating_exact() -> No
         allow_paid_model_calls=True,
         allow_best_available_calls=True,
         allow_paper_exact_calls=True,
+        provider_spend_cap_usd="10.00",
     )
 
     bases = readiness_api.resolve_prediction_basis_readiness(
@@ -382,6 +386,32 @@ def test_staged_basis_requires_its_own_approval_cap_and_priority() -> None:
     assert unapproved.operational is True
     assert unapproved.approved is False
     assert unapproved.ready is False
+
+
+def test_every_prediction_basis_fails_closed_without_a_provider_spend_cap() -> None:
+    ready = ComponentReadiness(ready=True, detail="ready")
+    settings = Settings(
+        openai_api_key="secret",
+        allow_paid_model_calls=True,
+        allow_model_only_calls=True,
+        allow_staged_bm25_calls=True,
+        allow_best_available_calls=True,
+        allow_paper_exact_calls=True,
+        provider_spend_cap_usd=None,
+        staged_bm25_spend_cap_usd=None,
+    )
+
+    bases = readiness_api.resolve_prediction_basis_readiness(
+        settings,
+        database=ready,
+        worker=ready,
+        corpus=ready,
+        staged_bm25_corpus=ready,
+        best_available_corpus=ready,
+    )
+
+    assert all(not status.operational for status in bases.values())
+    assert all(status.detail == "spend cap: not configured" for status in bases.values())
 
 
 def test_staged_bm25_readiness_needs_only_verified_corpus_and_bm25(

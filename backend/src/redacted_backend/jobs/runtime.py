@@ -23,7 +23,7 @@ from redacted_backend.domain.readiness import (
 )
 from redacted_backend.jobs.generation_store import AnalysisGenerationStore
 from redacted_backend.jobs.orchestrator import AnalysisOrchestrator
-from redacted_backend.jobs.spend_budget import StagedSpendBudget
+from redacted_backend.jobs.spend_budget import ProviderSpendBudget
 from redacted_backend.models.openai_gateway import OpenAIGateway, OpenAIHttpTransport
 from redacted_backend.retrieval.bm25 import Bm25Index, OpenSearchHttpTransport
 from redacted_backend.retrieval.dense import BgeEncoder, DenseIndex
@@ -67,16 +67,11 @@ def build_analysis_orchestrator(
         assert settings.database_url is not None
         database = Database.connect(settings.database_url)
     scientific = ScientificConfig()
-    spend_budget = None
-    if prediction_basis == PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1:
-        if not settings.allow_staged_bm25_calls:
-            raise RuntimeError("Analysis worker staged BM25 access is not approved")
-        if settings.staged_bm25_spend_cap_usd is None:
-            raise RuntimeError("Analysis worker staged spending cap is not configured")
-        spend_budget = StagedSpendBudget(
-            database,
-            cap_usd=settings.staged_bm25_spend_cap_usd,
-        )
+    _require_basis_approval(settings, prediction_basis)
+    spend_cap = settings.effective_provider_spend_cap_usd
+    if spend_cap is None:
+        raise RuntimeError("Analysis worker provider spending cap is not configured")
+    spend_budget = ProviderSpendBudget(database, cap_usd=spend_cap)
     gateway = OpenAIGateway(
         transport=OpenAIHttpTransport(
             settings.openai_api_key.get_secret_value(),
@@ -86,8 +81,6 @@ def build_analysis_orchestrator(
         scientific=scientific,
     )
     if prediction_basis == PredictionBasis.MODEL_ONLY_V1:
-        if not settings.allow_model_only_calls:
-            raise RuntimeError("Analysis worker model-only access is not approved")
         return AnalysisOrchestrator(
             database=database,
             model=gateway,
@@ -104,8 +97,6 @@ def build_analysis_orchestrator(
             contract=best_available_contract,
         )
     if prediction_basis == PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1:
-        if not settings.allow_best_available_calls:
-            raise RuntimeError("Analysis worker best-available access is not approved")
         return _build_best_available_orchestrator(
             settings,
             database=database,
@@ -114,8 +105,6 @@ def build_analysis_orchestrator(
             contract=best_available_contract,
             worker_identity=worker_identity,
         )
-    if not settings.allow_paper_exact_calls:
-        raise RuntimeError("Analysis worker paper-exact access is not approved")
     if settings.opensearch_url is None:
         raise RuntimeError("Analysis worker OpenSearch is not configured")
     required_paths = {
@@ -161,6 +150,32 @@ def build_analysis_orchestrator(
         prediction_basis=prediction_basis,
         scientific=scientific,
     )
+
+
+def _require_basis_approval(
+    settings: Settings,
+    prediction_basis: PredictionBasis,
+) -> None:
+    approval = {
+        PredictionBasis.MODEL_ONLY_V1: (
+            settings.allow_model_only_calls,
+            "model-only",
+        ),
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1: (
+            settings.allow_staged_bm25_calls,
+            "staged BM25",
+        ),
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1: (
+            settings.allow_best_available_calls,
+            "best-available",
+        ),
+        PredictionBasis.PAPER_EXACT_V1: (
+            settings.allow_paper_exact_calls,
+            "paper-exact",
+        ),
+    }[prediction_basis]
+    if not approval[0]:
+        raise RuntimeError(f"Analysis worker {approval[1]} access is not approved")
 
 
 def _build_staged_bm25_orchestrator(

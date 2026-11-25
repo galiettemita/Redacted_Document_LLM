@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     allow_staged_bm25_calls: bool = False
     allow_best_available_calls: bool = False
     allow_paper_exact_calls: bool = False
+    provider_spend_cap_usd: Decimal | None = Field(default=None, gt=0)
     staged_bm25_spend_cap_usd: Decimal | None = Field(default=None, gt=0)
     bm25_stage_max_predictions_per_document: int = Field(default=1, ge=1)
     worker_heartbeat_key: str = "redacted:analysis-worker:heartbeat"
@@ -67,9 +68,17 @@ class Settings(BaseSettings):
             return None
         return value
 
-    @field_validator("staged_bm25_spend_cap_usd", mode="before")
+    @field_validator(
+        "provider_spend_cap_usd",
+        "staged_bm25_spend_cap_usd",
+        mode="before",
+    )
     @classmethod
     def empty_spend_cap_is_unconfigured(cls, value: Any) -> Any:
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    @property
+    def effective_provider_spend_cap_usd(self) -> Decimal | None:
+        return self.provider_spend_cap_usd or self.staged_bm25_spend_cap_usd

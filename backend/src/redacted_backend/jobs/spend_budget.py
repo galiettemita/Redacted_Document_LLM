@@ -8,7 +8,7 @@ from redacted_backend.db.base import Database
 from redacted_backend.db.models import StagedSpendClaim, StagedSpendLedger
 
 _MICRO_USD = Decimal("1000000")
-_STAGED_BASIS = "best_available_foiarchive_bm25_v1"
+_PROVIDER_LEDGER_KEY = "best_available_foiarchive_bm25_v1"
 
 
 class SpendBudgetError(ValueError):
@@ -17,7 +17,7 @@ class SpendBudgetError(ValueError):
         self.code = code
 
 
-class StagedSpendBudget:
+class ProviderSpendBudget:
     def __init__(self, database: Database, *, cap_usd: Decimal) -> None:
         self.database = database
         self.cap_microusd = _microusd(cap_usd)
@@ -41,12 +41,12 @@ class StagedSpendBudget:
         with self.database.session_factory() as session, session.begin():
             ledger = session.get(
                 StagedSpendLedger,
-                _STAGED_BASIS,
+                _PROVIDER_LEDGER_KEY,
                 with_for_update=True,
             )
             if ledger is None:
                 ledger = StagedSpendLedger(
-                    prediction_basis=_STAGED_BASIS,
+                    prediction_basis=_PROVIDER_LEDGER_KEY,
                     committed_microusd=0,
                     actual_microusd=0,
                     updated_at=now,
@@ -70,12 +70,12 @@ class StagedSpendBudget:
             if ledger.committed_microusd + maximum > self.cap_microusd:
                 raise SpendBudgetError(
                     "spend_cap_exceeded",
-                    "The staged provider spending ceiling has been reached",
+                    "The provider spending ceiling has been reached",
                 )
             session.add(
                 StagedSpendClaim(
                     id=claim_id,
-                    prediction_basis=_STAGED_BASIS,
+                    prediction_basis=_PROVIDER_LEDGER_KEY,
                     scope=scope,
                     idempotency_key=idempotency_key,
                     request_sha256=request_sha256,
@@ -104,7 +104,7 @@ class StagedSpendBudget:
         with self.database.session_factory() as session, session.begin():
             ledger = session.get(
                 StagedSpendLedger,
-                _STAGED_BASIS,
+                _PROVIDER_LEDGER_KEY,
                 with_for_update=True,
             )
             claim = session.get(
@@ -173,3 +173,8 @@ def _microusd(value: Decimal | float, *, allow_zero: bool = False) -> int:
             "Provider spending amounts must be positive",
         )
     return int((amount * _MICRO_USD).to_integral_value(rounding=ROUND_CEILING))
+
+
+# Backward-compatible import for staged-only callers while the durable table keeps
+# its original migration name. All paid prediction bases now share this one ledger.
+StagedSpendBudget = ProviderSpendBudget

@@ -18,6 +18,7 @@ from redacted_backend.jobs.runtime_provider import (
     RuntimeInitializationError,
 )
 from redacted_backend.retrieval.service import Bm25RetrievalService
+from redacted_backend.models.openai_gateway import OpenAIGateway
 from tests.test_readiness import (
     _best_available_test_contract,
     _compatible_best_available_settings,
@@ -147,6 +148,7 @@ def test_model_only_runtime_requires_no_retrieval_configuration(tmp_path) -> Non
         openai_api_key="secret",
         allow_paid_model_calls=True,
         allow_model_only_calls=True,
+        provider_spend_cap_usd="10.00",
     )
 
     runtime = build_analysis_orchestrator(
@@ -156,6 +158,41 @@ def test_model_only_runtime_requires_no_retrieval_configuration(tmp_path) -> Non
     )
 
     assert runtime.retrieval is None
+    assert isinstance(runtime.model, OpenAIGateway)
+    assert runtime.model.spend_budget is not None
+
+
+@pytest.mark.parametrize(
+    ("basis", "approval"),
+    [
+        (PredictionBasis.MODEL_ONLY_V1, "allow_model_only_calls"),
+        (
+            PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1,
+            "allow_staged_bm25_calls",
+        ),
+        (
+            PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
+            "allow_best_available_calls",
+        ),
+        (PredictionBasis.PAPER_EXACT_V1, "allow_paper_exact_calls"),
+    ],
+)
+def test_every_paid_runtime_requires_the_shared_provider_cap(
+    tmp_path,
+    basis: PredictionBasis,
+    approval: str,
+) -> None:
+    database = Database.connect(f"sqlite+pysqlite:///{tmp_path / 'cap.db'}")
+    settings = Settings(
+        openai_api_key="secret",
+        allow_paid_model_calls=True,
+        provider_spend_cap_usd=None,
+        staged_bm25_spend_cap_usd=None,
+        **{approval: True},
+    )
+
+    with pytest.raises(RuntimeError, match="provider spending cap is not configured"):
+        build_analysis_orchestrator(settings, basis, database=database)
 
 
 def test_runtime_keeps_each_basis_fail_closed(tmp_path) -> None:
@@ -173,25 +210,42 @@ def test_runtime_keeps_each_basis_fail_closed(tmp_path) -> None:
         )
     with pytest.raises(RuntimeError, match="best-available corpus manifest"):
         build_analysis_orchestrator(
-            Settings(**base, allow_best_available_calls=True),
+            Settings(
+                **base,
+                allow_best_available_calls=True,
+                provider_spend_cap_usd="10.00",
+            ),
             PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
             database=database,
         )
     with pytest.raises(RuntimeError, match="staged BM25 access is not approved"):
         build_analysis_orchestrator(
-            Settings(**base, staged_bm25_spend_cap_usd="10.00"),
+            Settings(
+                **base,
+                allow_staged_bm25_calls=False,
+                staged_bm25_spend_cap_usd="10.00",
+            ),
             PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1,
             database=database,
         )
-    with pytest.raises(RuntimeError, match="staged spending cap is not configured"):
+    with pytest.raises(RuntimeError, match="provider spending cap is not configured"):
         build_analysis_orchestrator(
-            Settings(**base, allow_staged_bm25_calls=True),
+            Settings(
+                **base,
+                allow_staged_bm25_calls=True,
+                provider_spend_cap_usd=None,
+                staged_bm25_spend_cap_usd=None,
+            ),
             PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1,
             database=database,
         )
     with pytest.raises(RuntimeError, match="OpenSearch is not configured"):
         build_analysis_orchestrator(
-            Settings(**base, allow_paper_exact_calls=True),
+            Settings(
+                **base,
+                allow_paper_exact_calls=True,
+                provider_spend_cap_usd="10.00",
+            ),
             PredictionBasis.PAPER_EXACT_V1,
             database=database,
         )
@@ -209,6 +263,7 @@ def test_best_available_runtime_loads_only_its_separate_verified_artifacts(
             "openai_api_key": SecretStr("secret"),
             "allow_paid_model_calls": True,
             "allow_best_available_calls": True,
+            "provider_spend_cap_usd": 10,
         }
     )
     database = Database.connect(f"sqlite+pysqlite:///{tmp_path / 'runtime.db'}")
@@ -272,6 +327,8 @@ def test_best_available_runtime_loads_only_its_separate_verified_artifacts(
     assert captured["candidate_loader"] == runtime_module.FaissIvfPqIndex.load
     assert captured["bm25_probe_count"] == 1
     assert captured["dense_probe_count"] == 1
+    assert isinstance(runtime.model, OpenAIGateway)
+    assert runtime.model.spend_budget is not None
 
 
 def test_staged_runtime_loads_and_probes_bm25_without_dense_artifacts(

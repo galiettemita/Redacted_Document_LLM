@@ -107,15 +107,25 @@ def resolve_prediction_basis_readiness(
     staged_bm25_corpus: ComponentReadiness | None = None,
     best_available_corpus: ComponentReadiness | None = None,
 ) -> dict[PredictionBasis, BasisReadiness]:
+    spend_cap = ComponentReadiness(
+        ready=settings.effective_provider_spend_cap_usd is not None,
+        detail=(
+            "configured"
+            if settings.effective_provider_spend_cap_usd is not None
+            else "not configured"
+        ),
+    )
     model_only_operational, model_only_detail = _operational(
         ("database", database),
         ("worker", worker),
+        ("spend cap", spend_cap),
         model_configured=settings.openai_api_key is not None,
     )
     exact_operational, exact_detail = _operational(
         ("database", database),
         ("worker", worker),
         ("corpus", corpus),
+        ("spend cap", spend_cap),
         model_configured=settings.openai_api_key is not None,
     )
     best_operational, best_detail = _operational(
@@ -126,6 +136,7 @@ def resolve_prediction_basis_readiness(
             best_available_corpus
             or ComponentReadiness(ready=False, detail="not configured"),
         ),
+        ("spend cap", spend_cap),
         model_configured=settings.openai_api_key is not None,
     )
     staged_operational, staged_detail = _operational(
@@ -136,17 +147,7 @@ def resolve_prediction_basis_readiness(
             staged_bm25_corpus
             or ComponentReadiness(ready=False, detail="not configured"),
         ),
-        (
-            "spend cap",
-            ComponentReadiness(
-                ready=settings.staged_bm25_spend_cap_usd is not None,
-                detail=(
-                    "configured"
-                    if settings.staged_bm25_spend_cap_usd is not None
-                    else "not configured"
-                ),
-            ),
-        ),
+        ("spend cap", spend_cap),
         model_configured=settings.openai_api_key is not None,
     )
     master = settings.allow_paid_model_calls

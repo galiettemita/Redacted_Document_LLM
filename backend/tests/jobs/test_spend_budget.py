@@ -16,6 +16,17 @@ def test_settings_parse_the_exact_decimal_staged_spend_cap() -> None:
     settings = Settings(staged_bm25_spend_cap_usd="10.00")
 
     assert settings.staged_bm25_spend_cap_usd == Decimal("10.00")
+    assert settings.effective_provider_spend_cap_usd == Decimal("10.00")
+
+
+def test_settings_prefer_the_general_provider_spend_cap() -> None:
+    settings = Settings(
+        provider_spend_cap_usd="12.34",
+        staged_bm25_spend_cap_usd="10.00",
+    )
+
+    assert settings.provider_spend_cap_usd == Decimal("12.34")
+    assert settings.effective_provider_spend_cap_usd == Decimal("12.34")
 
 
 def test_budget_reserves_atomically_replays_and_rejects_cap_exhaustion(
