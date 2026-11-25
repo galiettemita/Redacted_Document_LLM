@@ -630,7 +630,12 @@ def test_best_available_readiness_verifies_separate_shards_queries_and_live_inde
     ready = ComponentReadiness(ready=True, detail="ready")
     unavailable = ComponentReadiness(ready=False, detail="not configured")
     basis = readiness_api.resolve_prediction_basis_readiness(
-        settings.model_copy(update={"openai_api_key": "configured"}),
+        settings.model_copy(
+            update={
+                "openai_api_key": "configured",
+                "provider_spend_cap_usd": "10.00",
+            }
+        ),
         database=ready,
         worker=ready,
         corpus=unavailable,

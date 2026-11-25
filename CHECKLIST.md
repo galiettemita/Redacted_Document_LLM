@@ -223,6 +223,10 @@
           - [x] Bind **Predict passage** to the selected passage ID and prepared revision, preserve earlier completed results, and release the one-active-prediction gate after completion so later selected passages can run sequentially.
           - [x] Merge and deploy commit `4141e38`; verify healthy API/worker/frontend, 522 backend tests, 290 main-workspace frontend tests, typecheck, production build, Compose validation, and migration round-trip.
           - [x] Prove deployment/recovery made no provider call: before and after remained 4 claims, 1,288,680 microusd actual/committed spend, and one prediction event (ID 35).
+        - [x] Put model-only, staged BM25, full best-available, and paper-exact provider calls behind one durable cumulative microdollar ceiling, with the existing staged setting retained as a backward-compatible fallback.
+        - [x] Gate **Predict all passages**/**Predict remaining passages** on live full-basis readiness, schedule every current passage durably in one request, and stream progressive retained cards through a document/passage/revision/basis-validated job allow-list.
+        - [x] Keep staged readiness selected-passage-only, and when full readiness arrives create new homogeneous full-basis jobs instead of misrepresenting older staged results as four-list predictions.
+        - [x] Deploy the full-document path without enabling the unfinished full basis or making a provider call; verify 576 backend tests with 2 expected skips, 302 frontend tests, typecheck, production build, Compose rendering, healthy API/worker/frontend, and unchanged before/after totals of 24 claims and 7,901,545 microusd actual/committed spend.
       - [ ] Complete the running 100,000-row real CPU benchmark, then start and verify the resumable 14,549,269-row production build only if the measured storage gate passes.
         - [x] Add and verify the durable CPU-only `nohup`/`caffeinate` runner with single-instance PID safety, atomic state, benchmark-first storage gates, adaptive two-hour checkpoints, and production-checkpoint resume.
         - [x] Launch the real 100,000-row CPU benchmark as one `launchd`-managed `caffeinate` job, verify PID 81336 is owned by PID 1 with one benchmark process, and leave staged predictions ready while it runs.
@@ -243,6 +247,7 @@
         - [x] Accept the local 2 GiB search-only heap against all 14,549,269 BM25 documents, staged readiness, 100 top-300 searches (116.3 ms mean, 155.6 ms p95, 746.5 ms maximum), and unchanged 13/6 job/claim counts.
         - [x] Re-test the reverse encoder with the freed memory: reject its 16.00 combined rows/s against the 19.19 single-process baseline, stop only the accelerator, and retain the primary after it recovered to 22.75 rows/s (about 7.4 active days remaining).
         - [x] Publish the first real production dense checkpoint for rows 0–68,571 with checksum-bound manifest `embedding-shard-checkpoint-v2`; continue the active second shard without interruption.
+        - [x] Verify 23 checksum-bound production checkpoints covering 1,577,156 contiguous rows (10.84% of 14,549,269) while the primary CPU encoder, finalizer, staged predictions, and no-spend full-basis activator remain healthy.
     - [x] With a real key configured and generation still disabled, count the exact one-passage request, show expected and maximum cost, and obtain explicit approval before the first paid model call.
       - [x] Align the production input-token request with the current provider schema by excluding generation-only fields, with a regression test and full backend/frontend verification.
       - [x] Count the selected one-passage closed-book request at 131 exact provider input tokens while every paid-generation approval remains disabled.

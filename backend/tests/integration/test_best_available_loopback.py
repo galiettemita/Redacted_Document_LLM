@@ -633,6 +633,7 @@ def test_upload_to_best_available_sse_runs_two_stage_four_list_prediction(
             allow_model_only_calls=False,
             allow_best_available_calls=True,
             allow_paper_exact_calls=False,
+            provider_spend_cap_usd="10.00",
         ),
         analysis_dispatcher=dispatcher,
     )

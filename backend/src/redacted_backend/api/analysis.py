@@ -133,11 +133,18 @@ def create_analysis_router(
                     }
                     else None
                 )
+                incompatible_active = False
                 if full_run_basis is not None:
+                    incompatible_active = any(
+                        job.prediction_basis != full_run_basis.value
+                        and job.status in {"queued", "running"}
+                        for job in recovered
+                    )
                     recovered = [
                         job
                         for job in recovered
                         if job.prediction_basis == full_run_basis.value
+                        or job.status in {"queued", "running"}
                     ]
                 accepted = {
                     job.passage_id: job
@@ -147,6 +154,9 @@ def create_analysis_router(
                 readiness_blockers: list[AnalysisBlocker] = []
                 for passage in passages:
                     if passage.id in accepted:
+                        continue
+                    if incompatible_active:
+                        deferred.append(passage.id)
                         continue
                     prediction_basis, decision_blockers = decisions[passage.id]
                     blockers = list(decision_blockers)

@@ -382,6 +382,47 @@ def test_full_document_schedule_replaces_staged_results_with_one_full_basis(
         assert session.scalar(select(func.count()).select_from(AnalysisJob)) == 3
 
 
+def test_full_document_schedule_does_not_duplicate_an_active_staged_job(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dispatcher = RecordingDispatcher()
+    app, document, first, second = _full_app(
+        tmp_path,
+        monkeypatch,
+        dispatcher=dispatcher,
+    )
+    with app.state.database.session_factory() as session, session.begin():
+        staged = AnalysisJobRepository(session).schedule(
+            passage_id=first.id,
+            document_id=document.id,
+            passage_revision=first.revision,
+            idempotency_key="active-staged-result",
+            blockers=[],
+            prediction_basis=PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1,
+        )
+
+    response = asyncio.run(
+        request(
+            app,
+            "POST",
+            f"/v1/documents/{document.id}/analysis",
+            headers={"Idempotency-Key": "wait-for-active-staged"},
+        )
+    )
+
+    assert response.status_code == 202
+    result = response.json()
+    assert [job["id"] for job in result["accepted_jobs"]] == [str(staged.id)]
+    assert result["accepted_jobs"][0]["prediction_basis"] == (
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1.value
+    )
+    assert result["deferred_passage_ids"] == [str(second.id)]
+    assert dispatcher.job_ids == [UUID(str(staged.id))]
+    with app.state.database.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(AnalysisJob)) == 1
+
+
 def test_document_schedule_returns_readiness_blockers_without_creating_jobs(
     tmp_path: Path,
     monkeypatch,
