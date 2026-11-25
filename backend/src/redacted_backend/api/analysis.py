@@ -86,7 +86,10 @@ def create_analysis_router(
                             "message": "Prepare visible-only context before analysis",
                         },
                     )
-                artifacts = {}
+                decisions: dict[
+                    UUID,
+                    tuple[PredictionBasis, list[AnalysisBlocker]],
+                ] = {}
                 for passage in passages:
                     artifact = VisibleExampleRepository(session).get_current(
                         passage.id,
@@ -101,26 +104,52 @@ def create_analysis_router(
                             },
                         )
                     _require_complete_query_metadata(artifact)
-                    artifacts[passage.id] = artifact
+                    decisions[passage.id] = _analysis_decision(
+                        settings,
+                        context_query_ready=all(
+                            value is not None for value in _query_fields(artifact)
+                        ),
+                    )
 
                 repository = AnalysisJobRepository(session)
+                recovered = repository.recoverable_for_document(document_id)
+                decision_bases = {
+                    basis
+                    for basis, blockers in decisions.values()
+                    if not blockers
+                }
+                candidate_basis = (
+                    next(iter(decision_bases))
+                    if len(decision_bases) == 1
+                    else None
+                )
+                full_run_basis = (
+                    candidate_basis
+                    if candidate_basis is not None
+                    and all(not blockers for _basis, blockers in decisions.values())
+                    and candidate_basis in {
+                        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
+                        PredictionBasis.PAPER_EXACT_V1,
+                    }
+                    else None
+                )
+                if full_run_basis is not None:
+                    recovered = [
+                        job
+                        for job in recovered
+                        if job.prediction_basis == full_run_basis.value
+                    ]
                 accepted = {
                     job.passage_id: job
-                    for job in repository.recoverable_for_document(document_id)
+                    for job in recovered
                 }
                 deferred: list[UUID] = []
                 readiness_blockers: list[AnalysisBlocker] = []
                 for passage in passages:
                     if passage.id in accepted:
                         continue
-                    artifact = artifacts[passage.id]
-                    query_fields = _query_fields(artifact)
-                    prediction_basis, blockers = _analysis_decision(
-                        settings,
-                        context_query_ready=all(
-                            value is not None for value in query_fields
-                        ),
-                    )
+                    prediction_basis, decision_blockers = decisions[passage.id]
+                    blockers = list(decision_blockers)
                     passage_key = _document_passage_key(
                         idempotency_key,
                         passage.id,

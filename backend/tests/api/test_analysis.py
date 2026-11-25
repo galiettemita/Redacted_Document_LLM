@@ -284,6 +284,104 @@ def test_document_schedule_reuses_a_completed_job_without_dispatch(
         assert session.scalar(select(func.count()).select_from(AnalysisJob)) == 1
 
 
+def test_full_document_schedule_reuses_completed_and_queues_every_remaining_passage(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dispatcher = RecordingDispatcher()
+    app, document, first, second = _full_app(
+        tmp_path,
+        monkeypatch,
+        dispatcher=dispatcher,
+    )
+    completed = _schedule(app, first.id, first.revision, "completed-full-first")
+    with app.state.database.session_factory() as session, session.begin():
+        model = session.get(AnalysisJob, completed["id"])
+        assert model is not None
+        model.status = "complete"
+        model.stage = "complete"
+
+    response = asyncio.run(
+        request(
+            app,
+            "POST",
+            f"/v1/documents/{document.id}/analysis",
+            headers={"Idempotency-Key": "full-document-run"},
+        )
+    )
+
+    assert response.status_code == 202
+    result = response.json()
+    assert [job["passage_id"] for job in result["accepted_jobs"]] == [
+        str(first.id),
+        str(second.id),
+    ]
+    assert [job["status"] for job in result["accepted_jobs"]] == [
+        "complete",
+        "queued",
+    ]
+    assert {job["prediction_basis"] for job in result["accepted_jobs"]} == {
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1.value,
+    }
+    assert result["deferred_passage_ids"] == []
+    assert dispatcher.job_ids == [
+        UUID(completed["id"]),
+        UUID(result["accepted_jobs"][1]["id"]),
+    ]
+
+
+def test_full_document_schedule_replaces_staged_results_with_one_full_basis(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dispatcher = RecordingDispatcher()
+    app, document, first, second = _full_app(
+        tmp_path,
+        monkeypatch,
+        dispatcher=dispatcher,
+    )
+    with app.state.database.session_factory() as session, session.begin():
+        staged = AnalysisJobRepository(session).schedule(
+            passage_id=first.id,
+            document_id=document.id,
+            passage_revision=first.revision,
+            idempotency_key="prior-staged-result",
+            blockers=[],
+            prediction_basis=PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1,
+        )
+        model = session.get(AnalysisJob, str(staged.id))
+        assert model is not None
+        model.status = "complete"
+        model.stage = "complete"
+
+    response = asyncio.run(
+        request(
+            app,
+            "POST",
+            f"/v1/documents/{document.id}/analysis",
+            headers={"Idempotency-Key": "upgrade-to-full-basis"},
+        )
+    )
+
+    assert response.status_code == 202
+    result = response.json()
+    assert [job["passage_id"] for job in result["accepted_jobs"]] == [
+        str(first.id),
+        str(second.id),
+    ]
+    assert {job["prediction_basis"] for job in result["accepted_jobs"]} == {
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1.value,
+    }
+    assert [job["status"] for job in result["accepted_jobs"]] == [
+        "queued",
+        "queued",
+    ]
+    assert result["deferred_passage_ids"] == []
+    assert len(dispatcher.job_ids) == 2
+    with app.state.database.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(AnalysisJob)) == 3
+
+
 def test_document_schedule_returns_readiness_blockers_without_creating_jobs(
     tmp_path: Path,
     monkeypatch,
@@ -780,6 +878,57 @@ def _staged_app(
             "allow_paper_exact_calls": False,
             "staged_bm25_spend_cap_usd": "10.00",
             "bm25_stage_max_predictions_per_document": limit,
+        },
+    )
+    with app.state.database.session_factory() as session, session.begin():
+        second = PassageRepository(session).create(
+            document_id=document.id,
+            label="Passage 2",
+            page_number=1,
+            rects=[PassageRect(x=0.5, y=0.5, width=0.2, height=0.05)],
+            source=PassageSource.MANUAL,
+        )
+    install_fake_preparation(monkeypatch, calls=[])
+    for passage in (first, second):
+        prepared = asyncio.run(
+            request(app, "POST", f"/v1/passages/{passage.id}:prepare-context")
+        )
+        assert prepared.status_code == 200
+    return app, document, first, second
+
+
+def _full_app(
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    dispatcher: RecordingDispatcher,
+):
+    ready = ComponentReadiness(ready=True, detail="ready")
+    unavailable = ComponentReadiness(ready=False, detail="not configured")
+    monkeypatch.setattr(analysis_api, "resolve_worker_readiness", lambda _s: ready)
+    monkeypatch.setattr(analysis_api, "resolve_corpus_readiness", lambda _s: unavailable)
+    monkeypatch.setattr(
+        analysis_api,
+        "resolve_staged_bm25_corpus_readiness",
+        lambda _s: unavailable,
+    )
+    monkeypatch.setattr(
+        analysis_api,
+        "resolve_best_available_corpus_readiness",
+        lambda _s: ready,
+    )
+    app, document, first = create_test_app_and_passage(
+        tmp_path,
+        analysis_dispatcher=dispatcher,
+        settings_overrides={
+            "redis_url": "redis://worker.test/0",
+            "openai_api_key": "secret",
+            "allow_paid_model_calls": True,
+            "allow_model_only_calls": False,
+            "allow_staged_bm25_calls": False,
+            "allow_best_available_calls": True,
+            "allow_paper_exact_calls": False,
+            "provider_spend_cap_usd": "10.00",
         },
     )
     with app.state.database.session_factory() as session, session.begin():

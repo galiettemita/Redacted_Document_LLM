@@ -7,6 +7,7 @@ import {
   type BackendApi,
   type BackendPassageRecord,
   type BackendReadiness,
+  type DocumentAnalysisScheduleResult,
   type PassageDetectionResult,
   type VisibleContextSummary,
 } from '../../services/backendApi'
@@ -486,6 +487,50 @@ export function DocumentWorkspace({
     }
   }
 
+  async function handlePredictAllPassages() {
+    if (
+      !backendReady
+      || !fullDocumentPredictionReady
+      || contextStatus !== 'ready'
+      || !document.backendDocumentId
+      || passages.length === 0
+    ) return
+    analysisRequest.current?.abort()
+    const controller = new AbortController()
+    analysisRequest.current = controller
+    setAnalysisScheduleStatus('scheduling')
+    setAnalysisError(null)
+    const runId = analysisRunId.current ?? createIdempotencyKey()
+    analysisRunId.current = runId
+    try {
+      const result = await backendApi.scheduleDocumentAnalysis(
+        document.backendDocumentId,
+        { idempotencyKey: runId, signal: controller.signal },
+      )
+      let jobBases: Record<string, PredictionBasis>
+      try {
+        jobBases = validateFullDocumentRun(
+          result,
+          document.backendDocumentId,
+          contextSummaries,
+        )
+      } catch {
+        analysisRunId.current = null
+        throw new Error('The backend returned an invalid prediction run.')
+      }
+      setAnalysisScheduleStatus('running')
+      setPredictionJobBases(jobBases)
+      setPredictionRunKey((current) => current + 1)
+      analysisRunId.current = null
+    } catch (error) {
+      if (isAbortError(error)) return
+      setAnalysisScheduleStatus('idle')
+      setAnalysisError(errorMessage(error, 'Predictions could not be started.'))
+    } finally {
+      if (analysisRequest.current === controller) analysisRequest.current = null
+    }
+  }
+
   function handleSelectPassage(passageId: string) {
     const passage = passages.find((item) => item.id === passageId)
     if (!passage) return
@@ -495,6 +540,11 @@ export function DocumentWorkspace({
   const selectedHasPrediction = selectedPassage
     ? predictions.some((prediction) => prediction.passageId === selectedPassage.id)
     : false
+  const hasRemainingPrediction = passages.some(
+    (passage) => !predictions.some(
+      (prediction) => prediction.passageId === passage.id,
+    ),
+  )
 
   return (
     <main className="workspace-shell">
@@ -721,18 +771,30 @@ export function DocumentWorkspace({
                       deletionInProgress
                       || analysisScheduleStatus === 'scheduling'
                       || analysisScheduleStatus === 'running'
-                      || !selectedPassage
-                      || !contextSummaries[selectedPassage.id]
-                      || selectedHasPrediction
+                      || (fullDocumentPredictionReady
+                        ? !hasRemainingPrediction
+                        : !selectedPassage
+                          || !contextSummaries[selectedPassage.id]
+                          || selectedHasPrediction)
                     }
-                    onClick={() => void handlePredictSelectedPassage()}
+                    onClick={() => void (
+                      fullDocumentPredictionReady
+                        ? handlePredictAllPassages()
+                        : handlePredictSelectedPassage()
+                    )}
                   >
                     {analysisScheduleStatus === 'scheduling'
-                      ? 'Starting prediction…'
+                      ? fullDocumentPredictionReady
+                        ? 'Starting predictions…'
+                        : 'Starting prediction…'
                       : analysisScheduleStatus === 'running'
-                        ? 'Prediction running…'
+                        ? fullDocumentPredictionReady
+                          ? 'Predictions running…'
+                          : 'Prediction running…'
                         : fullDocumentPredictionReady
-                          ? 'Predict all passages'
+                          ? predictions.length > 0
+                            ? 'Predict remaining passages'
+                            : 'Predict all passages'
                           : 'Predict passage'}
                   </button>
                 ) : null}
@@ -756,6 +818,49 @@ function isFullDocumentPredictionReady(readiness: BackendReadiness): boolean {
   return status?.operational === true
     && status.approved === true
     && status.ready === true
+}
+
+function validateFullDocumentRun(
+  result: DocumentAnalysisScheduleResult,
+  documentId: string,
+  contexts: Record<string, VisibleContextSummary>,
+): Record<string, PredictionBasis> {
+  const expectedPassages = new Set(Object.keys(contexts))
+  if (
+    result.document_id !== documentId
+    || result.blockers.length > 0
+    || result.deferred_passage_ids.length > 0
+    || result.accepted_jobs.length !== expectedPassages.size
+  ) throw new Error('invalid full-document schedule')
+
+  const seenPassages = new Set<string>()
+  let runBasis: PredictionBasis | null = null
+  const jobBases: Record<string, PredictionBasis> = {}
+  for (const job of result.accepted_jobs) {
+    const context = contexts[job.passage_id]
+    const fullBasis = job.prediction_basis === 'best_available_foiarchive_v1'
+      || job.prediction_basis === 'paper_exact_v1'
+    if (
+      job.document_id !== documentId
+      || !context
+      || context.passage_revision !== job.passage_revision
+      || seenPassages.has(job.passage_id)
+      || !fullBasis
+      || (runBasis !== null && job.prediction_basis !== runBasis)
+      || job.status === 'blocked'
+      || job.status === 'failed'
+      || job.status === 'cancelled'
+      || job.blockers.length > 0
+      || Object.prototype.hasOwnProperty.call(jobBases, job.id)
+    ) throw new Error('invalid full-document schedule')
+    seenPassages.add(job.passage_id)
+    runBasis = job.prediction_basis
+    jobBases[job.id] = job.prediction_basis
+  }
+  if ([...expectedPassages].some((passageId) => !seenPassages.has(passageId))) {
+    throw new Error('invalid full-document schedule')
+  }
+  return jobBases
 }
 
 function toPassage(record: BackendPassageRecord): Passage {
