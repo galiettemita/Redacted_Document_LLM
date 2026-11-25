@@ -247,7 +247,7 @@
         - [x] Accept the local 2 GiB search-only heap against all 14,549,269 BM25 documents, staged readiness, 100 top-300 searches (116.3 ms mean, 155.6 ms p95, 746.5 ms maximum), and unchanged 13/6 job/claim counts.
         - [x] Re-test the reverse encoder with the freed memory: reject its 16.00 combined rows/s against the 19.19 single-process baseline, stop only the accelerator, and retain the primary after it recovered to 22.75 rows/s (about 7.4 active days remaining).
         - [x] Publish the first real production dense checkpoint for rows 0–68,571 with checksum-bound manifest `embedding-shard-checkpoint-v2`; continue the active second shard without interruption.
-        - [x] Verify 23 checksum-bound production checkpoints covering 1,577,156 contiguous rows (10.84% of 14,549,269) while the primary CPU encoder, finalizer, staged predictions, and no-spend full-basis activator remain healthy.
+        - [x] Verify 24 checksum-bound production checkpoints covering 1,645,728 contiguous rows (11.31% of 14,549,269) while the primary CPU encoder, finalizer, staged predictions, and no-spend full-basis activator remain healthy.
     - [x] With a real key configured and generation still disabled, count the exact one-passage request, show expected and maximum cost, and obtain explicit approval before the first paid model call.
       - [x] Align the production input-token request with the current provider schema by excluding generation-only fields, with a regression test and full backend/frontend verification.
       - [x] Count the selected one-passage closed-book request at 131 exact provider input tokens while every paid-generation approval remains disabled.
