@@ -692,6 +692,38 @@ describe('DocumentWorkspace', () => {
     )
   })
 
+  it('abandons a hung readiness check and retries while the document stays open', async () => {
+    const getReadiness = vi.fn()
+      .mockImplementationOnce((signal?: AbortSignal) => new Promise<BackendReadiness>(
+        (_resolve, reject) => {
+          signal?.addEventListener('abort', () => {
+            reject(new DOMException('Readiness timed out.', 'AbortError'))
+          }, { once: true })
+        },
+      ))
+      .mockResolvedValue(fullReadiness)
+    const api = apiWithCreate(undefined, {
+      getReadiness,
+      detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
+    })
+    render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={api}
+        onReplace={vi.fn()}
+      />,
+    )
+
+    await act(async () => vi.advanceTimersByTimeAsync(15_000))
+    await act(async () => vi.advanceTimersByTimeAsync(60_000))
+
+    expect(getReadiness).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('button', {
+      name: 'Predict all passages',
+    })).toBeEnabled()
+  })
+
   it('schedules one full run and retains progressive results for every passage', async () => {
     vi.useRealTimers()
     const jobs = [savedPassage, detectedSecondPassage].map((passage) => ({

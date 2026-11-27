@@ -44,6 +44,7 @@ type FullDocumentPredictionBasis = Extract<
   'best_available_foiarchive_v1' | 'paper_exact_v1'
 >
 const READINESS_REFRESH_INTERVAL_MS = 60_000
+const READINESS_REQUEST_TIMEOUT_MS = 15_000
 
 interface DetectionTask {
   documentId: string
@@ -155,6 +156,11 @@ export function DocumentWorkspace({
       activeRequest?.abort()
       const controller = new AbortController()
       activeRequest = controller
+      let timedOut = false
+      const requestTimeout = setTimeout(() => {
+        timedOut = true
+        controller.abort()
+      }, READINESS_REQUEST_TIMEOUT_MS)
       void backendApi.getReadiness(controller.signal)
         .then((readiness) => {
           if (!controller.signal.aborted && !disposed) {
@@ -163,11 +169,14 @@ export function DocumentWorkspace({
           }
         })
         .catch((error: unknown) => {
-          if (!isAbortError(error) && !controller.signal.aborted && !disposed) {
+          if (timedOut && !disposed) {
+            setFullDocumentPredictionBasis(null)
+          } else if (!isAbortError(error) && !controller.signal.aborted && !disposed) {
             setFullDocumentPredictionBasis(null)
           }
         })
         .finally(() => {
+          clearTimeout(requestTimeout)
           if (disposed || activeRequest !== controller) return
           activeRequest = null
           refreshTimer = setTimeout(

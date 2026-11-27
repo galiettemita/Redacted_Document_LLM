@@ -390,4 +390,6 @@ npm run typecheck
 npm run build
 ```
 
+Root test discovery excludes `.worktrees/`, so stale or intentionally isolated Git worktrees cannot duplicate or destabilize the authoritative frontend suite.
+
 The automated suite covers upload errors, object-URL cleanup, exact prediction-basis labels, normalized drawing, grouped multi-line passage selection, deterministic visible-date evidence and conflicts, revision-bound context/query/job persistence and invalidation, ordered/resumable analysis events, durable provider-attempt claims that prevent uncertain generations from being resent, structural-marker removal, safe retry/backfill/conflict behavior, PDF safety ceilings, log redaction, reference-safe retention, safe response fields, no prediction text over uploaded PDFs, sidebar ordering, replacement reset, responsive prediction-to-document navigation, the fake-transport model-only loopback with zero retrieval, the fake-transport archive-assisted loopback with two provider stages and all four retrieval lists, and the staged two-list loopback with durable spend settlement and server-side passage limiting.
