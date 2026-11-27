@@ -75,6 +75,7 @@ export function DocumentWorkspace({
   const [fullDocumentPredictionBasis, setFullDocumentPredictionBasis] = useState<
     FullDocumentPredictionBasis | null
   >(null)
+  const [readinessRevision, setReadinessRevision] = useState(0)
   const [predictionRunKey, setPredictionRunKey] = useState(0)
   const [predictionJobBases, setPredictionJobBases] = useState<
     Record<string, PredictionBasis>
@@ -116,6 +117,7 @@ export function DocumentWorkspace({
     setAnalysisScheduleStatus('idle')
     setAnalysisError(null)
     setFullDocumentPredictionBasis(null)
+    setReadinessRevision(0)
     setPredictionRunKey(0)
     setPredictionJobBases({})
     passageRequest.current?.abort()
@@ -157,6 +159,7 @@ export function DocumentWorkspace({
         .then((readiness) => {
           if (!controller.signal.aborted && !disposed) {
             setFullDocumentPredictionBasis(readyFullDocumentBasis(readiness))
+            setReadinessRevision((current) => current + 1)
           }
         })
         .catch((error: unknown) => {
@@ -297,11 +300,14 @@ export function DocumentWorkspace({
   }, [backendApi])
 
   useEffect(() => {
+    if (!fullDocumentPredictionBasis) {
+      basisRecoveryKey.current = null
+      return
+    }
     if (
       !backendReady
       || !document.backendDocumentId
       || contextStatus !== 'ready'
-      || !fullDocumentPredictionBasis
       || Object.keys(contextSummaries).length === 0
       || Object.values(predictionJobBases).includes(fullDocumentPredictionBasis)
     ) return
@@ -347,6 +353,7 @@ export function DocumentWorkspace({
     document.backendDocumentId,
     fullDocumentPredictionBasis,
     predictionJobBases,
+    readinessRevision,
   ])
 
   useEffect(() => {

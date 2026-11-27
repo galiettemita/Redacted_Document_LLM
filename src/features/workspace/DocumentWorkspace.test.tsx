@@ -1003,6 +1003,72 @@ describe('DocumentWorkspace', () => {
     })).toBeEnabled()
   })
 
+  it('retries exact-basis recovery after a transient response failure', async () => {
+    vi.useRealTimers()
+    const full = {
+      ...analysisJob(savedPassage.id, 'complete'),
+      id: '88888888-8888-4888-8888-888888888888',
+      passage_revision: preparedContext.passage_revision,
+      prediction_basis: 'best_available_foiarchive_v1' as const,
+      stage: 'complete' as const,
+    }
+    let exactAttempts = 0
+    const getDocumentAnalysis = vi.fn((
+      _documentId: string,
+      _signal?: AbortSignal,
+      predictionBasis?: PredictionBasis,
+    ) => {
+      if (!predictionBasis) {
+        return Promise.resolve({
+          document_id: uploadedDocument.backendDocumentId!,
+          jobs: [],
+        })
+      }
+      exactAttempts += 1
+      if (exactAttempts === 1) {
+        return Promise.reject(new Error('temporary recovery failure'))
+      }
+      return Promise.resolve({
+        document_id: uploadedDocument.backendDocumentId!,
+        jobs: [full],
+      })
+    })
+    const stream = vi.fn<PredictionService['stream']>(
+      async (_document, _signal, onPrediction) => {
+        onPrediction({
+          passageId: savedPassage.id,
+          page: 1,
+          model: 'GPT-6 Astra',
+          text: 'Recovered after retry.',
+          provenance: 'model',
+          predictionBasis: 'best_available_foiarchive_v1',
+        })
+      },
+    )
+    const api = apiWithCreate(undefined, {
+      getReadiness: vi.fn().mockResolvedValue(fullReadiness),
+      detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
+      getDocumentAnalysis,
+    })
+
+    render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={api}
+        predictionService={{ stream }}
+        onReplace={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(exactAttempts).toBe(1))
+
+    window.dispatchEvent(new Event('focus'))
+
+    expect(await screen.findByText('Recovered after retry.')).toBeInTheDocument()
+    expect(exactAttempts).toBe(2)
+  })
+
   it('keeps controls locked when a second full-document stream starts', async () => {
     vi.useRealTimers()
     const recovered = {
