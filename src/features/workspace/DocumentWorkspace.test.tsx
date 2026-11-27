@@ -654,6 +654,44 @@ describe('DocumentWorkspace', () => {
     expect(screen.queryByText(/dense artifacts/i)).not.toBeInTheDocument()
   })
 
+  it('notices full-basis activation without reopening the document', async () => {
+    vi.useRealTimers()
+    const getReadiness = vi.fn()
+      .mockResolvedValueOnce(stagedReadiness)
+      .mockResolvedValue(fullReadiness)
+    const getDocumentAnalysis = vi.fn().mockResolvedValue({
+      document_id: uploadedDocument.backendDocumentId!,
+      jobs: [],
+    })
+    const api = apiWithCreate(undefined, {
+      getReadiness,
+      getDocumentAnalysis,
+      detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
+    })
+    render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={api}
+        onReplace={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByRole('button', { name: 'Predict passage' })).toBeEnabled()
+
+    window.dispatchEvent(new Event('focus'))
+
+    expect(await screen.findByRole('button', {
+      name: 'Predict all passages',
+    })).toBeEnabled()
+    expect(getReadiness).toHaveBeenCalledTimes(2)
+    expect(getDocumentAnalysis).toHaveBeenCalledWith(
+      uploadedDocument.backendDocumentId,
+      expect.any(AbortSignal),
+      'best_available_foiarchive_v1',
+    )
+  })
+
   it('schedules one full run and retains progressive results for every passage', async () => {
     vi.useRealTimers()
     const jobs = [savedPassage, detectedSecondPassage].map((passage) => ({

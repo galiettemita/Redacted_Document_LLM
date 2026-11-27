@@ -43,6 +43,7 @@ type FullDocumentPredictionBasis = Extract<
   PredictionBasis,
   'best_available_foiarchive_v1' | 'paper_exact_v1'
 >
+const READINESS_REFRESH_INTERVAL_MS = 60_000
 
 interface DetectionTask {
   documentId: string
@@ -139,19 +140,48 @@ export function DocumentWorkspace({
   useEffect(() => {
     setFullDocumentPredictionBasis(null)
     if (!backendReady) return
-    const controller = new AbortController()
-    void backendApi.getReadiness(controller.signal)
-      .then((readiness) => {
-        if (!controller.signal.aborted) {
-          setFullDocumentPredictionBasis(readyFullDocumentBasis(readiness))
-        }
-      })
-      .catch((error: unknown) => {
-        if (!isAbortError(error) && !controller.signal.aborted) {
-          setFullDocumentPredictionBasis(null)
-        }
-      })
-    return () => controller.abort()
+    let disposed = false
+    let activeRequest: AbortController | null = null
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null
+
+    const refreshReadiness = () => {
+      if (disposed) return
+      if (refreshTimer !== null) {
+        clearTimeout(refreshTimer)
+        refreshTimer = null
+      }
+      activeRequest?.abort()
+      const controller = new AbortController()
+      activeRequest = controller
+      void backendApi.getReadiness(controller.signal)
+        .then((readiness) => {
+          if (!controller.signal.aborted && !disposed) {
+            setFullDocumentPredictionBasis(readyFullDocumentBasis(readiness))
+          }
+        })
+        .catch((error: unknown) => {
+          if (!isAbortError(error) && !controller.signal.aborted && !disposed) {
+            setFullDocumentPredictionBasis(null)
+          }
+        })
+        .finally(() => {
+          if (disposed || activeRequest !== controller) return
+          activeRequest = null
+          refreshTimer = setTimeout(
+            refreshReadiness,
+            READINESS_REFRESH_INTERVAL_MS,
+          )
+        })
+    }
+
+    refreshReadiness()
+    window.addEventListener('focus', refreshReadiness)
+    return () => {
+      disposed = true
+      window.removeEventListener('focus', refreshReadiness)
+      activeRequest?.abort()
+      if (refreshTimer !== null) clearTimeout(refreshTimer)
+    }
   }, [backendApi, backendReady, document.id])
 
   useEffect(() => {
