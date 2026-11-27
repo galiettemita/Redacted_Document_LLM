@@ -270,23 +270,27 @@ def test_docker_failure_is_recorded_without_readiness_or_secret_disclosure(
     result = _run(environment, "internal-run")
 
     assert result.returncode == 17
-    assert "REDACTED_ALLOW_BEST_AVAILABLE_CALLS=true" in env_file.read_text(
+    assert "REDACTED_ALLOW_BEST_AVAILABLE_CALLS=false" in env_file.read_text(
         encoding="utf-8"
     )
+    assert command_log.read_text(encoding="utf-8").splitlines() == [
+        "docker compose up -d --force-recreate backend worker",
+        "docker compose up -d --force-recreate backend worker",
+    ]
     assert all(
         not line.startswith("curl ")
         for line in command_log.read_text(encoding="utf-8").splitlines()
     )
     current = json.loads((state / "state.json").read_text(encoding="utf-8"))
     assert current["phase"] == "failed"
-    assert current["reason"] == "compose_recreate_failed"
+    assert current["reason"] == "compose_recreate_failed_rollback_recreate_failed"
     assert "secret-that-must-never-be-logged" not in result.stdout + result.stderr
 
 
 def test_unready_live_service_never_records_activation(
     activator_environment: tuple[dict[str, str], Path, Path, Path],
 ) -> None:
-    environment, state, _env_file, _command_log = activator_environment
+    environment, state, env_file, command_log = activator_environment
     environment["FULL_ACTIVATOR_TEST_READINESS_READY"] = "0"
 
     result = _run(environment, "internal-run")
@@ -295,6 +299,36 @@ def test_unready_live_service_never_records_activation(
     current = json.loads((state / "state.json").read_text(encoding="utf-8"))
     assert current["phase"] == "failed"
     assert current["reason"] == "full_basis_readiness_timeout"
+    assert "REDACTED_ALLOW_BEST_AVAILABLE_CALLS=false" in env_file.read_text(
+        encoding="utf-8"
+    )
+    assert command_log.read_text(encoding="utf-8").splitlines()[-1] == (
+        "docker compose up -d --force-recreate backend worker"
+    )
+
+
+def test_failed_activation_removes_an_approval_key_it_added(
+    activator_environment: tuple[dict[str, str], Path, Path, Path],
+) -> None:
+    environment, _state, env_file, command_log = activator_environment
+    env_file.write_text(
+        env_file.read_text(encoding="utf-8").replace(
+            "REDACTED_ALLOW_BEST_AVAILABLE_CALLS=false\n",
+            "",
+        ),
+        encoding="utf-8",
+    )
+    environment["FULL_ACTIVATOR_TEST_READINESS_READY"] = "0"
+
+    result = _run(environment, "internal-run")
+
+    assert result.returncode != 0
+    assert "REDACTED_ALLOW_BEST_AVAILABLE_CALLS=" not in env_file.read_text(
+        encoding="utf-8"
+    )
+    assert command_log.read_text(encoding="utf-8").splitlines()[-1] == (
+        "docker compose up -d --force-recreate backend worker"
+    )
 
 
 def test_managed_activator_removes_its_launchd_job_after_failure(

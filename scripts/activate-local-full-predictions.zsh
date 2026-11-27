@@ -370,29 +370,70 @@ validate_approval_config() {
     write_state "blocked" 65 "full_basis_approval_ambiguous" "completed"
     return 65
   fi
+  if (( full_count == 1 )); then
+    local full_value
+    full_value="$(env_key_value REDACTED_ALLOW_BEST_AVAILABLE_CALLS)"
+    if [[ "$full_value" != "true" && "$full_value" != "false" ]]; then
+      write_state "blocked" 65 "full_basis_approval_invalid" "completed"
+      return 65
+    fi
+  fi
+}
+
+write_full_basis_config() {
+  local mode=$1
+  local value=${2:-}
+  local temporary="${ENV_FILE:h}/.env.full-prediction-activation.$$.tmp"
+  awk -v mode="$mode" -v value="$value" '
+    BEGIN { replaced = 0 }
+    index($0, "REDACTED_ALLOW_BEST_AVAILABLE_CALLS=") == 1 {
+      if (mode == "present") {
+        print "REDACTED_ALLOW_BEST_AVAILABLE_CALLS=" value
+      }
+      replaced = 1
+      next
+    }
+    { print }
+    END {
+      if (mode == "present" && replaced == 0) {
+        print "REDACTED_ALLOW_BEST_AVAILABLE_CALLS=" value
+      }
+    }
+  ' "$ENV_FILE" > "$temporary"
+  chmod 600 "$temporary"
+  mv "$temporary" "$ENV_FILE"
 }
 
 enable_full_basis() {
   if [[ "$(env_key_count REDACTED_ALLOW_BEST_AVAILABLE_CALLS)" == "1" && "$(env_key_value REDACTED_ALLOW_BEST_AVAILABLE_CALLS)" == "true" ]]; then
     return 0
   fi
-  local temporary="${ENV_FILE:h}/.env.full-prediction-activation.$$.tmp"
-  awk '
-    BEGIN { replaced = 0 }
-    index($0, "REDACTED_ALLOW_BEST_AVAILABLE_CALLS=") == 1 {
-      print "REDACTED_ALLOW_BEST_AVAILABLE_CALLS=true"
-      replaced = 1
-      next
-    }
-    { print }
-    END {
-      if (replaced == 0) {
-        print "REDACTED_ALLOW_BEST_AVAILABLE_CALLS=true"
-      }
-    }
-  ' "$ENV_FILE" > "$temporary"
-  chmod 600 "$temporary"
-  mv "$temporary" "$ENV_FILE"
+  write_full_basis_config present true
+}
+
+restore_full_basis() {
+  local previous_count=$1
+  local previous_value=$2
+  if [[ "$previous_count" == "0" ]]; then
+    write_full_basis_config absent
+  else
+    write_full_basis_config present "$previous_value"
+  fi
+}
+
+recreate_services() {
+  local output_name=$1
+  (
+    cd "$PROJECT_ROOT"
+    "$DOCKER_COMMAND" compose up -d --force-recreate backend worker
+  ) > "$STATE_DIR/$output_name" 2>&1
+}
+
+rollback_activation() {
+  local previous_count=$1
+  local previous_value=$2
+  restore_full_basis "$previous_count" "$previous_value" || return 70
+  recreate_services "rollback-compose-output.log"
 }
 
 readiness_attempt_count() {
@@ -407,16 +448,25 @@ readiness_attempt_count() {
 }
 
 deploy_and_verify() {
+  local previous_full_count
+  previous_full_count="$(env_key_count REDACTED_ALLOW_BEST_AVAILABLE_CALLS)"
+  local previous_full_value=""
+  if [[ "$previous_full_count" == "1" ]]; then
+    previous_full_value="$(env_key_value REDACTED_ALLOW_BEST_AVAILABLE_CALLS)"
+  fi
   write_state "enabling" null "" "completed"
   enable_full_basis
   write_state "deploying" null "" "completed"
   local deploy_exit=0
-  (
-    cd "$PROJECT_ROOT"
-    "$DOCKER_COMMAND" compose up -d --force-recreate backend worker
-  ) > "$STATE_DIR/compose-output.log" 2>&1 || deploy_exit=$?
+  recreate_services "compose-output.log" || deploy_exit=$?
   if (( deploy_exit != 0 )); then
-    write_state "failed" "$deploy_exit" "compose_recreate_failed" "completed"
+    local rollback_exit=0
+    rollback_activation "$previous_full_count" "$previous_full_value" || rollback_exit=$?
+    local failure_reason="compose_recreate_failed"
+    if (( rollback_exit != 0 )); then
+      failure_reason="compose_recreate_failed_rollback_recreate_failed"
+    fi
+    write_state "failed" "$deploy_exit" "$failure_reason" "completed"
     return "$deploy_exit"
   fi
 
@@ -445,6 +495,12 @@ deploy_and_verify() {
       sleep "$POLL_SECONDS"
     fi
   done
+  local rollback_exit=0
+  rollback_activation "$previous_full_count" "$previous_full_value" || rollback_exit=$?
+  if (( rollback_exit != 0 )); then
+    write_state "failed" "$rollback_exit" "full_basis_readiness_timeout_rollback_failed" "completed"
+    return "$rollback_exit"
+  fi
   write_state "failed" 69 "full_basis_readiness_timeout" "completed"
   return 69
 }
