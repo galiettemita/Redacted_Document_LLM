@@ -93,8 +93,12 @@ class FakeTwoStageProviderTransport:
         number = len(self.create_requests)
         output = (
             "specific actors paris 1960 meeting"
-            if number == 1
-            else "The missing passage identifies the responsible officials."
+            if number % 2 == 1
+            else (
+                "The missing passage identifies the responsible officials."
+                if number == 2
+                else "The second missing passage identifies additional officials."
+            )
         )
         return ProviderHttpResponse(
             body=_fake_response(output, number),
@@ -761,6 +765,178 @@ def test_upload_to_best_available_sse_runs_two_stage_four_list_prediction(
     assert [item[1] for item in fake_transport.create_requests] == [
         f"{job['id']}:query",
         f"{job['id']}:prediction",
+    ]
+
+
+def test_full_document_best_available_loopback_predicts_every_passage(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dispatcher = RecordingDispatcher()
+    ready = ComponentReadiness(ready=True, detail="test ready")
+    unavailable = ComponentReadiness(ready=False, detail="test unavailable")
+    monkeypatch.setattr(analysis_api, "resolve_worker_readiness", lambda _settings: ready)
+    monkeypatch.setattr(
+        analysis_api,
+        "resolve_best_available_corpus_readiness",
+        lambda _settings: ready,
+    )
+    monkeypatch.setattr(
+        analysis_api,
+        "resolve_corpus_readiness",
+        lambda _settings: unavailable,
+    )
+    monkeypatch.setattr(
+        passages_api,
+        "detect_passages",
+        lambda _path: DetectionResult(
+            passages=[
+                DetectedPassage(
+                    page_number=1,
+                    rects=[
+                        PassageRect(
+                            x=0.1,
+                            y=0.2 + (index * 0.2),
+                            width=0.2,
+                            height=0.03,
+                        )
+                    ],
+                    kinds=["black"],
+                    source_mask_ids=[f"mask-{index + 1}"],
+                    confidence=1.0,
+                )
+                for index in range(2)
+            ],
+            pages_scanned=1,
+            coverage_confident=True,
+            uncertain_pages=[],
+            warnings=[],
+        ),
+    )
+    install_fake_preparation(monkeypatch, calls=[])
+    app = create_app(
+        Settings(
+            database_url=f"sqlite+pysqlite:///{tmp_path / 'bulk-loopback.sqlite3'}",
+            document_storage_root=tmp_path / "stored-documents",
+            redis_url="redis://worker.test/0",
+            openai_api_key="injected-fake-key",
+            allow_paid_model_calls=True,
+            allow_model_only_calls=False,
+            allow_best_available_calls=True,
+            allow_paper_exact_calls=False,
+            provider_spend_cap_usd="10.00",
+        ),
+        analysis_dispatcher=dispatcher,
+    )
+    Base.metadata.create_all(app.state.database.engine)
+
+    uploaded = asyncio.run(
+        request(
+            app,
+            "POST",
+            "/v1/documents",
+            files={
+                "file": (
+                    "two-visible-redactions.pdf",
+                    make_pdf(text="Visible bulletin dated 1945-05-08"),
+                    "application/pdf",
+                )
+            },
+        )
+    )
+    assert uploaded.status_code == 201
+    document_id = uploaded.json()["id"]
+    detected = asyncio.run(
+        request(app, "POST", f"/v1/documents/{document_id}/passages:detect")
+    )
+    assert detected.status_code == 200
+    passages = detected.json()["passages"]
+    assert len(passages) == 2
+    for passage in passages:
+        context = asyncio.run(
+            request(app, "POST", f"/v1/passages/{passage['id']}:prepare-context")
+        )
+        assert context.status_code == 200
+
+    scheduled = asyncio.run(
+        request(
+            app,
+            "POST",
+            f"/v1/documents/{document_id}/analysis",
+            headers={"Idempotency-Key": "loopback-full-document"},
+            json={"expected_prediction_basis": "best_available_foiarchive_v1"},
+        )
+    )
+    assert scheduled.status_code == 202
+    payload = scheduled.json()
+    assert payload["document_id"] == document_id
+    assert payload["deferred_passage_ids"] == []
+    assert payload["blockers"] == []
+    jobs = payload["accepted_jobs"]
+    assert len(jobs) == 2
+    assert {job["passage_id"] for job in jobs} == {
+        passage["id"] for passage in passages
+    }
+    assert all(job["status"] == "queued" for job in jobs)
+    assert all(job["stage"] == "query" for job in jobs)
+    assert all(
+        job["prediction_basis"] == "best_available_foiarchive_v1" for job in jobs
+    )
+    assert dispatcher.job_ids == [UUID(job["id"]) for job in jobs]
+
+    fake_transport = FakeTwoStageProviderTransport()
+    bm25, dense, _bm25_transport, _dense_encoder = _build_real_retrievers(tmp_path)
+    try:
+        orchestrator = AnalysisOrchestrator(
+            database=app.state.database,
+            model=OpenAIGateway(
+                transport=fake_transport,
+                store=AnalysisGenerationStore(app.state.database),
+            ),
+            retrieval=RealisticRetrievalService(bm25=bm25, dense=dense),
+            prediction_basis=PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
+        )
+        for job in jobs:
+            orchestrator.run(job["id"])
+    finally:
+        dense.close()
+
+    events = asyncio.run(request(app, "GET", f"/v1/documents/{document_id}/events"))
+    assert events.status_code == 200
+    assert events.text.count("event: passage.prediction") == 2
+    assert '"prediction_basis":"best_available_foiarchive_v1"' in events.text
+    assert "The missing passage identifies the responsible officials." in events.text
+    assert "The second missing passage identifies additional officials." in events.text
+    assert "specific actors paris 1960 meeting" not in events.text
+    assert "semantic vector evidence" not in events.text.casefold()
+
+    with app.state.database.session_factory() as session:
+        stored_jobs = list(
+            session.scalars(
+                select(AnalysisJob)
+                .where(AnalysisJob.document_id == document_id)
+                .order_by(AnalysisJob.created_at, AnalysisJob.id)
+            )
+        )
+    assert len(stored_jobs) == 2
+    assert all(stored.status == "complete" for stored in stored_jobs)
+    assert all(
+        stored.prediction_basis == "best_available_foiarchive_v1"
+        for stored in stored_jobs
+    )
+    assert all(
+        set(stored.retrieval_trace["lists"])
+        == {"context_bm25", "context_dense", "own_bm25", "own_dense"}
+        for stored in stored_jobs
+    )
+    assert all(
+        all(stored.retrieval_trace["lists"].values()) for stored in stored_jobs
+    )
+    assert len(fake_transport.count_requests) == 4
+    assert [key for _request, key in fake_transport.create_requests] == [
+        key
+        for job in jobs
+        for key in (f"{job['id']}:query", f"{job['id']}:prediction")
     ]
 
 
