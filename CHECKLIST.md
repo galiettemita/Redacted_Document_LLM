@@ -252,6 +252,7 @@
         - [x] Observe and checksum-verify checkpoint 33 covering rows 2,194,304–2,262,875 (15.55% cumulative), with the same encoder immediately continuing into checkpoint 34.
         - [x] Reconfirm the live chain while checkpoint 34 advanced from 40,384 to 40,896 encoded rows in 30 seconds; keep its atomic partial file untouched while the finalizer and activator remain correctly waiting.
         - [x] Continue supervising checkpoint 34 through 50,688 of 68,572 rows (73.92%) with sustained CPU activity, no duplicate encoder, and healthy waiting finalizer/activator processes.
+        - [x] Checksum-verify checkpoint 36 after checkpoints 34–36 published contiguously through row 2,468,591 (16.97% published); confirm checkpoint 37 is actively encoding and brings live encoded progress to 2,482,032 rows (17.06%).
         - [ ] Finish all 213 embedding checkpoints, build the 213 FAISS candidate shards, and publish the dense manifest only if the frozen 100-query exact comparison reaches mean recall@300 of at least 0.98 within the 16 GiB artifact ceiling.
         - [ ] Certify all 100 warm dense searches in the worker image at no more than 5 seconds each, verify every corpus/dense/checksum/count binding, and let the waiting activator enable the full best-available basis only after live readiness selects it.
     - [x] With a real key configured and generation still disabled, count the exact one-passage request, show expected and maximum cost, and obtain explicit approval before the first paid model call.
