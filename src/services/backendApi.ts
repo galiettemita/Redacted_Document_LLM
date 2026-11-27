@@ -207,7 +207,13 @@ export interface BackendApi {
   scheduleDocumentAnalysis(
     documentId: string,
     options: Required<Pick<PassageRequestOptions, 'idempotencyKey'>>
-      & Pick<PassageRequestOptions, 'signal'>,
+      & Pick<PassageRequestOptions, 'signal'>
+      & {
+        expectedPredictionBasis: Extract<
+          PredictionBasis,
+          'best_available_foiarchive_v1' | 'paper_exact_v1'
+        >
+      },
   ): Promise<DocumentAnalysisScheduleResult>
   getDocumentAnalysis(
     documentId: string,
@@ -332,7 +338,13 @@ export function createBackendApi(fetchImplementation?: typeof fetch): BackendApi
         `/v1/documents/${encodeURIComponent(documentId)}/analysis`,
         {
           method: 'POST',
-          headers: { 'Idempotency-Key': options.idempotencyKey },
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': options.idempotencyKey,
+          },
+          body: JSON.stringify({
+            expected_prediction_basis: options.expectedPredictionBasis,
+          }),
           signal: options.signal,
         },
       )

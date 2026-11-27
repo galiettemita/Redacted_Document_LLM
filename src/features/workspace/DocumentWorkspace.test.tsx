@@ -714,6 +714,7 @@ describe('DocumentWorkspace', () => {
       expect.objectContaining({
         idempotencyKey: expect.any(String),
         signal: expect.any(AbortSignal),
+        expectedPredictionBasis: 'best_available_foiarchive_v1',
       }),
     )
     expect(schedulePassageAnalysis).not.toHaveBeenCalled()
@@ -846,6 +847,126 @@ describe('DocumentWorkspace', () => {
     expect(screen.getByRole('button', {
       name: 'Predict remaining passages',
     })).toBeEnabled()
+  })
+
+  it('does not count staged results as completed full-document predictions', async () => {
+    vi.useRealTimers()
+    const recovered = [savedPassage, detectedSecondPassage].map((passage) => ({
+      ...analysisJob(passage.id, 'complete'),
+      passage_revision: preparedContext.passage_revision,
+      prediction_basis: 'best_available_foiarchive_bm25_v1' as const,
+      stage: 'complete' as const,
+    }))
+    const stream = vi.fn<PredictionService['stream']>(
+      async (_document, _signal, onPrediction) => {
+        for (const [index, passage] of [savedPassage, detectedSecondPassage].entries()) {
+          onPrediction({
+            passageId: passage.id,
+            page: passage.page_number,
+            model: 'GPT-6 Astra',
+            text: `Stored staged prediction ${index + 1}.`,
+            provenance: 'model',
+            predictionBasis: 'best_available_foiarchive_bm25_v1',
+          })
+        }
+      },
+    )
+    const api = apiWithCreate(undefined, {
+      getReadiness: vi.fn().mockResolvedValue(fullReadiness),
+      detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
+      getDocumentAnalysis: vi.fn().mockResolvedValue({
+        document_id: uploadedDocument.backendDocumentId!,
+        jobs: recovered,
+      }),
+    })
+    render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={api}
+        predictionService={{ stream }}
+        onReplace={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByText('Stored staged prediction 2.')).toBeInTheDocument()
+    expect(screen.getByRole('button', {
+      name: 'Predict all passages',
+    })).toBeEnabled()
+    expect(screen.queryByRole('button', {
+      name: 'Predict remaining passages',
+    })).not.toBeInTheDocument()
+  })
+
+  it('keeps controls locked when a second full-document stream starts', async () => {
+    vi.useRealTimers()
+    const recovered = {
+      ...analysisJob(savedPassage.id, 'complete'),
+      passage_revision: preparedContext.passage_revision,
+      prediction_basis: 'best_available_foiarchive_v1' as const,
+      stage: 'complete' as const,
+    }
+    const jobs = [
+      recovered,
+      {
+        ...analysisJob(detectedSecondPassage.id),
+        passage_revision: preparedContext.passage_revision,
+        prediction_basis: 'best_available_foiarchive_v1' as const,
+      },
+    ]
+    let streamCall = 0
+    const stream = vi.fn<PredictionService['stream']>(
+      async (_document, signal, onPrediction) => {
+        streamCall += 1
+        if (streamCall === 1) {
+          onPrediction({
+            passageId: savedPassage.id,
+            page: 1,
+            model: 'GPT-6 Astra',
+            text: 'Stored full prediction.',
+            provenance: 'model',
+            predictionBasis: 'best_available_foiarchive_v1',
+          })
+          return
+        }
+        await new Promise<void>((resolve) => {
+          signal.addEventListener('abort', () => resolve(), { once: true })
+        })
+      },
+    )
+    const api = apiWithCreate(undefined, {
+      getReadiness: vi.fn().mockResolvedValue(fullReadiness),
+      detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
+      getDocumentAnalysis: vi.fn().mockResolvedValue({
+        document_id: uploadedDocument.backendDocumentId!,
+        jobs: [recovered],
+      }),
+      scheduleDocumentAnalysis: vi.fn().mockResolvedValue({
+        document_id: uploadedDocument.backendDocumentId!,
+        accepted_jobs: jobs,
+        deferred_passage_ids: [],
+        blockers: [],
+      }),
+    })
+    render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={api}
+        predictionService={{ stream }}
+        onReplace={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByText('Stored full prediction.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Predict remaining passages' }))
+    await waitFor(() => expect(stream).toHaveBeenCalledTimes(2))
+
+    expect(screen.getByRole('button', { name: 'Predictions running…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Correct selected area' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Remove selected passage' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Add missed passage' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Replace document' })).toBeDisabled()
   })
 
   it('schedules only the passage the user selected', async () => {

@@ -13,7 +13,12 @@ from sqlalchemy.orm import Session
 
 import redacted_backend.api.analysis as analysis_api
 import redacted_backend.domain.analysis as analysis_domain
-from redacted_backend.db.models import AnalysisEvent, AnalysisJob, Document
+from redacted_backend.db.models import (
+    AnalysisEvent,
+    AnalysisJob,
+    Document,
+    VisibleExampleArtifact,
+)
 from redacted_backend.db.repositories.analysis import AnalysisJobRepository
 from redacted_backend.db.repositories.passages import PassageRepository
 from redacted_backend.domain.analysis import PredictionBasis
@@ -74,6 +79,7 @@ def test_selected_staged_limit_allows_one_active_passage_at_a_time(
 
     assert next_selected["status"] == "queued"
     assert dispatcher.job_ids == [
+        UUID(selected["id"]),
         UUID(selected["id"]),
         UUID(next_selected["id"]),
     ]
@@ -380,6 +386,363 @@ def test_full_document_schedule_replaces_staged_results_with_one_full_basis(
     assert len(dispatcher.job_ids) == 2
     with app.state.database.session_factory() as session:
         assert session.scalar(select(func.count()).select_from(AnalysisJob)) == 3
+
+
+def test_full_document_schedule_is_atomic_when_any_context_query_is_unavailable(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dispatcher = RecordingDispatcher()
+    app, document, first, second = _full_app(
+        tmp_path,
+        monkeypatch,
+        dispatcher=dispatcher,
+    )
+    with app.state.database.session_factory() as session, session.begin():
+        artifact = session.scalar(
+            select(VisibleExampleArtifact).where(
+                VisibleExampleArtifact.passage_id == str(second.id),
+                VisibleExampleArtifact.passage_revision == second.revision,
+                VisibleExampleArtifact.invalidated_at.is_(None),
+            )
+        )
+        assert artifact is not None
+        artifact.context_query = None
+        artifact.context_query_sha256 = None
+        artifact.context_query_term_count = None
+        artifact.context_query_version = None
+        artifact.context_stopwords_version = None
+
+    response = asyncio.run(
+        request(
+            app,
+            "POST",
+            f"/v1/documents/{document.id}/analysis",
+            headers={"Idempotency-Key": "atomic-full-document-run"},
+            json={
+                "expected_prediction_basis": (
+                    PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1.value
+                )
+            },
+        )
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "full_document_context_incomplete",
+        "message": "Every passage needs a visible context query before full-document prediction",
+        "passage_ids": [str(second.id)],
+    }
+    assert dispatcher.job_ids == []
+    with app.state.database.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(AnalysisJob)) == 0
+        assert PassageRepository(session).get_live(first.id) is not None
+
+
+def test_selected_request_reuses_an_existing_current_full_basis_job(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dispatcher = RecordingDispatcher()
+    app, document, first, _second = _full_app(
+        tmp_path,
+        monkeypatch,
+        dispatcher=dispatcher,
+    )
+    bulk = asyncio.run(
+        request(
+            app,
+            "POST",
+            f"/v1/documents/{document.id}/analysis",
+            headers={"Idempotency-Key": "full-document-before-stale-tab"},
+        )
+    )
+    assert bulk.status_code == 202
+    first_job = next(
+        job
+        for job in bulk.json()["accepted_jobs"]
+        if job["passage_id"] == str(first.id)
+    )
+
+    selected = asyncio.run(
+        request(
+            app,
+            "POST",
+            f"/v1/passages/{first.id}/analysis",
+            headers={"Idempotency-Key": "stale-selected-tab"},
+            json={"expected_revision": first.revision},
+        )
+    )
+
+    assert selected.status_code == 202
+    assert selected.json() == first_job
+    assert dispatcher.job_ids == [
+        UUID(job["id"])
+        for job in bulk.json()["accepted_jobs"]
+    ] + [UUID(first_job["id"])]
+    with app.state.database.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(AnalysisJob)) == 2
+
+
+def test_expected_full_basis_rejects_a_readiness_downgrade_before_dispatch(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dispatcher = RecordingDispatcher()
+    app, document, _first, _second = _staged_app(
+        tmp_path,
+        monkeypatch,
+        dispatcher=dispatcher,
+        limit=2,
+    )
+
+    response = asyncio.run(
+        request(
+            app,
+            "POST",
+            f"/v1/documents/{document.id}/analysis",
+            headers={"Idempotency-Key": "full-run-after-readiness-downgrade"},
+            json={
+                "expected_prediction_basis": (
+                    PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1.value
+                )
+            },
+        )
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "prediction_basis_changed"
+    assert dispatcher.job_ids == []
+    with app.state.database.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(AnalysisJob)) == 0
+
+
+def test_full_document_schedule_resolves_live_readiness_once_for_all_passages(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dispatcher = RecordingDispatcher()
+    app, document, _first, _second = _full_app(
+        tmp_path,
+        monkeypatch,
+        dispatcher=dispatcher,
+    )
+    calls = {"worker": 0, "corpus": 0, "staged": 0, "full": 0}
+    ready = ComponentReadiness(ready=True, detail="ready")
+    unavailable = ComponentReadiness(ready=False, detail="not configured")
+
+    def readiness(name: str, result: ComponentReadiness):
+        def resolve(_settings):
+            calls[name] += 1
+            return result
+
+        return resolve
+
+    monkeypatch.setattr(
+        analysis_api,
+        "resolve_worker_readiness",
+        readiness("worker", ready),
+    )
+    monkeypatch.setattr(
+        analysis_api,
+        "resolve_corpus_readiness",
+        readiness("corpus", unavailable),
+    )
+    monkeypatch.setattr(
+        analysis_api,
+        "resolve_staged_bm25_corpus_readiness",
+        readiness("staged", unavailable),
+    )
+    monkeypatch.setattr(
+        analysis_api,
+        "resolve_best_available_corpus_readiness",
+        readiness("full", ready),
+    )
+
+    response = asyncio.run(
+        request(
+            app,
+            "POST",
+            f"/v1/documents/{document.id}/analysis",
+            headers={"Idempotency-Key": "one-readiness-snapshot"},
+            json={
+                "expected_prediction_basis": (
+                    PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1.value
+                )
+            },
+        )
+    )
+
+    assert response.status_code == 202
+    assert calls == {"worker": 1, "corpus": 1, "staged": 1, "full": 1}
+
+
+def test_full_document_schedule_reuses_matching_basis_behind_newer_staged_result(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dispatcher = RecordingDispatcher()
+    app, document, first, second = _full_app(
+        tmp_path,
+        monkeypatch,
+        dispatcher=dispatcher,
+    )
+    with app.state.database.session_factory() as session, session.begin():
+        repository = AnalysisJobRepository(session)
+        full = repository.schedule(
+            passage_id=first.id,
+            document_id=document.id,
+            passage_revision=first.revision,
+            idempotency_key="older-full-result",
+            blockers=[],
+            prediction_basis=PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
+        )
+        full_model = session.get(AnalysisJob, str(full.id))
+        assert full_model is not None
+        full_model.status = "complete"
+        full_model.stage = "complete"
+        full_model.updated_at = datetime.now(UTC) - timedelta(seconds=1)
+        staged = repository.schedule(
+            passage_id=first.id,
+            document_id=document.id,
+            passage_revision=first.revision,
+            idempotency_key="newer-staged-result",
+            blockers=[],
+            prediction_basis=PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1,
+        )
+        staged_model = session.get(AnalysisJob, str(staged.id))
+        assert staged_model is not None
+        staged_model.status = "complete"
+        staged_model.stage = "complete"
+        staged_model.updated_at = datetime.now(UTC)
+
+    response = asyncio.run(
+        request(
+            app,
+            "POST",
+            f"/v1/documents/{document.id}/analysis",
+            headers={"Idempotency-Key": "reuse-hidden-full-result"},
+            json={
+                "expected_prediction_basis": (
+                    PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1.value
+                )
+            },
+        )
+    )
+
+    assert response.status_code == 202
+    jobs = response.json()["accepted_jobs"]
+    assert [job["id"] for job in jobs if job["passage_id"] == str(first.id)] == [
+        str(full.id)
+    ]
+    assert [job["passage_id"] for job in jobs] == [str(first.id), str(second.id)]
+    with app.state.database.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(AnalysisJob)) == 3
+
+
+def test_selected_exact_key_replay_precedes_cross_key_full_basis_reuse(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dispatcher = RecordingDispatcher()
+    app, document, first, _second = _full_app(
+        tmp_path,
+        monkeypatch,
+        dispatcher=dispatcher,
+    )
+    with app.state.database.session_factory() as session, session.begin():
+        repository = AnalysisJobRepository(session)
+        staged = repository.schedule(
+            passage_id=first.id,
+            document_id=document.id,
+            passage_revision=first.revision,
+            idempotency_key="historical-selected-key",
+            blockers=[],
+            prediction_basis=PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1,
+        )
+        staged_model = session.get(AnalysisJob, str(staged.id))
+        assert staged_model is not None
+        staged_model.status = "complete"
+        staged_model.stage = "complete"
+        full = repository.schedule(
+            passage_id=first.id,
+            document_id=document.id,
+            passage_revision=first.revision,
+            idempotency_key="new-full-key",
+            blockers=[],
+            prediction_basis=PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
+        )
+        full_model = session.get(AnalysisJob, str(full.id))
+        assert full_model is not None
+        full_model.status = "complete"
+        full_model.stage = "complete"
+
+    response = asyncio.run(
+        request(
+            app,
+            "POST",
+            f"/v1/passages/{first.id}/analysis",
+            headers={"Idempotency-Key": "historical-selected-key"},
+            json={"expected_revision": first.revision},
+        )
+    )
+
+    assert response.status_code == 202
+    assert response.json()["id"] == str(staged.id)
+    assert response.json()["prediction_basis"] == (
+        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1.value
+    )
+    with app.state.database.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(AnalysisJob)) == 2
+
+
+def test_selected_retry_redelivers_a_recovered_queued_full_job(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class FlakyDispatcher:
+        def __init__(self) -> None:
+            self.job_ids: list[UUID] = []
+
+        def dispatch(self, job_id: UUID) -> None:
+            self.job_ids.append(job_id)
+            if len(self.job_ids) == 1:
+                raise RuntimeError("broker unavailable")
+
+    dispatcher = FlakyDispatcher()
+    app, _document, first, _second = _full_app(
+        tmp_path,
+        monkeypatch,
+        dispatcher=dispatcher,
+    )
+
+    failed = asyncio.run(
+        request(
+            app,
+            "POST",
+            f"/v1/passages/{first.id}/analysis",
+            headers={"Idempotency-Key": "failed-full-dispatch"},
+            json={"expected_revision": first.revision},
+        )
+    )
+    retried = asyncio.run(
+        request(
+            app,
+            "POST",
+            f"/v1/passages/{first.id}/analysis",
+            headers={"Idempotency-Key": "fresh-key-after-dispatch-failure"},
+            json={"expected_revision": first.revision},
+        )
+    )
+
+    assert failed.status_code == 503
+    assert retried.status_code == 202
+    assert dispatcher.job_ids == [
+        UUID(retried.json()["id"]),
+        UUID(retried.json()["id"]),
+    ]
+    with app.state.database.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(AnalysisJob)) == 1
 
 
 def test_full_document_schedule_does_not_duplicate_an_active_staged_job(

@@ -39,6 +39,10 @@ type PassageDetectionStatus = 'idle' | 'detecting' | 'ready' | 'failed'
 type ContextPreparationStatus = 'idle' | 'preparing' | 'ready' | 'failed'
 type PassageRemovalStatus = 'idle' | 'confirming' | 'deleting'
 type AnalysisScheduleStatus = 'idle' | 'scheduling' | 'running' | 'blocked'
+type FullDocumentPredictionBasis = Extract<
+  PredictionBasis,
+  'best_available_foiarchive_v1' | 'paper_exact_v1'
+>
 
 interface DetectionTask {
   documentId: string
@@ -67,7 +71,9 @@ export function DocumentWorkspace({
   const [passageRemovalId, setPassageRemovalId] = useState<string | null>(null)
   const [analysisScheduleStatus, setAnalysisScheduleStatus] = useState<AnalysisScheduleStatus>('idle')
   const [analysisError, setAnalysisError] = useState<string | null>(null)
-  const [fullDocumentPredictionReady, setFullDocumentPredictionReady] = useState(false)
+  const [fullDocumentPredictionBasis, setFullDocumentPredictionBasis] = useState<
+    FullDocumentPredictionBasis | null
+  >(null)
   const [predictionRunKey, setPredictionRunKey] = useState(0)
   const [predictionJobBases, setPredictionJobBases] = useState<
     Record<string, PredictionBasis>
@@ -107,7 +113,7 @@ export function DocumentWorkspace({
     setPassageRemovalId(null)
     setAnalysisScheduleStatus('idle')
     setAnalysisError(null)
-    setFullDocumentPredictionReady(false)
+    setFullDocumentPredictionBasis(null)
     setPredictionRunKey(0)
     setPredictionJobBases({})
     passageRequest.current?.abort()
@@ -129,18 +135,18 @@ export function DocumentWorkspace({
   }, [])
 
   useEffect(() => {
-    setFullDocumentPredictionReady(false)
+    setFullDocumentPredictionBasis(null)
     if (!backendReady) return
     const controller = new AbortController()
     void backendApi.getReadiness(controller.signal)
       .then((readiness) => {
         if (!controller.signal.aborted) {
-          setFullDocumentPredictionReady(isFullDocumentPredictionReady(readiness))
+          setFullDocumentPredictionBasis(readyFullDocumentBasis(readiness))
         }
       })
       .catch((error: unknown) => {
         if (!isAbortError(error) && !controller.signal.aborted) {
-          setFullDocumentPredictionReady(false)
+          setFullDocumentPredictionBasis(null)
         }
       })
     return () => controller.abort()
@@ -259,12 +265,13 @@ export function DocumentWorkspace({
 
   useEffect(() => {
     if (analysisScheduleStatus !== 'running') return
+    if (modelStream.phaseRunKey !== predictionRunKey) return
     if (modelStream.phase === 'complete' || modelStream.phase === 'empty') {
       setAnalysisScheduleStatus('idle')
     } else if (modelStream.phase === 'failed') {
       setAnalysisScheduleStatus('idle')
     }
-  }, [analysisScheduleStatus, modelStream.phase])
+  }, [analysisScheduleStatus, modelStream.phase, modelStream.phaseRunKey, predictionRunKey])
 
   useEffect(() => {
     if (!backendReady || !document.backendDocumentId) return
@@ -490,7 +497,7 @@ export function DocumentWorkspace({
   async function handlePredictAllPassages() {
     if (
       !backendReady
-      || !fullDocumentPredictionReady
+      || !fullDocumentPredictionBasis
       || contextStatus !== 'ready'
       || !document.backendDocumentId
       || passages.length === 0
@@ -505,7 +512,11 @@ export function DocumentWorkspace({
     try {
       const result = await backendApi.scheduleDocumentAnalysis(
         document.backendDocumentId,
-        { idempotencyKey: runId, signal: controller.signal },
+        {
+          idempotencyKey: runId,
+          signal: controller.signal,
+          expectedPredictionBasis: fullDocumentPredictionBasis,
+        },
       )
       let jobBases: Record<string, PredictionBasis>
       try {
@@ -513,6 +524,7 @@ export function DocumentWorkspace({
           result,
           document.backendDocumentId,
           contextSummaries,
+          fullDocumentPredictionBasis,
         )
       } catch {
         analysisRunId.current = null
@@ -540,11 +552,20 @@ export function DocumentWorkspace({
   const selectedHasPrediction = selectedPassage
     ? predictions.some((prediction) => prediction.passageId === selectedPassage.id)
     : false
+  const hasFullDocumentPrediction = fullDocumentPredictionBasis !== null
+    && predictions.some(
+      (prediction) => prediction.predictionBasis === fullDocumentPredictionBasis,
+    )
   const hasRemainingPrediction = passages.some(
     (passage) => !predictions.some(
-      (prediction) => prediction.passageId === passage.id,
+      (prediction) => prediction.passageId === passage.id
+        && (
+          fullDocumentPredictionBasis === null
+          || prediction.predictionBasis === fullDocumentPredictionBasis
+        ),
     ),
   )
+  const fullDocumentPredictionReady = fullDocumentPredictionBasis !== null
 
   return (
     <main className="workspace-shell">
@@ -792,7 +813,7 @@ export function DocumentWorkspace({
                           ? 'Predictions running…'
                           : 'Prediction running…'
                         : fullDocumentPredictionReady
-                          ? predictions.length > 0
+                          ? hasFullDocumentPrediction
                             ? 'Predict remaining passages'
                             : 'Predict all passages'
                           : 'Predict passage'}
@@ -807,23 +828,28 @@ export function DocumentWorkspace({
   )
 }
 
-function isFullDocumentPredictionReady(readiness: BackendReadiness): boolean {
-  if (!readiness.prediction_ready) return false
+function readyFullDocumentBasis(
+  readiness: BackendReadiness,
+): FullDocumentPredictionBasis | null {
+  if (!readiness.prediction_ready) return null
   const basis = readiness.strongest_ready_basis
   if (
     basis !== 'best_available_foiarchive_v1'
     && basis !== 'paper_exact_v1'
-  ) return false
+  ) return null
   const status = readiness.prediction_bases?.[basis]
   return status?.operational === true
     && status.approved === true
     && status.ready === true
+    ? basis
+    : null
 }
 
 function validateFullDocumentRun(
   result: DocumentAnalysisScheduleResult,
   documentId: string,
   contexts: Record<string, VisibleContextSummary>,
+  expectedBasis: FullDocumentPredictionBasis,
 ): Record<string, PredictionBasis> {
   const expectedPassages = new Set(Object.keys(contexts))
   if (
@@ -846,6 +872,7 @@ function validateFullDocumentRun(
       || context.passage_revision !== job.passage_revision
       || seenPassages.has(job.passage_id)
       || !fullBasis
+      || job.prediction_basis !== expectedBasis
       || (runBasis !== null && job.prediction_basis !== runBasis)
       || job.status === 'blocked'
       || job.status === 'failed'

@@ -17,17 +17,20 @@ export function usePredictionStream(
 ) {
   const [predictions, setPredictions] = useState<Prediction[]>([])
   const [phase, setPhase] = useState<PredictionPhase>('idle')
+  const [phaseRunKey, setPhaseRunKey] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!document || runKey < 1) {
       setPredictions([])
       setPhase('idle')
+      setPhaseRunKey(0)
       setError(null)
       return
     }
     const controller = new AbortController()
     let completedCount = 0
+    setPhaseRunKey(runKey)
     setPhase('predicting')
     setError(null)
 
@@ -56,5 +59,5 @@ export function usePredictionStream(
     return () => controller.abort()
   }, [document, jobBases, runKey, service])
 
-  return { predictions, phase, error }
+  return { predictions, phase, phaseRunKey, error }
 }

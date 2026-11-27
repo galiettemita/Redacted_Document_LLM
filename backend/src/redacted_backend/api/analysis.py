@@ -35,7 +35,7 @@ from redacted_backend.domain.analysis import (
     DocumentAnalysisState,
     PredictionBasis,
 )
-from redacted_backend.domain.readiness import ComponentReadiness
+from redacted_backend.domain.readiness import BasisReadiness, ComponentReadiness
 from redacted_backend.jobs.queue import AnalysisDispatcher
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -45,6 +45,12 @@ class ScheduleAnalysisRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     expected_revision: int = Field(ge=1)
+
+
+class ScheduleDocumentAnalysisRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    expected_prediction_basis: PredictionBasis
 
 
 def create_analysis_router(
@@ -61,6 +67,7 @@ def create_analysis_router(
     )
     def schedule_document_analysis(
         document_id: UUID,
+        body: ScheduleDocumentAnalysisRequest | None = None,
         idempotency_key: str = Header(
             alias="Idempotency-Key", min_length=1, max_length=512
         ),
@@ -90,6 +97,9 @@ def create_analysis_router(
                     UUID,
                     tuple[PredictionBasis, list[AnalysisBlocker]],
                 ] = {}
+                basis_readiness, worker_readiness = _resolve_analysis_readiness(
+                    settings
+                )
                 for passage in passages:
                     artifact = VisibleExampleRepository(session).get_current(
                         passage.id,
@@ -104,12 +114,99 @@ def create_analysis_router(
                             },
                         )
                     _require_complete_query_metadata(artifact)
-                    decisions[passage.id] = _analysis_decision(
+                    decisions[passage.id] = _analysis_decision_from_readiness(
                         settings,
+                        basis_readiness,
+                        worker_readiness,
                         context_query_ready=all(
                             value is not None for value in _query_fields(artifact)
                         ),
                     )
+
+                expected_basis = (
+                    body.expected_prediction_basis if body is not None else None
+                )
+                full_bases = {
+                    PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
+                    PredictionBasis.PAPER_EXACT_V1,
+                }
+                if expected_basis is not None and expected_basis not in full_bases:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                        detail={"code": "invalid_full_prediction_basis"},
+                    )
+                if expected_basis is not None:
+                    matching_passage_ids = [
+                        passage.id
+                        for passage in passages
+                        if decisions[passage.id][0] == expected_basis
+                        and not decisions[passage.id][1]
+                    ]
+                    if not matching_passage_ids:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail={
+                                "code": "prediction_basis_changed",
+                                "message": (
+                                    "Full-document prediction readiness changed; "
+                                    "refresh and try again"
+                                ),
+                            },
+                        )
+                    incomplete_passage_ids = [
+                        passage.id
+                        for passage in passages
+                        if passage.id not in matching_passage_ids
+                    ]
+                    if incomplete_passage_ids:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail={
+                                "code": "full_document_context_incomplete",
+                                "message": (
+                                    "Every passage needs a visible context query "
+                                    "before full-document prediction"
+                                ),
+                                "passage_ids": [
+                                    str(passage_id)
+                                    for passage_id in incomplete_passage_ids
+                                ],
+                            },
+                        )
+
+                selected_full_bases = {
+                    basis
+                    for basis, blockers in decisions.values()
+                    if not blockers and basis in full_bases
+                }
+                if selected_full_bases:
+                    full_basis = (
+                        next(iter(selected_full_bases))
+                        if len(selected_full_bases) == 1
+                        else None
+                    )
+                    incomplete_passage_ids = [
+                        passage.id
+                        for passage in passages
+                        if full_basis is None
+                        or decisions[passage.id][0] != full_basis
+                        or decisions[passage.id][1]
+                    ]
+                    if incomplete_passage_ids:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail={
+                                "code": "full_document_context_incomplete",
+                                "message": (
+                                    "Every passage needs a visible context query "
+                                    "before full-document prediction"
+                                ),
+                                "passage_ids": [
+                                    str(passage_id)
+                                    for passage_id in incomplete_passage_ids
+                                ],
+                            },
+                        )
 
                 repository = AnalysisJobRepository(session)
                 recovered = repository.recoverable_for_document(document_id)
@@ -124,7 +221,9 @@ def create_analysis_router(
                     else None
                 )
                 full_run_basis = (
-                    candidate_basis
+                    expected_basis
+                    if expected_basis is not None
+                    else candidate_basis
                     if candidate_basis is not None
                     and all(not blockers for _basis, blockers in decisions.values())
                     and candidate_basis in {
@@ -135,17 +234,60 @@ def create_analysis_router(
                 )
                 incompatible_active = False
                 if full_run_basis is not None:
-                    incompatible_active = any(
-                        job.prediction_basis != full_run_basis.value
-                        and job.status in {"queued", "running"}
-                        for job in recovered
+                    incompatible_active = (
+                        repository.has_active_for_document_outside_basis(
+                            document_id,
+                            full_run_basis,
+                        )
                     )
-                    recovered = [
-                        job
-                        for job in recovered
-                        if job.prediction_basis == full_run_basis.value
-                        or job.status in {"queued", "running"}
-                    ]
+                    if expected_basis is not None and incompatible_active:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail={
+                                "code": "prediction_run_in_progress",
+                                "message": (
+                                    "Another prediction run is still active; "
+                                    "wait for it to finish"
+                                ),
+                            },
+                        )
+                    if incompatible_active:
+                        recovered = [
+                            job
+                            for job in recovered
+                            if job.status in {"queued", "running"}
+                        ]
+                    else:
+                        recovered = repository.recoverable_for_document_basis(
+                            document_id,
+                            full_run_basis,
+                        )
+                    if expected_basis is not None:
+                        for passage in passages:
+                            passage_key = _document_passage_key(
+                                idempotency_key,
+                                passage.id,
+                            )
+                            keyed = repository.get_by_idempotency(
+                                passage.id,
+                                passage_key,
+                            )
+                            if keyed is not None and (
+                                keyed.passage_revision != passage.revision
+                                or keyed.prediction_basis != expected_basis
+                                or keyed.status
+                                not in {"queued", "running", "complete"}
+                            ):
+                                raise HTTPException(
+                                    status_code=status.HTTP_409_CONFLICT,
+                                    detail={
+                                        "code": "idempotency_conflict",
+                                        "message": (
+                                            "This prediction request key belongs "
+                                            "to a different run"
+                                        ),
+                                    },
+                                )
                 accepted = {
                     job.passage_id: job
                     for job in recovered
@@ -292,10 +434,34 @@ def create_analysis_router(
                     ),
                 )
                 repository = AnalysisJobRepository(session)
-                replayed = (
-                    repository.get_by_idempotency(passage.id, idempotency_key)
-                    is not None
+                keyed = repository.get_by_idempotency(
+                    passage.id,
+                    idempotency_key,
                 )
+                if keyed is not None:
+                    job = repository.schedule(
+                        passage_id=passage.id,
+                        document_id=passage.document_id,
+                        passage_revision=passage.revision,
+                        idempotency_key=idempotency_key,
+                        blockers=blockers,
+                        prediction_basis=prediction_basis,
+                    )
+                elif (
+                    not blockers
+                    and prediction_basis
+                    in {
+                        PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,
+                        PredictionBasis.PAPER_EXACT_V1,
+                    }
+                ):
+                    job = repository.recoverable_for_passage_basis(
+                        passage_id=passage.id,
+                        passage_revision=passage.revision,
+                        prediction_basis=prediction_basis,
+                    )
+                else:
+                    job = None
                 if (
                     prediction_basis
                     == PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1
@@ -309,33 +475,17 @@ def create_analysis_router(
                     )
                     if limit_blocker is not None:
                         blockers.append(limit_blocker)
-                job = repository.schedule(
-                    passage_id=passage.id,
-                    document_id=passage.document_id,
-                    passage_revision=passage.revision,
-                    idempotency_key=idempotency_key,
-                    blockers=blockers,
-                    prediction_basis=prediction_basis,
-                )
-            if job.status == "queued" and not replayed:
-                if dispatcher is None:
-                    raise HTTPException(
-                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail={
-                            "code": "worker_dispatch_unavailable",
-                            "message": "Analysis worker dispatch is unavailable",
-                        },
+                if job is None:
+                    job = repository.schedule(
+                        passage_id=passage.id,
+                        document_id=passage.document_id,
+                        passage_revision=passage.revision,
+                        idempotency_key=idempotency_key,
+                        blockers=blockers,
+                        prediction_basis=prediction_basis,
                     )
-                try:
-                    dispatcher.dispatch(job.id)
-                except Exception as error:
-                    raise HTTPException(
-                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail={
-                            "code": "worker_dispatch_failed",
-                            "message": "Analysis worker dispatch failed; retry with the same idempotency key",
-                        },
-                    ) from error
+            if job.status == "queued":
+                _dispatch_job(dispatcher, job)
             return job
         except AnalysisConflictError as error:
             raise HTTPException(
@@ -390,6 +540,18 @@ def _analysis_decision(
     *,
     context_query_ready: bool = True,
 ) -> tuple[PredictionBasis, list[AnalysisBlocker]]:
+    bases, worker = _resolve_analysis_readiness(settings)
+    return _analysis_decision_from_readiness(
+        settings,
+        bases,
+        worker,
+        context_query_ready=context_query_ready,
+    )
+
+
+def _resolve_analysis_readiness(
+    settings: Settings,
+) -> tuple[dict[PredictionBasis, BasisReadiness], ComponentReadiness]:
     database = ComponentReadiness(ready=True, detail="ready")
     worker = resolve_worker_readiness(settings)
     corpus = resolve_corpus_readiness(settings)
@@ -403,7 +565,18 @@ def _analysis_decision(
         staged_bm25_corpus=staged_bm25_corpus,
         best_available_corpus=best_available_corpus,
     )
+    return bases, worker
+
+
+def _analysis_decision_from_readiness(
+    settings: Settings,
+    bases: dict[PredictionBasis, BasisReadiness],
+    worker: ComponentReadiness,
+    *,
+    context_query_ready: bool,
+) -> tuple[PredictionBasis, list[AnalysisBlocker]]:
     if not context_query_ready:
+        bases = dict(bases)
         for basis in (
             PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_BM25_V1,
             PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1,

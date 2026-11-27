@@ -290,13 +290,23 @@ describe('BackendApi', () => {
 
     await expect(api.scheduleDocumentAnalysis(
       documentRecord.id,
-      { signal: controller.signal, idempotencyKey: 'document-analysis-1' },
+      {
+        signal: controller.signal,
+        idempotencyKey: 'document-analysis-1',
+        expectedPredictionBasis: 'best_available_foiarchive_v1',
+      },
     )).resolves.toEqual(result)
     expect(fetchMock).toHaveBeenCalledWith(
       `/v1/documents/${documentRecord.id}/analysis`,
       {
         method: 'POST',
-        headers: { 'Idempotency-Key': 'document-analysis-1' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'document-analysis-1',
+        },
+        body: JSON.stringify({
+          expected_prediction_basis: 'best_available_foiarchive_v1',
+        }),
         signal: controller.signal,
       },
     )
