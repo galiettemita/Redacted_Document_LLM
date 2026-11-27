@@ -170,6 +170,14 @@ export class BackendApiError extends Error {
 
 export interface BackendApi {
   getReadiness(signal?: AbortSignal): Promise<BackendReadiness>
+  getDocument(
+    documentId: string,
+    signal?: AbortSignal,
+  ): Promise<BackendDocumentRecord>
+  getDocumentContent(
+    documentId: string,
+    signal?: AbortSignal,
+  ): Promise<Blob>
   uploadDocument(file: File, signal?: AbortSignal): Promise<BackendDocumentRecord>
   deleteDocument(documentId: string, signal?: AbortSignal): Promise<void>
   createPassage(
@@ -228,6 +236,22 @@ export function createBackendApi(fetchImplementation?: typeof fetch): BackendApi
   return {
     getReadiness(signal) {
       return requestJson<BackendReadiness>(fetchRequest, '/v1/readiness', { signal })
+    },
+
+    getDocument(documentId, signal) {
+      return requestJson<BackendDocumentRecord>(
+        fetchRequest,
+        `/v1/documents/${encodeURIComponent(documentId)}`,
+        { signal },
+      )
+    },
+
+    getDocumentContent(documentId, signal) {
+      return requestBlob(
+        fetchRequest,
+        `/v1/documents/${encodeURIComponent(documentId)}/content`,
+        { signal },
+      )
     },
 
     uploadDocument(file, signal) {
@@ -385,6 +409,31 @@ async function requestJson<T>(
   }
   if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
+}
+
+async function requestBlob(
+  fetchImplementation: typeof fetch,
+  input: string,
+  init: RequestInit,
+): Promise<Blob> {
+  let response: Response
+  try {
+    response = await fetchImplementation(input, init)
+  } catch (error) {
+    if (isAbortError(error)) throw error
+    throw new BackendApiError('The local backend is unavailable.', {
+      code: 'backend_unavailable',
+      cause: error,
+    })
+  }
+  if (!response.ok) {
+    const detail = await readErrorDetail(response)
+    throw new BackendApiError(detail.message, {
+      status: response.status,
+      code: detail.code,
+    })
+  }
+  return response.blob()
 }
 
 function isAbortError(error: unknown): boolean {

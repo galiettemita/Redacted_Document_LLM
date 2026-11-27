@@ -73,6 +73,65 @@ def test_upload_sanitizes_the_name_and_persists_only_a_sha256_storage_key(
     assert body["date_provenance"] is None
 
 
+def test_live_document_metadata_and_pdf_can_be_reopened(tmp_path: Path) -> None:
+    app = create_test_app(tmp_path)
+    pdf_bytes = make_pdf(text="Visible reopening test")
+    upload = asyncio.run(
+        request(
+            app,
+            "POST",
+            "/v1/documents",
+            files={
+                "file": (
+                    "Reopen Me.pdf",
+                    pdf_bytes,
+                    "application/pdf",
+                )
+            },
+        )
+    )
+    document_id = upload.json()["id"]
+
+    metadata = asyncio.run(request(app, "GET", f"/v1/documents/{document_id}"))
+    content = asyncio.run(
+        request(app, "GET", f"/v1/documents/{document_id}/content")
+    )
+
+    assert metadata.status_code == 200
+    assert metadata.json() == upload.json()
+    assert content.status_code == 200
+    assert content.content == pdf_bytes
+    assert content.headers["content-type"] == "application/pdf"
+    assert content.headers["cache-control"] == "no-store"
+    assert content.headers["content-disposition"].startswith("inline;")
+    assert "Reopen%20Me.pdf" in content.headers["content-disposition"]
+
+
+def test_deleted_document_cannot_be_reopened(tmp_path: Path) -> None:
+    app = create_test_app(tmp_path)
+    upload = asyncio.run(
+        request(
+            app,
+            "POST",
+            "/v1/documents",
+            files={"file": ("deleted.pdf", make_pdf(), "application/pdf")},
+        )
+    )
+    document_id = upload.json()["id"]
+    deleted = asyncio.run(
+        request(app, "DELETE", f"/v1/documents/{document_id}")
+    )
+
+    metadata = asyncio.run(request(app, "GET", f"/v1/documents/{document_id}"))
+    content = asyncio.run(
+        request(app, "GET", f"/v1/documents/{document_id}/content")
+    )
+
+    assert deleted.status_code == 204
+    assert metadata.status_code == 404
+    assert content.status_code == 404
+
+
 def test_upload_rejects_non_pdf_content_without_retaining_it(tmp_path: Path) -> None:
     app = create_test_app(tmp_path)
 

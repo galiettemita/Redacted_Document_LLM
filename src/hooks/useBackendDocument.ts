@@ -9,6 +9,7 @@ import {
 export type BackendDocumentStatus =
   | 'idle'
   | 'uploading'
+  | 'restoring'
   | 'ready'
   | 'unavailable'
   | 'failed'
@@ -36,9 +37,14 @@ const IDLE_SNAPSHOT: BackendDocumentSnapshot = {
 export function useBackendDocument(
   file: File | null,
   api: BackendApi = backendApi,
+  restoreDocumentId: string | null = null,
 ): BackendDocumentState {
   const [snapshot, setSnapshot] = useState<BackendDocumentSnapshot>(() => (
-    file ? { status: 'uploading', record: null, error: null } : IDLE_SNAPSHOT
+    file
+      ? { status: 'uploading', record: null, error: null }
+      : restoreDocumentId
+        ? { status: 'restoring', record: null, error: null }
+        : IDLE_SNAPSHOT
   ))
   const recordRef = useRef<BackendDocumentRecord | null>(null)
   const uploadControllerRef = useRef<AbortController | null>(null)
@@ -47,7 +53,7 @@ export function useBackendDocument(
   const removalPromiseRef = useRef<Promise<void> | null>(null)
 
   useEffect(() => {
-    if (!file) {
+    if (!file && !restoreDocumentId) {
       recordRef.current = null
       uploadPromiseRef.current = null
       removingRef.current = false
@@ -60,15 +66,21 @@ export function useBackendDocument(
     uploadControllerRef.current = controller
     removingRef.current = false
     recordRef.current = null
-    setSnapshot({ status: 'uploading', record: null, error: null })
+    setSnapshot({
+      status: file ? 'uploading' : 'restoring',
+      record: null,
+      error: null,
+    })
 
-    const uploadPromise = api.uploadDocument(file, controller.signal)
+    const uploadPromise = file
+      ? api.uploadDocument(file, controller.signal)
+      : api.getDocument(restoreDocumentId!, controller.signal)
     uploadPromiseRef.current = uploadPromise
     void uploadPromise.then(
       (record) => {
         if (uploadPromiseRef.current === uploadPromise) uploadPromiseRef.current = null
         if (!active) {
-          void api.deleteDocument(record.id).catch(() => undefined)
+          if (file) void api.deleteDocument(record.id).catch(() => undefined)
           return
         }
         recordRef.current = record
@@ -90,10 +102,14 @@ export function useBackendDocument(
           status: unavailable ? 'unavailable' : 'failed',
           record: null,
           error: unavailable
-            ? 'The local backend is unavailable. Start it and choose the PDF again.'
+            ? file
+              ? 'The local backend is unavailable. Start it and choose the PDF again.'
+              : 'The local backend is unavailable. Reopening will resume when it returns.'
             : error instanceof Error
               ? error.message
-              : 'The PDF could not be uploaded.',
+              : file
+                ? 'The PDF could not be uploaded.'
+                : 'The stored PDF could not be reopened.',
         })
       },
     )
@@ -103,7 +119,7 @@ export function useBackendDocument(
       controller.abort()
       if (uploadControllerRef.current === controller) uploadControllerRef.current = null
     }
-  }, [api, file])
+  }, [api, file, restoreDocumentId])
 
   const remove = useCallback(() => {
     if (removalPromiseRef.current) return removalPromiseRef.current

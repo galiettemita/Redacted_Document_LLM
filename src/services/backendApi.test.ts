@@ -328,6 +328,39 @@ describe('BackendApi', () => {
     )
   })
 
+  it('reads one live document and its retained PDF for browser reopening', async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(documentRecord))
+      .mockResolvedValueOnce(new Response('%PDF-1.7 reopened', {
+        status: 200,
+        headers: { 'Content-Type': 'application/pdf' },
+      }))
+    const api = createBackendApi(fetchMock)
+    const controller = new AbortController()
+
+    await expect(api.getDocument(
+      documentRecord.id,
+      controller.signal,
+    )).resolves.toEqual(documentRecord)
+    const content = await api.getDocumentContent(
+      documentRecord.id,
+      controller.signal,
+    )
+
+    expect(content.type).toBe('application/pdf')
+    expect(await content.text()).toBe('%PDF-1.7 reopened')
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      `/v1/documents/${documentRecord.id}`,
+      { signal: controller.signal },
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `/v1/documents/${documentRecord.id}/content`,
+      { signal: controller.signal },
+    )
+  })
+
   it('maps backend details into a typed error without hiding the status or code', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
       detail: { code: 'malformed_pdf', message: 'PDF parser rejected the file' },

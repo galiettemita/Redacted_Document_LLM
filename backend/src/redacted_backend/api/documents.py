@@ -9,6 +9,7 @@ from typing import Annotated, BinaryIO
 from uuid import UUID
 
 from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
+from fastapi.responses import FileResponse
 
 from redacted_backend.config import Settings
 from redacted_backend.db.base import Database
@@ -42,6 +43,45 @@ def create_documents_router(
     def upload_document(file: Annotated[UploadFile, File()]) -> DocumentRecord:
         ready_database, ready_store = _require_services(database, document_store)
         return _persist_upload(file, settings, ready_database, ready_store)
+
+    @router.get(
+        "/documents/{document_id}",
+        response_model=DocumentRecord,
+    )
+    def get_document(document_id: UUID) -> DocumentRecord:
+        ready_database, _ready_store = _require_services(database, document_store)
+        with ready_database.session_factory() as session:
+            record = DocumentRepository(session).get_live(document_id)
+        if record is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "document_not_found"},
+            )
+        return record
+
+    @router.get("/documents/{document_id}/content", response_class=FileResponse)
+    def get_document_content(document_id: UUID) -> FileResponse:
+        ready_database, ready_store = _require_services(database, document_store)
+        with ready_database.session_factory() as session:
+            record = DocumentRepository(session).get_live(document_id)
+        if record is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "document_not_found"},
+            )
+        path = ready_store.resolve(record.storage_key)
+        if not path.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "document_content_not_found"},
+            )
+        return FileResponse(
+            path,
+            media_type=record.media_type,
+            filename=record.filename,
+            content_disposition_type="inline",
+            headers={"Cache-Control": "no-store"},
+        )
 
     @router.delete(
         "/documents/{document_id}",

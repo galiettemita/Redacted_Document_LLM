@@ -20,6 +20,8 @@ const record: BackendDocumentRecord = {
 function apiWith(overrides: Partial<BackendApi> = {}): BackendApi {
   return {
     getReadiness: vi.fn(),
+    getDocument: vi.fn(),
+    getDocumentContent: vi.fn(),
     uploadDocument: vi.fn().mockResolvedValue(record),
     deleteDocument: vi.fn().mockResolvedValue(undefined),
     createPassage: vi.fn(),
@@ -36,6 +38,20 @@ function apiWith(overrides: Partial<BackendApi> = {}): BackendApi {
 }
 
 describe('useBackendDocument', () => {
+  it('reattaches an existing live document without uploading it again', async () => {
+    const getDocument = vi.fn().mockResolvedValue(record)
+    const uploadDocument = vi.fn()
+    const api = apiWith({ getDocument, uploadDocument })
+
+    const { result } = renderHook(() => useBackendDocument(null, api, record.id))
+
+    expect(result.current.status).toBe('restoring')
+    await waitFor(() => expect(result.current.status).toBe('ready'))
+    expect(result.current.record).toEqual(record)
+    expect(getDocument).toHaveBeenCalledWith(record.id, expect.any(AbortSignal))
+    expect(uploadDocument).not.toHaveBeenCalled()
+  })
+
   it('reports uploading immediately and then exposes the persisted record', async () => {
     let resolveUpload!: (value: BackendDocumentRecord) => void
     const uploadDocument = vi.fn(() => new Promise<BackendDocumentRecord>((resolve) => {

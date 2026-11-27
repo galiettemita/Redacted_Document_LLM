@@ -222,6 +222,8 @@ function apiWithCreate(
 ): BackendApi {
   return {
     getReadiness: vi.fn().mockResolvedValue(stagedReadiness),
+    getDocument: vi.fn(),
+    getDocumentContent: vi.fn(),
     uploadDocument: vi.fn(),
     deleteDocument: vi.fn(),
     createPassage,
@@ -959,7 +961,9 @@ describe('DocumentWorkspace', () => {
     )
 
     expect(await screen.findByText('Stored full prediction.')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Predict remaining passages' }))
+    fireEvent.click(await screen.findByRole('button', {
+      name: 'Predict remaining passages',
+    }))
     await waitFor(() => expect(stream).toHaveBeenCalledTimes(2))
 
     expect(screen.getByRole('button', { name: 'Predictions running…' })).toBeDisabled()

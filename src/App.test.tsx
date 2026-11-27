@@ -51,6 +51,7 @@ describe('document lifecycle', () => {
   const fetchMock = vi.fn<typeof fetch>()
 
   beforeEach(() => {
+    localStorage.clear()
     validatePdfFileMock.mockClear()
     validatePdfFileMock.mockReturnValue({ ok: true })
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL })
@@ -76,6 +77,53 @@ describe('document lifecycle', () => {
   })
 
   afterEach(() => vi.unstubAllGlobals())
+
+  it('reopens the retained PDF after a browser reload without uploading again', async () => {
+    const documentId = '11111111-1111-4111-8111-111111111111'
+    localStorage.setItem('redacted-document-llm.active-document-v1', documentId)
+    fetchMock.mockImplementation((input, init) => {
+      if (input === `/v1/documents/${documentId}`) {
+        return Promise.resolve(new Response(JSON.stringify({
+          id: documentId,
+          filename: 'local-record.pdf',
+          sha256: 'a'.repeat(64),
+          media_type: 'application/pdf',
+          page_count: 1,
+          status: 'uploaded',
+          storage_key: 'sha256/aa/aaaaaaaa',
+          visible_date: null,
+          date_provenance: null,
+          visible_date_evidence: null,
+          created_at: '2026-11-11T12:00:00Z',
+          expires_at: '2026-12-11T12:00:00Z',
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      }
+      if (input === `/v1/documents/${documentId}/content`) {
+        return Promise.resolve(new Response('%PDF-1.7', {
+          status: 200,
+          headers: { 'Content-Type': 'application/pdf' },
+        }))
+      }
+      if (init?.method === 'DELETE') return Promise.resolve(new Response(null, { status: 204 }))
+      return Promise.resolve(new Response(JSON.stringify({
+        detail: { code: 'test_unavailable', message: 'Unavailable in this test.' },
+      }), { status: 503, headers: { 'Content-Type': 'application/json' } }))
+    })
+
+    render(<App />)
+
+    expect(await screen.findByText('local-record.pdf')).toBeInTheDocument()
+    expect(screen.getByLabelText('Local PDF renderer')).toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([input, init]) => (
+      input === '/v1/documents' && init?.method === 'POST'
+    ))).toBe(false)
+    expect(createObjectURL).toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace document' }))
+    await waitFor(() => expect(localStorage.getItem(
+      'redacted-document-llm.active-document-v1',
+    )).toBeNull())
+  })
 
   it('opens a valid local PDF and replaces it without retaining workspace state', async () => {
     const file = new File(['%PDF-1.7'], 'local-record.pdf', { type: 'application/pdf' })
