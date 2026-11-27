@@ -314,7 +314,9 @@ describe('BackendApi', () => {
 
   it('reads recoverable document jobs without scheduling', async () => {
     const state = { document_id: documentRecord.id, jobs: [queuedAnalysis] }
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(state))
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(
+      async () => jsonResponse(state),
+    )
     const api = createBackendApi(fetchMock)
     const controller = new AbortController()
 
@@ -324,6 +326,16 @@ describe('BackendApi', () => {
     )).resolves.toEqual(state)
     expect(fetchMock).toHaveBeenCalledWith(
       `/v1/documents/${documentRecord.id}/analysis`,
+      { signal: controller.signal },
+    )
+
+    await api.getDocumentAnalysis(
+      documentRecord.id,
+      controller.signal,
+      'best_available_foiarchive_v1',
+    )
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `/v1/documents/${documentRecord.id}/analysis?prediction_basis=best_available_foiarchive_v1`,
       { signal: controller.signal },
     )
   })

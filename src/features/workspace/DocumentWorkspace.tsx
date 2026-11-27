@@ -86,6 +86,7 @@ export function DocumentWorkspace({
   const passageRemovalRequest = useRef<AbortController | null>(null)
   const analysisRequest = useRef<AbortController | null>(null)
   const analysisRunId = useRef<string | null>(null)
+  const basisRecoveryKey = useRef<string | null>(null)
   const uploadedPredictionService = useMemo(
     () => predictionService ?? createHttpPredictionService(),
     [predictionService],
@@ -125,6 +126,7 @@ export function DocumentWorkspace({
     analysisRequest.current?.abort()
     analysisRequest.current = null
     analysisRunId.current = null
+    basisRecoveryKey.current = null
   }, [document.id])
 
   useEffect(() => () => {
@@ -191,6 +193,7 @@ export function DocumentWorkspace({
     documentId: string,
     expectedPassageIds?: string[],
   ) => {
+    basisRecoveryKey.current = null
     analysisRequest.current?.abort()
     analysisRequest.current = null
     analysisRunId.current = null
@@ -262,6 +265,59 @@ export function DocumentWorkspace({
       if (contextRequest.current === controller) contextRequest.current = null
     }
   }, [backendApi])
+
+  useEffect(() => {
+    if (
+      !backendReady
+      || !document.backendDocumentId
+      || contextStatus !== 'ready'
+      || !fullDocumentPredictionBasis
+      || Object.keys(contextSummaries).length === 0
+      || Object.values(predictionJobBases).includes(fullDocumentPredictionBasis)
+    ) return
+
+    const recoveryKey = [
+      document.backendDocumentId,
+      fullDocumentPredictionBasis,
+      ...Object.values(contextSummaries)
+        .map((summary) => `${summary.passage_id}:${summary.passage_revision}`)
+        .sort(),
+    ].join('|')
+    if (basisRecoveryKey.current === recoveryKey) return
+    basisRecoveryKey.current = recoveryKey
+
+    const controller = new AbortController()
+    void backendApi.getDocumentAnalysis(
+      document.backendDocumentId,
+      controller.signal,
+      fullDocumentPredictionBasis,
+    ).then((recovered) => {
+      if (controller.signal.aborted) return
+      const jobBases = validateRecoveredBasisRun(
+        recovered,
+        document.backendDocumentId!,
+        contextSummaries,
+        fullDocumentPredictionBasis,
+      )
+      if (Object.keys(jobBases).length === 0) return
+      setAnalysisScheduleStatus('running')
+      setPredictionJobBases(jobBases)
+      setPredictionRunKey((current) => current + 1)
+    }).catch((error: unknown) => {
+      if (!isAbortError(error) && !controller.signal.aborted) {
+        basisRecoveryKey.current = null
+      }
+    })
+    return () => controller.abort()
+  }, [
+    backendApi,
+    backendReady,
+    contextStatus,
+    contextSummaries,
+    document.backendDocumentId,
+    fullDocumentPredictionBasis,
+    predictionJobBases,
+  ])
 
   useEffect(() => {
     if (analysisScheduleStatus !== 'running') return
@@ -886,6 +942,38 @@ function validateFullDocumentRun(
   }
   if ([...expectedPassages].some((passageId) => !seenPassages.has(passageId))) {
     throw new Error('invalid full-document schedule')
+  }
+  return jobBases
+}
+
+function validateRecoveredBasisRun(
+  result: Awaited<ReturnType<BackendApi['getDocumentAnalysis']>>,
+  documentId: string,
+  contexts: Record<string, VisibleContextSummary>,
+  expectedBasis: FullDocumentPredictionBasis,
+): Record<string, PredictionBasis> {
+  if (result.document_id !== documentId) {
+    throw new Error('invalid full-document recovery')
+  }
+
+  const seenPassages = new Set<string>()
+  const jobBases: Record<string, PredictionBasis> = {}
+  for (const job of result.jobs) {
+    const context = contexts[job.passage_id]
+    if (
+      job.document_id !== documentId
+      || !context
+      || context.passage_revision !== job.passage_revision
+      || seenPassages.has(job.passage_id)
+      || job.prediction_basis !== expectedBasis
+      || job.status === 'blocked'
+      || job.status === 'failed'
+      || job.status === 'cancelled'
+      || job.blockers.length > 0
+      || Object.prototype.hasOwnProperty.call(jobBases, job.id)
+    ) throw new Error('invalid full-document recovery')
+    seenPassages.add(job.passage_id)
+    jobBases[job.id] = job.prediction_basis
   }
   return jobBases
 }

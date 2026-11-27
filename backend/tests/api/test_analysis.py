@@ -616,6 +616,22 @@ def test_full_document_schedule_reuses_matching_basis_behind_newer_staged_result
         staged_model.stage = "complete"
         staged_model.updated_at = datetime.now(UTC)
 
+    recovered = asyncio.run(
+        request(
+            app,
+            "GET",
+            f"/v1/documents/{document.id}/analysis",
+            params={
+                "prediction_basis": (
+                    PredictionBasis.BEST_AVAILABLE_FOIARCHIVE_V1.value
+                )
+            },
+        )
+    )
+
+    assert recovered.status_code == 200
+    assert [job["id"] for job in recovered.json()["jobs"]] == [str(full.id)]
+
     response = asyncio.run(
         request(
             app,

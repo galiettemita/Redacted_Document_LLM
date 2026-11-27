@@ -12,7 +12,7 @@ import type {
 import { BackendApiError } from '../../services/backendApi'
 import type { PredictionService } from '../../services/predictionService'
 import type { BackendDocumentState } from '../../hooks/useBackendDocument'
-import type { DocumentDescriptor } from '../../types'
+import type { DocumentDescriptor, PredictionBasis } from '../../types'
 import { DocumentWorkspace } from './DocumentWorkspace'
 
 vi.mock('../viewer/PdfViewer', () => ({
@@ -892,12 +892,77 @@ describe('DocumentWorkspace', () => {
     )
 
     expect(await screen.findByText('Stored staged prediction 2.')).toBeInTheDocument()
-    expect(screen.getByRole('button', {
+    expect(await screen.findByRole('button', {
       name: 'Predict all passages',
     })).toBeEnabled()
     expect(screen.queryByRole('button', {
       name: 'Predict remaining passages',
     })).not.toBeInTheDocument()
+  })
+
+  it('recovers the ready full basis even when a newer staged result exists', async () => {
+    vi.useRealTimers()
+    const staged = {
+      ...analysisJob(savedPassage.id, 'complete'),
+      passage_revision: preparedContext.passage_revision,
+      prediction_basis: 'best_available_foiarchive_bm25_v1' as const,
+      stage: 'complete' as const,
+    }
+    const full = {
+      ...analysisJob(savedPassage.id, 'complete'),
+      id: '77777777-7777-4777-8777-777777777777',
+      passage_revision: preparedContext.passage_revision,
+      prediction_basis: 'best_available_foiarchive_v1' as const,
+      stage: 'complete' as const,
+    }
+    const getDocumentAnalysis = vi.fn((
+      _documentId: string,
+      _signal?: AbortSignal,
+      predictionBasis?: PredictionBasis,
+    ) => Promise.resolve({
+      document_id: uploadedDocument.backendDocumentId!,
+      jobs: predictionBasis ? [full] : [staged],
+    }))
+    const stream = vi.fn<PredictionService['stream']>(
+      async (_document, _signal, onPrediction, options) => {
+        const basis = Object.values(options?.jobBases ?? {})[0]
+        onPrediction({
+          passageId: savedPassage.id,
+          page: 1,
+          model: 'GPT-6 Astra',
+          text: basis === 'best_available_foiarchive_v1'
+            ? 'Recovered full prediction.'
+            : 'Newer staged prediction.',
+          provenance: 'model',
+          predictionBasis: basis ?? 'best_available_foiarchive_bm25_v1',
+        })
+      },
+    )
+    const api = apiWithCreate(undefined, {
+      getReadiness: vi.fn().mockResolvedValue(fullReadiness),
+      detectDocumentPassages: vi.fn().mockResolvedValue(detectedPassages),
+      getDocumentAnalysis,
+    })
+
+    render(
+      <DocumentWorkspace
+        document={uploadedDocument}
+        backendDocument={readyBackendDocument}
+        backendApi={api}
+        predictionService={{ stream }}
+        onReplace={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByText('Recovered full prediction.')).toBeInTheDocument()
+    expect(getDocumentAnalysis).toHaveBeenCalledWith(
+      uploadedDocument.backendDocumentId,
+      expect.any(AbortSignal),
+      'best_available_foiarchive_v1',
+    )
+    expect(await screen.findByRole('button', {
+      name: 'Predict remaining passages',
+    })).toBeEnabled()
   })
 
   it('keeps controls locked when a second full-document stream starts', async () => {

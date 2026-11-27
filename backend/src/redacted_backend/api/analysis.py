@@ -368,7 +368,10 @@ def create_analysis_router(
         "/documents/{document_id}/analysis",
         response_model=DocumentAnalysisState,
     )
-    def get_document_analysis(document_id: UUID) -> DocumentAnalysisState:
+    def get_document_analysis(
+        document_id: UUID,
+        prediction_basis: PredictionBasis | None = None,
+    ) -> DocumentAnalysisState:
         ready_database = _require_database(database)
         with ready_database.session_factory() as session:
             document = DocumentRepository(session).get_live(document_id)
@@ -377,8 +380,14 @@ def create_analysis_router(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail={"code": "document_not_found"},
                 )
-            jobs = AnalysisJobRepository(session).recoverable_for_document(
-                document_id
+            repository = AnalysisJobRepository(session)
+            jobs = (
+                repository.recoverable_for_document_basis(
+                    document_id,
+                    prediction_basis,
+                )
+                if prediction_basis is not None
+                else repository.recoverable_for_document(document_id)
             )
         return DocumentAnalysisState(document_id=document_id, jobs=jobs)
 

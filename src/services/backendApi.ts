@@ -226,6 +226,7 @@ export interface BackendApi {
   getDocumentAnalysis(
     documentId: string,
     signal?: AbortSignal,
+    predictionBasis?: PredictionBasis,
   ): Promise<DocumentAnalysisState>
 }
 
@@ -374,10 +375,13 @@ export function createBackendApi(fetchImplementation?: typeof fetch): BackendApi
       )
     },
 
-    getDocumentAnalysis(documentId, signal) {
+    getDocumentAnalysis(documentId, signal, predictionBasis) {
+      const query = predictionBasis
+        ? `?prediction_basis=${encodeURIComponent(predictionBasis)}`
+        : ''
       return requestJson<DocumentAnalysisState>(
         fetchRequest,
-        `/v1/documents/${encodeURIComponent(documentId)}/analysis`,
+        `/v1/documents/${encodeURIComponent(documentId)}/analysis${query}`,
         { signal },
       )
     },
