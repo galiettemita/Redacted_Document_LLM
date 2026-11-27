@@ -200,6 +200,14 @@ For the complete local run, use the durable single-instance wrapper instead of k
 
 The repository includes a reverse-order CPU accelerator for higher-memory hosts, but do not run it on the current 32-GiB local Mac. A sustained two-model test triggered memory compression and reduced combined throughput; the single primary encoder recovered to approximately 8.5–9.1 passages per second after the accelerator stopped.
 
+The completed 213-shard runtime needs a Docker Desktop memory limit of at least 16 GiB. A representative FAISS measurement projected the resident candidate indexes alone at about 6.38 GiB; OpenSearch, the prediction worker, and bounded exact rescoring must fit beside them. In Docker Desktop, open **Settings**, choose **Resources**, choose **Advanced**, move **Memory limit** to **16 GB**, and select **Apply & restart**. After Docker returns, verify the effective VM limit before latency certification:
+
+```bash
+docker info --format '{{.MemTotal}}'
+```
+
+The value must be at least `16000000000`. Restart the Compose services and the `retrieval`-profile OpenSearch service after a Docker Desktop restart; changing this limit does not affect the host-managed dense encoder or its published checkpoints.
+
 Start the separate durable finalizer once while the build is running:
 
 ```bash
