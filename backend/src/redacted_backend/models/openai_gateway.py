@@ -360,20 +360,20 @@ class OpenAIGateway:
         kind: Literal["query", "prediction"],
         before_generation: Callable[[], bool] | None,
     ) -> tuple[int, ProviderHttpResponse, str, TokenUsage]:
-        budget = check_token_budget(
-            request,
-            self.transport,
-            context_window=self.scientific.model_context_window,
-            max_output_tokens=self.scientific.model_max_output_tokens,
-        )
         if before_generation is not None and not before_generation():
             raise ModelGatewayError(
                 "analysis_cancelled",
                 "Analysis changed before provider generation",
             )
+        reserved_maximum: float | None = None
         if self.spend_budget is not None:
-            maximum_cost = estimate_maximum_cost(
-                budget.input_tokens,
+            local_input_upper_bound = _local_input_token_upper_bound(
+                request,
+                context_window=self.scientific.model_context_window,
+                max_output_tokens=self.scientific.model_max_output_tokens,
+            )
+            reserved_maximum = estimate_maximum_cost(
+                local_input_upper_bound,
                 self.scientific.model_max_output_tokens,
             )
             try:
@@ -381,7 +381,7 @@ class OpenAIGateway:
                     scope,
                     idempotency_key,
                     request_hash,
-                    maximum_cost,
+                    reserved_maximum,
                 )
             except Exception as error:
                 raise ModelGatewayError(
@@ -393,6 +393,27 @@ class OpenAIGateway:
                     "provider_outcome_unknown",
                     "A provider spending reservation already exists for this generation",
                 )
+        budget = check_token_budget(
+            request,
+            self.transport,
+            context_window=self.scientific.model_context_window,
+            max_output_tokens=self.scientific.model_max_output_tokens,
+        )
+        if reserved_maximum is not None:
+            counted_maximum = estimate_maximum_cost(
+                budget.input_tokens,
+                self.scientific.model_max_output_tokens,
+            )
+            if counted_maximum > reserved_maximum:
+                raise ModelGatewayError(
+                    "token_count_exceeds_reserved_bound",
+                    "Provider token count exceeds the local spending reservation",
+                )
+        if before_generation is not None and not before_generation():
+            raise ModelGatewayError(
+                "analysis_cancelled",
+                "Analysis changed before provider generation",
+            )
         if not self.store.claim(scope, idempotency_key, request_hash, kind):
             raise ModelGatewayError(
                 "provider_outcome_unknown",
@@ -609,5 +630,30 @@ def _canonical_hash(value: object) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
+
+
+def _local_input_token_upper_bound(
+    request: dict[str, object],
+    *,
+    context_window: int,
+    max_output_tokens: int,
+) -> int:
+    available_input_tokens = context_window - max_output_tokens
+    if available_input_tokens < 1:
+        raise ModelGatewayError(
+            "token_budget_invalid",
+            "Model output allowance leaves no input context",
+        )
+    # The pinned provider tokenizer is byte based, so serialized UTF-8 bytes are
+    # conservative for prompt content. The fixed allowance covers message framing;
+    # the provider count is still checked against this reservation before generation.
+    serialized_size = len(
+        json.dumps(
+            request,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    return min(available_input_tokens, serialized_size + 1_024)
 
 

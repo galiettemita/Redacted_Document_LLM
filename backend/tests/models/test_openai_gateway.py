@@ -91,7 +91,7 @@ class RecordingSpendBudget:
         )
 
 
-def test_gateway_reserves_maximum_after_count_and_settles_after_response() -> None:
+def test_gateway_reserves_a_local_upper_bound_before_count_and_settles_after_response() -> None:
     events: list[str] = []
 
     class OrderedTransport(RecordingTransport):
@@ -120,12 +120,12 @@ def test_gateway_reserves_maximum_after_count_and_settles_after_response() -> No
 
     result = gateway.generate_query(_example(), "budgeted-query")
 
-    assert events == ["count", "reserve", "create", "settle"]
+    assert events == ["reserve", "count", "create", "settle"]
     assert budget.reservations[0][:2] == (
         f"query:{_example().passage_id}",
         "budgeted-query",
     )
-    assert budget.reservations[0][3] == pytest.approx(0.20801)
+    assert budget.reservations[0][3] >= 0.20801
     assert budget.settlements[0][3] == pytest.approx(0.00521)
     assert result.estimated_cost_usd == pytest.approx(0.00521)
 
@@ -160,7 +160,7 @@ def test_gateway_uncertainty_keeps_maximum_reserved_without_settlement() -> None
     with pytest.raises(ModelGatewayError, match="provider_outcome_unknown"):
         gateway.generate_query(_example(), "uncertain-budgeted-query")
 
-    assert events == ["count", "reserve", "create"]
+    assert events == ["reserve", "count", "create"]
     assert len(budget.reservations) == 1
     assert budget.settlements == []
 
@@ -178,7 +178,32 @@ def test_gateway_refuses_dispatch_when_reservation_already_exists() -> None:
     with pytest.raises(ModelGatewayError, match="provider_outcome_unknown"):
         gateway.generate_query(_example(), "already-reserved-query")
 
-    assert len(transport.count_requests) == 1
+    assert transport.count_requests == []
+    assert transport.create_requests == []
+    assert budget.settlements == []
+
+
+def test_gateway_fails_closed_when_provider_count_exceeds_local_reservation() -> None:
+    events: list[str] = []
+
+    class InflatedCountTransport(RecordingTransport):
+        def count_input_tokens(self, request: dict[str, object]) -> int:
+            events.append("count")
+            self.count_requests.append(request)
+            return 100_000
+
+    transport = InflatedCountTransport([_response("must not be used")])
+    budget = RecordingSpendBudget(events)
+    gateway = OpenAIGateway(
+        transport=transport,
+        store=InMemoryGenerationStore(),
+        spend_budget=budget,
+    )
+
+    with pytest.raises(ModelGatewayError, match="token_count_exceeds_reserved_bound"):
+        gateway.generate_query(_example(), "under-reserved-query")
+
+    assert events == ["reserve", "count"]
     assert transport.create_requests == []
     assert budget.settlements == []
 
