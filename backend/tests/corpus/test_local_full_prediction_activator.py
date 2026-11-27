@@ -99,6 +99,7 @@ fi
             "FULL_ACTIVATOR_CURL": str(fake_curl),
             "FULL_ACTIVATOR_POLL_SECONDS": "0.02",
             "FULL_ACTIVATOR_READINESS_TIMEOUT_SECONDS": "0.12",
+            "FULL_ACTIVATOR_READINESS_PROBE_TIMEOUT_SECONDS": "0.02",
             "FULL_ACTIVATOR_TEST_MODE": "1",
             "FULL_ACTIVATOR_TEST_COMMAND_LOG": str(command_log),
         }
@@ -148,7 +149,9 @@ def test_verified_completion_enables_only_full_basis_and_proves_live_readiness(
     )
     commands = command_log.read_text(encoding="utf-8").splitlines()
     assert commands[0] == "docker compose up -d --force-recreate backend worker"
-    assert commands[1].startswith("curl -fsS ")
+    assert commands[1].startswith(
+        "curl -fsS --connect-timeout 0.02 --max-time 0.02 "
+    )
     current = json.loads((state / "state.json").read_text(encoding="utf-8"))
     assert current["phase"] == "activated"
     assert current["exit_code"] == 0
@@ -259,6 +262,22 @@ def test_master_approval_must_already_be_true(
     assert not command_log.exists()
     current = json.loads((state / "state.json").read_text(encoding="utf-8"))
     assert current["reason"] == "master_approval_not_enabled"
+
+
+def test_readiness_probe_timeout_cannot_exceed_the_overall_deadline(
+    activator_environment: tuple[dict[str, str], Path, Path, Path],
+) -> None:
+    environment, state, env_file, command_log = activator_environment
+    environment["FULL_ACTIVATOR_READINESS_PROBE_TIMEOUT_SECONDS"] = "0.13"
+    before = env_file.read_text(encoding="utf-8")
+
+    result = _run(environment, "internal-run")
+
+    assert result.returncode == 64
+    assert "cannot exceed the overall readiness timeout" in result.stderr
+    assert env_file.read_text(encoding="utf-8") == before
+    assert not command_log.exists()
+    assert not (state / "state.json").exists()
 
 
 def test_docker_failure_is_recorded_without_readiness_or_secret_disclosure(

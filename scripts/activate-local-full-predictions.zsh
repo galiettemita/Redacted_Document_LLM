@@ -15,6 +15,7 @@ READINESS_RESPONSE="$STATE_DIR/readiness-response.json"
 READINESS_URL="${FULL_ACTIVATOR_READINESS_URL:-http://127.0.0.1:8000/v1/readiness}"
 POLL_SECONDS="${FULL_ACTIVATOR_POLL_SECONDS:-60}"
 READINESS_TIMEOUT_SECONDS="${FULL_ACTIVATOR_READINESS_TIMEOUT_SECONDS:-600}"
+READINESS_PROBE_TIMEOUT_SECONDS="${FULL_ACTIVATOR_READINESS_PROBE_TIMEOUT_SECONDS:-45}"
 
 if [[ -n "${FULL_ACTIVATOR_DOCKER:-}" ]]; then
   DOCKER_COMMAND="$FULL_ACTIVATOR_DOCKER"
@@ -86,6 +87,14 @@ require_runtime() {
   fi
   require_positive_number "$POLL_SECONDS" "poll seconds" || return $?
   require_positive_number "$READINESS_TIMEOUT_SECONDS" "readiness timeout" || return $?
+  require_positive_number "$READINESS_PROBE_TIMEOUT_SECONDS" "readiness probe timeout" || return $?
+  if ! awk \
+    -v probe="$READINESS_PROBE_TIMEOUT_SECONDS" \
+    -v timeout="$READINESS_TIMEOUT_SECONDS" \
+    'BEGIN { exit(probe <= timeout ? 0 : 1) }'; then
+    print -u2 -- "STOP: readiness probe timeout cannot exceed the overall readiness timeout"
+    return 64
+  fi
 }
 
 write_state() {
@@ -437,10 +446,12 @@ rollback_activation() {
 }
 
 readiness_attempt_count() {
-  awk -v timeout="$READINESS_TIMEOUT_SECONDS" -v poll="$POLL_SECONDS" '
+  awk \
+    -v timeout="$READINESS_TIMEOUT_SECONDS" \
+    -v poll="$POLL_SECONDS" \
+    -v probe="$READINESS_PROBE_TIMEOUT_SECONDS" '
     BEGIN {
-      attempts = int(timeout / poll)
-      if (attempts * poll < timeout) attempts += 1
+      attempts = int((timeout + poll) / (probe + poll))
       if (attempts < 1) attempts = 1
       print attempts
     }
@@ -477,7 +488,11 @@ deploy_and_verify() {
   local temporary="$STATE_DIR/.readiness-response.$$.tmp"
   for (( attempt = 1; attempt <= maximum_attempts; attempt += 1 )); do
     local curl_exit=0
-    "$CURL_COMMAND" -fsS "$READINESS_URL" > "$temporary" 2>> "$LOG_FILE" || curl_exit=$?
+    "$CURL_COMMAND" \
+      -fsS \
+      --connect-timeout "$READINESS_PROBE_TIMEOUT_SECONDS" \
+      --max-time "$READINESS_PROBE_TIMEOUT_SECONDS" \
+      "$READINESS_URL" > "$temporary" 2>> "$LOG_FILE" || curl_exit=$?
     if (( curl_exit == 0 )) && jq -e '
       .prediction_bases.best_available_foiarchive_v1.operational == true and
       .prediction_bases.best_available_foiarchive_v1.approved == true and
